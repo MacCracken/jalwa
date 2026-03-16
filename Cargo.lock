@@ -2667,6 +2667,7 @@ dependencies = [
 [[package]]
 name = "tarang-ai"
 version = "2026.3.16"
+source = "git+https://github.com/MacCracken/tarang.git?tag=2026.3.16#de165b242890aeffc3d3f7d56ab9b17d9f112e60"
 dependencies = [
  "chrono",
  "reqwest",
@@ -2684,6 +2685,7 @@ dependencies = [
 [[package]]
 name = "tarang-audio"
 version = "2026.3.16"
+source = "git+https://github.com/MacCracken/tarang.git?tag=2026.3.16#de165b242890aeffc3d3f7d56ab9b17d9f112e60"
 dependencies = [
  "bytes",
  "pipewire",
@@ -2697,6 +2699,7 @@ dependencies = [
 [[package]]
 name = "tarang-core"
 version = "2026.3.16"
+source = "git+https://github.com/MacCracken/tarang.git?tag=2026.3.16#de165b242890aeffc3d3f7d56ab9b17d9f112e60"
 dependencies = [
  "bytes",
  "chrono",
@@ -2709,6 +2712,7 @@ dependencies = [
 [[package]]
 name = "tarang-demux"
 version = "2026.3.16"
+source = "git+https://github.com/MacCracken/tarang.git?tag=2026.3.16#de165b242890aeffc3d3f7d56ab9b17d9f112e60"
 dependencies = [
  "bytes",
  "tarang-core",
@@ -2720,6 +2724,7 @@ dependencies = [
 [[package]]
 name = "tarang-video"
 version = "2026.3.16"
+source = "git+https://github.com/MacCracken/tarang.git?tag=2026.3.16#de165b242890aeffc3d3f7d56ab9b17d9f112e60"
 dependencies = [
  "bytes",
  "tarang-core",

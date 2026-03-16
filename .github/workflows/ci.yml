@@ -14,13 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: jalwa
-
-      - uses: actions/checkout@v4
-        with:
-          repository: MacCracken/tarang
-          path: tarang
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -30,17 +23,13 @@ jobs:
           sudo apt-get install -y libpipewire-0.3-dev libclang-dev libdbus-1-dev pkg-config
 
       - name: Check
-        working-directory: jalwa
         run: cargo check --workspace
 
       - name: Test
-        working-directory: jalwa
         run: cargo test --workspace
 
       - name: Clippy
-        working-directory: jalwa
         run: cargo clippy --workspace -- -D warnings -A dead-code
 
       - name: Format
-        working-directory: jalwa
         run: cargo fmt --all -- --check

@@ -1,13 +1,8 @@
 # Jalwa Roadmap
 
-## Pending: Tarang Release Migration
-- [ ] Update Cargo.toml path deps (`../tarang`) to crates.io/git registry once tarang is released
-- [ ] Remove CI workaround (dual checkout of tarang as sibling repo)
-- [ ] Pin tarang version in workspace dependencies
-
 ## Test Coverage Backlog (ongoing)
 
-Current: 51% (907/1778 lines). Target: 80%.
+Current: 55.9% (1038/1858 lines). Target: 80%.
 
 ### Tier 1 — Pure rendering (est. +198 lines)
 - [ ] `widgets.rs`: ratatui TestBackend tests for all views (Library, NowPlaying, Queue, Equalizer)
@@ -18,9 +13,6 @@ Current: 51% (907/1778 lines). Target: 80%.
 ### Tier 3 — Decode thread + MPRIS (est. +80 lines)
 - [ ] `decode_thread.rs`: integration test with NullOutput + minimal WAV
 - [ ] `mpris.rs`: test MPRIS command dispatch
-
-### Tier 4 — CLI commands (est. +70 lines)
-- [ ] `main.rs`: extract `cmd_*` into testable module or integration tests
 
 ## Phase 6 — Video Playback (v2)
 - [ ] tarang-video decode integration (dav1d, openh264, libvpx)

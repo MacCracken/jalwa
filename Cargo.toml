@@ -41,11 +41,11 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 libc = "0.2"
 
 # Tarang media framework
-tarang-core = { path = "../tarang/crates/tarang-core" }
-tarang-demux = { path = "../tarang/crates/tarang-demux" }
-tarang-audio = { path = "../tarang/crates/tarang-audio" }
-tarang-video = { path = "../tarang/crates/tarang-video" }
-tarang-ai = { path = "../tarang/crates/tarang-ai" }
+tarang-core = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16" }
+tarang-demux = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16" }
+tarang-audio = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16" }
+tarang-video = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16" }
+tarang-ai = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16" }
 
 [package]
 name = "jalwa"

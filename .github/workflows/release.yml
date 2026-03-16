@@ -22,13 +22,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: jalwa
-
-      - uses: actions/checkout@v4
-        with:
-          repository: MacCracken/tarang
-          path: tarang
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -47,11 +40,9 @@ jobs:
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
 
       - name: Build
-        working-directory: jalwa
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
-        working-directory: jalwa
         run: |
           VERSION=$(cat VERSION | tr -d '[:space:]')
           ARCHIVE="jalwa-${VERSION}-linux-${{ matrix.arch }}.tar.gz"
@@ -64,8 +55,8 @@ jobs:
         with:
           name: jalwa-${{ matrix.arch }}
           path: |
-            jalwa/jalwa-*.tar.gz
-            jalwa/jalwa-*.sha256
+            jalwa-*.tar.gz
+            jalwa-*.sha256
 
   release:
     needs: build
