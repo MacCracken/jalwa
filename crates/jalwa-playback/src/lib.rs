@@ -100,9 +100,10 @@ impl PlaybackEngine {
 
     /// Start or resume playback
     pub fn play(&mut self) -> Result<()> {
-        let path = self.current_path.clone().ok_or_else(|| {
-            JalwaError::Playback("no file loaded".to_string())
-        })?;
+        let path = self
+            .current_path
+            .clone()
+            .ok_or_else(|| JalwaError::Playback("no file loaded".to_string()))?;
 
         if self.state == PlaybackState::Paused {
             // Resume existing decode thread
@@ -275,11 +276,10 @@ impl PlaybackEngine {
 
     /// Get current position (reads from decode thread if running)
     pub fn position(&self) -> Duration {
-        if let Some(ref status) = self.decode_status {
-            if let Ok(s) = status.lock() {
+        if let Some(ref status) = self.decode_status
+            && let Ok(s) = status.lock() {
                 return s.position;
             }
-        }
         self.position
     }
 
@@ -342,11 +342,10 @@ impl PlaybackEngine {
             }
         }
         // Update position from decode status
-        if let Some(ref status) = self.decode_status {
-            if let Ok(s) = status.lock() {
+        if let Some(ref status) = self.decode_status
+            && let Ok(s) = status.lock() {
                 self.position = s.position;
             }
-        }
         events
     }
 }
@@ -555,9 +554,8 @@ mod tests {
     // ---- apply_volume tests ----
 
     fn make_test_buf(samples: &[f32]) -> tarang_core::AudioBuffer {
-        let bytes = unsafe {
-            std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4)
-        };
+        let bytes =
+            unsafe { std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4) };
         tarang_core::AudioBuffer {
             data: bytes::Bytes::copy_from_slice(bytes),
             sample_format: tarang_core::SampleFormat::F32,

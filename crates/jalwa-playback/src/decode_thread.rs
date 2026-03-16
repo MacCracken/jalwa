@@ -24,7 +24,9 @@ pub enum EngineCommand {
     Seek(Duration),
     Volume(f32),
     Mute(bool),
-    PrepareNext { path: PathBuf },
+    PrepareNext {
+        path: PathBuf,
+    },
     /// Update EQ settings (bands + enabled).
     EqUpdate(crate::dsp::EqSettings),
     /// Enable/disable volume normalization.
@@ -111,7 +113,9 @@ pub fn decode_loop(
         return;
     }
 
-    let _ = event_tx.send(EngineEvent::StateChanged(jalwa_core::PlaybackState::Playing));
+    let _ = event_tx.send(EngineEvent::StateChanged(
+        jalwa_core::PlaybackState::Playing,
+    ));
     let mut paused = false;
     let mut near_end_sent = false;
 
@@ -138,12 +142,15 @@ pub fn decode_loop(
                 Some(EngineCommand::Stop) => {
                     let _ = output.flush();
                     let _ = output.close();
-                    let _ = event_tx.send(EngineEvent::StateChanged(jalwa_core::PlaybackState::Stopped));
+                    let _ = event_tx.send(EngineEvent::StateChanged(
+                        jalwa_core::PlaybackState::Stopped,
+                    ));
                     return;
                 }
                 Some(EngineCommand::Pause) => {
                     paused = true;
-                    let _ = event_tx.send(EngineEvent::StateChanged(jalwa_core::PlaybackState::Paused));
+                    let _ =
+                        event_tx.send(EngineEvent::StateChanged(jalwa_core::PlaybackState::Paused));
                     if let Ok(mut s) = status.lock() {
                         s.state = jalwa_core::PlaybackState::Paused;
                         s.volume = volume;
@@ -153,7 +160,9 @@ pub fn decode_loop(
                 }
                 Some(EngineCommand::Resume | EngineCommand::Play) => {
                     paused = false;
-                    let _ = event_tx.send(EngineEvent::StateChanged(jalwa_core::PlaybackState::Playing));
+                    let _ = event_tx.send(EngineEvent::StateChanged(
+                        jalwa_core::PlaybackState::Playing,
+                    ));
                     break;
                 }
                 Some(EngineCommand::Seek(pos)) => {
@@ -168,14 +177,12 @@ pub fn decode_loop(
                 Some(EngineCommand::Mute(m)) => {
                     muted = m;
                 }
-                Some(EngineCommand::PrepareNext { path }) => {
-                    match FileDecoder::open_path(&path) {
-                        Ok(d) => next_decoder = Some(d),
-                        Err(e) => {
-                            let _ = event_tx.send(EngineEvent::Error(format!("prepare next: {e}")));
-                        }
+                Some(EngineCommand::PrepareNext { path }) => match FileDecoder::open_path(&path) {
+                    Ok(d) => next_decoder = Some(d),
+                    Err(e) => {
+                        let _ = event_tx.send(EngineEvent::Error(format!("prepare next: {e}")));
                     }
-                }
+                },
                 Some(EngineCommand::EqUpdate(settings)) => {
                     equalizer.settings = settings;
                     equalizer.update_coefficients();
@@ -270,14 +277,12 @@ pub fn decode_loop(
         }
 
         // Check near-end for gapless prebuffer hint
-        if !near_end_sent {
-            if let Some(dur) = duration {
-                if dur.as_secs_f64() - buf.timestamp.as_secs_f64() < 2.0 {
+        if !near_end_sent
+            && let Some(dur) = duration
+                && dur.as_secs_f64() - buf.timestamp.as_secs_f64() < 2.0 {
                     let _ = event_tx.send(EngineEvent::NearEnd);
                     near_end_sent = true;
                 }
-            }
-        }
 
         // Write to output
         if let Err(e) = output.write(&buf) {
@@ -290,13 +295,11 @@ pub fn decode_loop(
 
 /// Apply volume gain to an AudioBuffer, returning a new buffer.
 pub(crate) fn apply_volume(buf: &tarang_core::AudioBuffer, gain: f32) -> tarang_core::AudioBuffer {
-    let samples: &[f32] = unsafe {
-        std::slice::from_raw_parts(buf.data.as_ptr() as *const f32, buf.data.len() / 4)
-    };
+    let samples: &[f32] =
+        unsafe { std::slice::from_raw_parts(buf.data.as_ptr() as *const f32, buf.data.len() / 4) };
     let scaled: Vec<f32> = samples.iter().map(|s| s * gain).collect();
-    let bytes = unsafe {
-        std::slice::from_raw_parts(scaled.as_ptr() as *const u8, scaled.len() * 4)
-    };
+    let bytes =
+        unsafe { std::slice::from_raw_parts(scaled.as_ptr() as *const u8, scaled.len() * 4) };
     tarang_core::AudioBuffer {
         data: bytes::Bytes::copy_from_slice(bytes),
         sample_format: buf.sample_format,

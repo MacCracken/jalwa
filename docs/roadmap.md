@@ -1,8 +1,13 @@
 # Jalwa Roadmap
 
+## Pending: Tarang Release Migration
+- [ ] Update Cargo.toml path deps (`../tarang`) to crates.io/git registry once tarang is released
+- [ ] Remove CI workaround (dual checkout of tarang as sibling repo)
+- [ ] Pin tarang version in workspace dependencies
+
 ## Test Coverage Backlog (ongoing)
 
-Current: 46.6% (829/1778 lines). Target: 80%.
+Current: 51% (907/1778 lines). Target: 80%.
 
 ### Tier 1 — Pure rendering (est. +198 lines)
 - [ ] `widgets.rs`: ratatui TestBackend tests for all views (Library, NowPlaying, Queue, Equalizer)

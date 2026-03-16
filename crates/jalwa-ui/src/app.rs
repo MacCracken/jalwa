@@ -1,7 +1,7 @@
 //! Application state for the interactive TUI.
 
-use jalwa_core::db::PersistentLibrary;
 use jalwa_core::PlayQueue;
+use jalwa_core::db::PersistentLibrary;
 use jalwa_playback::PlaybackEngine;
 
 /// Which view is active in the TUI.
@@ -105,8 +105,14 @@ impl App {
             .enumerate()
             .filter(|(_, item)| {
                 item.title.to_lowercase().contains(&q)
-                    || item.artist.as_ref().is_some_and(|a| a.to_lowercase().contains(&q))
-                    || item.album.as_ref().is_some_and(|a| a.to_lowercase().contains(&q))
+                    || item
+                        .artist
+                        .as_ref()
+                        .is_some_and(|a| a.to_lowercase().contains(&q))
+                    || item
+                        .album
+                        .as_ref()
+                        .is_some_and(|a| a.to_lowercase().contains(&q))
             })
             .map(|(i, _)| i)
             .collect();
@@ -260,8 +266,12 @@ mod tests {
     #[test]
     fn update_search_finds_matches() {
         let mut app = make_test_app();
-        app.library.library.add_item(make_item("Bohemian Rhapsody", "Queen"));
-        app.library.library.add_item(make_item("Time", "Pink Floyd"));
+        app.library
+            .library
+            .add_item(make_item("Bohemian Rhapsody", "Queen"));
+        app.library
+            .library
+            .add_item(make_item("Time", "Pink Floyd"));
         app.search_query = "queen".to_string();
         app.update_search();
         assert_eq!(app.search_results.len(), 1);

@@ -14,7 +14,7 @@ pub enum MprisCommand {
     Stop,
     Next,
     Previous,
-    Seek(f64),  // offset in seconds
+    Seek(f64),      // offset in seconds
     SetVolume(f64), // 0.0..1.0
 }
 
@@ -55,7 +55,8 @@ fn run_mpris_server(tx: mpsc::Sender<MprisCommand>) -> Result<(), Box<dyn std::e
             .at("/org/mpris/MediaPlayer2", player)
             .await?;
 
-        let bus_name = zbus::names::WellKnownName::try_from("org.mpris.MediaPlayer2.jalwa").unwrap();
+        let bus_name =
+            zbus::names::WellKnownName::try_from("org.mpris.MediaPlayer2.jalwa").unwrap();
         conn.request_name(bus_name).await?;
 
         // Keep running until sender side is dropped
@@ -71,28 +72,44 @@ struct MprisRoot;
 #[zbus::interface(name = "org.mpris.MediaPlayer2")]
 impl MprisRoot {
     #[zbus(property)]
-    fn can_quit(&self) -> bool { true }
+    fn can_quit(&self) -> bool {
+        true
+    }
 
     #[zbus(property)]
-    fn can_raise(&self) -> bool { false }
+    fn can_raise(&self) -> bool {
+        false
+    }
 
     #[zbus(property)]
-    fn has_track_list(&self) -> bool { false }
+    fn has_track_list(&self) -> bool {
+        false
+    }
 
     #[zbus(property)]
-    fn identity(&self) -> &str { "Jalwa" }
+    fn identity(&self) -> &str {
+        "Jalwa"
+    }
 
     #[zbus(property)]
-    fn desktop_entry(&self) -> &str { "jalwa" }
+    fn desktop_entry(&self) -> &str {
+        "jalwa"
+    }
 
     #[zbus(property)]
-    fn supported_uri_schemes(&self) -> Vec<String> { vec!["file".into()] }
+    fn supported_uri_schemes(&self) -> Vec<String> {
+        vec!["file".into()]
+    }
 
     #[zbus(property)]
     fn supported_mime_types(&self) -> Vec<String> {
         vec![
-            "audio/mpeg".into(), "audio/flac".into(), "audio/ogg".into(),
-            "audio/wav".into(), "audio/aac".into(), "audio/opus".into(),
+            "audio/mpeg".into(),
+            "audio/flac".into(),
+            "audio/ogg".into(),
+            "audio/wav".into(),
+            "audio/aac".into(),
+            "audio/opus".into(),
             "audio/mp4".into(),
         ]
     }
@@ -133,25 +150,39 @@ impl MprisPlayer {
     }
 
     #[zbus(property)]
-    fn can_play(&self) -> bool { true }
+    fn can_play(&self) -> bool {
+        true
+    }
 
     #[zbus(property)]
-    fn can_pause(&self) -> bool { true }
+    fn can_pause(&self) -> bool {
+        true
+    }
 
     #[zbus(property)]
-    fn can_go_next(&self) -> bool { true }
+    fn can_go_next(&self) -> bool {
+        true
+    }
 
     #[zbus(property)]
-    fn can_go_previous(&self) -> bool { true }
+    fn can_go_previous(&self) -> bool {
+        true
+    }
 
     #[zbus(property)]
-    fn can_seek(&self) -> bool { true }
+    fn can_seek(&self) -> bool {
+        true
+    }
 
     #[zbus(property)]
-    fn can_control(&self) -> bool { true }
+    fn can_control(&self) -> bool {
+        true
+    }
 
     #[zbus(property)]
-    fn playback_status(&self) -> &str { "Stopped" }
+    fn playback_status(&self) -> &str {
+        "Stopped"
+    }
 }
 
 #[cfg(test)]
@@ -194,8 +225,14 @@ mod tests {
         assert_eq!(root.identity(), "Jalwa");
         assert_eq!(root.desktop_entry(), "jalwa");
         assert!(root.supported_uri_schemes().contains(&"file".to_string()));
-        assert!(root.supported_mime_types().contains(&"audio/flac".to_string()));
-        assert!(root.supported_mime_types().contains(&"audio/mpeg".to_string()));
+        assert!(
+            root.supported_mime_types()
+                .contains(&"audio/flac".to_string())
+        );
+        assert!(
+            root.supported_mime_types()
+                .contains(&"audio/mpeg".to_string())
+        );
     }
 
     #[test]

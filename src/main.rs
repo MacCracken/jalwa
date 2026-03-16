@@ -66,11 +66,14 @@ fn db_path() -> PathBuf {
 }
 
 fn open_library() -> Result<jalwa_core::db::PersistentLibrary> {
-    let path = db_path();
+    open_library_at(&db_path())
+}
+
+fn open_library_at(path: &std::path::Path) -> Result<jalwa_core::db::PersistentLibrary> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    Ok(jalwa_core::db::PersistentLibrary::open(&path)?)
+    Ok(jalwa_core::db::PersistentLibrary::open(path)?)
 }
 
 #[tokio::main]
@@ -271,7 +274,11 @@ fn cmd_export(name: &str, output: &str) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("playlist '{name}' not found"))?;
 
     jalwa_core::playlist_io::save_m3u(playlist, &plib.library, std::path::Path::new(output))?;
-    println!("Exported '{}' ({} items) to {output}", playlist.name, playlist.len());
+    println!(
+        "Exported '{}' ({} items) to {output}",
+        playlist.name,
+        playlist.len()
+    );
     Ok(())
 }
 
@@ -473,16 +480,22 @@ fn handle_tool_call(
                     if recs.is_empty() {
                         json!({ "content": [{ "type": "text", "text": "No recommendations found" }] })
                     } else {
-                        let text: Vec<String> = recs.iter().map(|r| {
-                            let title = lib.library.find_by_id(r.item_id)
-                                .map(|i| {
-                                    let artist = i.artist.as_deref().unwrap_or("Unknown");
-                                    format!("{} - {}", artist, i.title)
-                                })
-                                .unwrap_or_else(|| r.item_id.to_string());
-                            let reasons: Vec<String> = r.reasons.iter().map(|r| r.to_string()).collect();
-                            format!("  {:.0}% {} ({})", r.score, title, reasons.join(", "))
-                        }).collect();
+                        let text: Vec<String> = recs
+                            .iter()
+                            .map(|r| {
+                                let title = lib
+                                    .library
+                                    .find_by_id(r.item_id)
+                                    .map(|i| {
+                                        let artist = i.artist.as_deref().unwrap_or("Unknown");
+                                        format!("{} - {}", artist, i.title)
+                                    })
+                                    .unwrap_or_else(|| r.item_id.to_string());
+                                let reasons: Vec<String> =
+                                    r.reasons.iter().map(|r| r.to_string()).collect();
+                                format!("  {:.0}% {} ({})", r.score, title, reasons.join(", "))
+                            })
+                            .collect();
                         json!({ "content": [{ "type": "text", "text": text.join("\n") }] })
                     }
                 }
@@ -503,12 +516,46 @@ fn ctrlc_handler(running: Arc<std::sync::atomic::AtomicBool>) {
     });
 }
 
+/// Minimal WAV generator for tests.
+#[cfg(test)]
+fn make_test_wav(num_samples: u32, sample_rate: u32) -> Vec<u8> {
+    let channels: u16 = 1;
+    let bits: u16 = 16;
+    let data_size = num_samples * channels as u32 * (bits as u32 / 8);
+    let file_size = 36 + data_size;
+    let byte_rate = sample_rate * channels as u32 * (bits as u32 / 8);
+    let block_align = channels * (bits / 8);
+    let mut buf = Vec::new();
+    buf.extend_from_slice(b"RIFF");
+    buf.extend_from_slice(&file_size.to_le_bytes());
+    buf.extend_from_slice(b"WAVE");
+    buf.extend_from_slice(b"fmt ");
+    buf.extend_from_slice(&16u32.to_le_bytes());
+    buf.extend_from_slice(&1u16.to_le_bytes());
+    buf.extend_from_slice(&channels.to_le_bytes());
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&byte_rate.to_le_bytes());
+    buf.extend_from_slice(&block_align.to_le_bytes());
+    buf.extend_from_slice(&bits.to_le_bytes());
+    buf.extend_from_slice(b"data");
+    buf.extend_from_slice(&data_size.to_le_bytes());
+    for i in 0..num_samples {
+        let t = i as f64 / sample_rate as f64;
+        let s = (t * 440.0 * 2.0 * std::f64::consts::PI).sin();
+        buf.extend_from_slice(&((s * 16000.0) as i16).to_le_bytes());
+    }
+    buf
+}
+
 /// Simple ctrlc handler module (inline, no extra dep needed — uses signal directly)
 mod ctrlc {
     pub fn install_handler(handler: impl Fn() + Send + 'static) -> Result<(), std::io::Error> {
         // Use a simple signal handler via libc
         unsafe {
-            libc::signal(libc::SIGINT, signal_handler as *const () as libc::sighandler_t);
+            libc::signal(
+                libc::SIGINT,
+                signal_handler as *const () as libc::sighandler_t,
+            );
         }
         // Store handler in a static
         *HANDLER.lock().unwrap() = Some(Box::new(handler));
@@ -518,10 +565,196 @@ mod ctrlc {
     static HANDLER: std::sync::Mutex<Option<Box<dyn Fn() + Send>>> = std::sync::Mutex::new(None);
 
     extern "C" fn signal_handler(_: libc::c_int) {
-        if let Ok(guard) = HANDLER.lock() {
-            if let Some(ref handler) = *guard {
+        if let Ok(guard) = HANDLER.lock()
+            && let Some(ref handler) = *guard {
                 handler();
             }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn tmp_db() -> (PathBuf, jalwa_core::db::PersistentLibrary) {
+        let path = std::env::temp_dir().join(format!("jalwa_cmd_test_{}.db", uuid::Uuid::new_v4()));
+        let plib = open_library_at(&path).unwrap();
+        (path, plib)
+    }
+
+    fn tmp_dir_with_wav() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("jalwa_cmd_wav_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = make_test_wav(4410, 44100);
+        std::fs::write(dir.join("test.wav"), &wav).unwrap();
+        dir
+    }
+
+    // ---- cmd_info ----
+
+    #[test]
+    fn info_with_wav() {
+        let dir = tmp_dir_with_wav();
+        let wav_path = dir.join("test.wav");
+        let result = cmd_info(wav_path.to_str().unwrap());
+        assert!(result.is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn info_nonexistent() {
+        let result = cmd_info("/nonexistent/file.wav");
+        assert!(result.is_err());
+    }
+
+    // ---- cmd_search ----
+
+    #[test]
+    fn search_empty_library() {
+        let (path, _plib) = tmp_db();
+        // Temporarily override db_path by using open_library_at directly
+        // We test the search logic via the library directly
+        let plib = open_library_at(&path).unwrap();
+        let results = plib.library.search("anything");
+        assert!(results.is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- cmd_stats ----
+
+    #[test]
+    fn stats_empty_library() {
+        let (path, plib) = tmp_db();
+        let stats = jalwa_ui::render_library_stats(&plib.library);
+        assert!(stats.contains("0 items"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- cmd_library ----
+
+    #[test]
+    fn library_empty() {
+        let (path, plib) = tmp_db();
+        assert!(plib.library.items.is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- cmd_scan ----
+
+    #[test]
+    fn scan_with_wav() {
+        let dir = tmp_dir_with_wav();
+        let (db_path, mut plib) = tmp_db();
+
+        let scanned = jalwa_core::scanner::scan_directory(&dir).unwrap();
+        assert_eq!(scanned.len(), 1);
+
+        for file in scanned {
+            let item = jalwa_core::scanner::scanned_to_media_item(file);
+            plib.add_item(item).unwrap();
         }
+        assert_eq!(plib.library.items.len(), 1);
+        assert_eq!(plib.library.items[0].title, "test");
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn scan_nonexistent_dir() {
+        let result = jalwa_core::scanner::scan_directory(std::path::Path::new("/nonexistent"));
+        assert!(result.is_err());
+    }
+
+    // ---- cmd_export ----
+
+    #[test]
+    fn export_missing_playlist() {
+        let (path, plib) = tmp_db();
+        let found = plib.library.playlists.iter().find(|p| p.name == "nope");
+        assert!(found.is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- handle_tool_call ----
+
+    #[test]
+    fn tool_call_pause() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let result = handle_tool_call("jalwa_pause", &json!({}), &plib);
+        assert!(result["content"][0]["text"].as_str().unwrap().contains("paused"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_call_status() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let result = handle_tool_call("jalwa_status", &json!({}), &plib);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Stopped"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_call_search_empty() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let result = handle_tool_call("jalwa_search", &json!({"query": "test"}), &plib);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("No results"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_call_recommend_invalid_uuid() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let result = handle_tool_call("jalwa_recommend", &json!({"item_id": "not-a-uuid"}), &plib);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_call_recommend_empty_library() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let result = handle_tool_call(
+            "jalwa_recommend",
+            &json!({"item_id": uuid::Uuid::new_v4().to_string()}),
+            &plib,
+        );
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("No recommendations"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_call_unknown() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let result = handle_tool_call("nonexistent_tool", &json!({}), &plib);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_call_play_nonexistent() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let result = handle_tool_call("jalwa_play", &json!({"path": "/nonexistent.wav"}), &plib);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn open_library_at_creates_dir() {
+        let dir = std::env::temp_dir().join(format!("jalwa_deep_{}/sub/dir", uuid::Uuid::new_v4()));
+        let db = dir.join("test.db");
+        let result = open_library_at(&db);
+        assert!(result.is_ok());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

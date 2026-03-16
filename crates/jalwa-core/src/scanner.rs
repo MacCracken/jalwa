@@ -75,7 +75,9 @@ fn scan_file(path: &Path) -> Result<ScannedFile> {
     let (title, artist, album, art_mime, art_data) = match lofty::read_from_path(path) {
         Ok(tagged_file) => {
             use lofty::prelude::*;
-            let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
+            let tag = tagged_file
+                .primary_tag()
+                .or_else(|| tagged_file.first_tag());
             match tag {
                 Some(t) => {
                     let title = t.title().map(|s| s.to_string());

@@ -24,7 +24,11 @@ const TARGET_RMS: f32 = 0.125;
 pub fn analyze_loudness(buf: &AudioBuffer) -> LoudnessInfo {
     let samples = buf_to_f32(buf);
     if samples.is_empty() {
-        return LoudnessInfo { rms: 0.0, peak: 0.0, gain: 1.0 };
+        return LoudnessInfo {
+            rms: 0.0,
+            peak: 0.0,
+            gain: 1.0,
+        };
     }
 
     let mut sum_sq: f64 = 0.0;
@@ -54,7 +58,10 @@ pub fn normalize(buf: &AudioBuffer, gain: f32) -> AudioBuffer {
     let samples = buf_to_f32(buf);
     let limited_gain = if gain > 1.0 {
         // Find peak after gain to prevent clipping
-        let max_after = samples.iter().map(|s| (s * gain).abs()).fold(0.0f32, f32::max);
+        let max_after = samples
+            .iter()
+            .map(|s| (s * gain).abs())
+            .fold(0.0f32, f32::max);
         if max_after > 1.0 {
             gain / max_after
         } else {
@@ -114,23 +121,37 @@ impl EqSettings {
     pub fn preset(name: &str) -> Self {
         //                       31   62  125  250  500   1k   2k   4k   8k  16k
         let bands = match name {
-            "rock"      => [ 4.0, 3.0, 1.0, -1.0, -2.0, 0.0, 2.0, 3.0, 4.0, 4.0],
-            "pop"       => [-1.0, 1.0, 3.0,  4.0,  3.0, 0.0, -1.0, 0.0, 1.0, 2.0],
-            "jazz"      => [ 2.0, 1.0, 0.0,  1.0, -1.0, -1.0, 0.0, 1.0, 2.0, 3.0],
-            "classical" => [ 0.0, 0.0, 0.0,  0.0,  0.0, 0.0, -2.0, -3.0, -2.0, 0.0],
-            "bass"      => [ 6.0, 5.0, 4.0,  2.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            "treble"    => [ 0.0, 0.0, 0.0,  0.0,  0.0, 0.0, 2.0, 4.0, 5.0, 6.0],
-            "vocal"     => [-2.0, -1.0, 0.0, 2.0,  4.0, 4.0, 3.0, 1.0, 0.0, -1.0],
-            "electronic"=> [ 5.0, 4.0, 1.0,  0.0, -2.0, 0.0, 1.0, 3.0, 4.0, 5.0],
-            "acoustic"  => [ 2.0, 1.0, 0.0,  1.0,  2.0, 1.0, 2.0, 3.0, 2.0, 1.0],
-            _           => [0.0; 10],
+            "rock" => [4.0, 3.0, 1.0, -1.0, -2.0, 0.0, 2.0, 3.0, 4.0, 4.0],
+            "pop" => [-1.0, 1.0, 3.0, 4.0, 3.0, 0.0, -1.0, 0.0, 1.0, 2.0],
+            "jazz" => [2.0, 1.0, 0.0, 1.0, -1.0, -1.0, 0.0, 1.0, 2.0, 3.0],
+            "classical" => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -2.0, -3.0, -2.0, 0.0],
+            "bass" => [6.0, 5.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "treble" => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 4.0, 5.0, 6.0],
+            "vocal" => [-2.0, -1.0, 0.0, 2.0, 4.0, 4.0, 3.0, 1.0, 0.0, -1.0],
+            "electronic" => [5.0, 4.0, 1.0, 0.0, -2.0, 0.0, 1.0, 3.0, 4.0, 5.0],
+            "acoustic" => [2.0, 1.0, 0.0, 1.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0],
+            _ => [0.0; 10],
         };
-        Self { bands, enabled: true }
+        Self {
+            bands,
+            enabled: true,
+        }
     }
 
     /// List all available preset names.
     pub fn preset_names() -> &'static [&'static str] {
-        &["flat", "rock", "pop", "jazz", "classical", "bass", "treble", "vocal", "electronic", "acoustic"]
+        &[
+            "flat",
+            "rock",
+            "pop",
+            "jazz",
+            "classical",
+            "bass",
+            "treble",
+            "vocal",
+            "electronic",
+            "acoustic",
+        ]
     }
 
     /// Get the band index for a display name.
@@ -154,15 +175,20 @@ impl EqSettings {
 /// Biquad filter coefficients for a single band.
 #[derive(Debug, Clone, Copy)]
 struct BiquadCoeffs {
-    b0: f32, b1: f32, b2: f32,
-    a1: f32, a2: f32,
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
 }
 
 /// Biquad filter state (per channel).
 #[derive(Debug, Clone, Copy, Default)]
 struct BiquadState {
-    x1: f32, x2: f32,
-    y1: f32, y2: f32,
+    x1: f32,
+    x2: f32,
+    y1: f32,
+    y2: f32,
 }
 
 /// Compute peaking EQ biquad coefficients.
@@ -182,15 +208,17 @@ fn peaking_eq(freq: f32, gain_db: f32, q: f32, sr: f32) -> BiquadCoeffs {
     let a2 = 1.0 - alpha / a;
 
     BiquadCoeffs {
-        b0: b0 / a0, b1: b1 / a0, b2: b2 / a0,
-        a1: a1 / a0, a2: a2 / a0,
+        b0: b0 / a0,
+        b1: b1 / a0,
+        b2: b2 / a0,
+        a1: a1 / a0,
+        a2: a2 / a0,
     }
 }
 
 /// Apply a biquad filter to a single sample, updating state.
 fn biquad_process(c: &BiquadCoeffs, s: &mut BiquadState, input: f32) -> f32 {
-    let output = c.b0 * input + c.b1 * s.x1 + c.b2 * s.x2
-               - c.a1 * s.y1 - c.a2 * s.y2;
+    let output = c.b0 * input + c.b1 * s.x1 + c.b2 * s.x2 - c.a1 * s.y1 - c.a2 * s.y2;
     s.x2 = s.x1;
     s.x1 = input;
     s.y2 = s.y1;
@@ -213,7 +241,13 @@ pub struct Equalizer {
 impl Equalizer {
     pub fn new(sample_rate: u32) -> Self {
         let mut eq = Self {
-            coeffs: [BiquadCoeffs { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 }; 10],
+            coeffs: [BiquadCoeffs {
+                b0: 1.0,
+                b1: 0.0,
+                b2: 0.0,
+                a1: 0.0,
+                a2: 0.0,
+            }; 10],
             state: [[BiquadState::default(); 2]; 10],
             sample_rate,
             settings: EqSettings::default(),
@@ -260,11 +294,7 @@ impl Equalizer {
             for frame in 0..(output.len() / channels) {
                 for ch in 0..channels.min(2) {
                     let idx = frame * channels + ch;
-                    output[idx] = biquad_process(
-                        coeffs,
-                        &mut self.state[band][ch],
-                        output[idx],
-                    );
+                    output[idx] = biquad_process(coeffs, &mut self.state[band][ch], output[idx]);
                 }
             }
         }
@@ -279,15 +309,12 @@ fn buf_to_f32(buf: &AudioBuffer) -> &[f32] {
     if buf.data.is_empty() {
         return &[];
     }
-    unsafe {
-        std::slice::from_raw_parts(buf.data.as_ptr() as *const f32, buf.data.len() / 4)
-    }
+    unsafe { std::slice::from_raw_parts(buf.data.as_ptr() as *const f32, buf.data.len() / 4) }
 }
 
 fn f32_to_buf(samples: &[f32], template: &AudioBuffer) -> AudioBuffer {
-    let bytes = unsafe {
-        std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4)
-    };
+    let bytes =
+        unsafe { std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4) };
     AudioBuffer {
         data: bytes::Bytes::copy_from_slice(bytes),
         sample_format: template.sample_format,
@@ -306,9 +333,8 @@ mod tests {
     use tarang_core::SampleFormat;
 
     fn make_buf(samples: &[f32], channels: u16, sample_rate: u32) -> AudioBuffer {
-        let bytes = unsafe {
-            std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4)
-        };
+        let bytes =
+            unsafe { std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4) };
         AudioBuffer {
             data: Bytes::copy_from_slice(bytes),
             sample_format: SampleFormat::F32,
@@ -320,9 +346,9 @@ mod tests {
     }
 
     fn make_sine(freq: f64, sr: u32, n: usize) -> Vec<f32> {
-        (0..n).map(|i| {
-            (i as f64 / sr as f64 * freq * 2.0 * std::f64::consts::PI).sin() as f32
-        }).collect()
+        (0..n)
+            .map(|i| (i as f64 / sr as f64 * freq * 2.0 * std::f64::consts::PI).sin() as f32)
+            .collect()
     }
 
     // ---- Normalization tests ----
@@ -463,7 +489,10 @@ mod tests {
         // RMS should be higher (boosted)
         let in_rms = rms(buf_to_f32(&buf));
         let out_rms = rms(buf_to_f32(&out));
-        assert!(out_rms > in_rms, "boost should increase RMS: in={in_rms}, out={out_rms}");
+        assert!(
+            out_rms > in_rms,
+            "boost should increase RMS: in={in_rms}, out={out_rms}"
+        );
     }
 
     #[test]
@@ -477,7 +506,10 @@ mod tests {
         let out = eq.process(&buf);
         let in_rms = rms(buf_to_f32(&buf));
         let out_rms = rms(buf_to_f32(&out));
-        assert!(out_rms < in_rms, "cut should decrease RMS: in={in_rms}, out={out_rms}");
+        assert!(
+            out_rms < in_rms,
+            "cut should decrease RMS: in={in_rms}, out={out_rms}"
+        );
     }
 
     #[test]
@@ -550,7 +582,10 @@ mod tests {
         for name in EqSettings::preset_names() {
             let eq = EqSettings::preset(name);
             for &b in &eq.bands {
-                assert!(b >= -12.0 && b <= 12.0, "preset '{name}' band out of range: {b}");
+                assert!(
+                    b >= -12.0 && b <= 12.0,
+                    "preset '{name}' band out of range: {b}"
+                );
             }
         }
     }

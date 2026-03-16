@@ -3,12 +3,12 @@
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
-use crate::{Library, Playlist, Result, JalwaError};
+use crate::{JalwaError, Library, Playlist, Result};
 
 /// Save a playlist as an M3U file.
 pub fn save_m3u(playlist: &Playlist, library: &Library, path: &Path) -> Result<()> {
     let mut file = std::fs::File::create(path)?;
-    writeln!(file, "#EXTM3U").map_err(|e| JalwaError::Io(e))?;
+    writeln!(file, "#EXTM3U").map_err(JalwaError::Io)?;
 
     for item_id in &playlist.items {
         if let Some(item) = library.find_by_id(*item_id) {
@@ -18,10 +18,8 @@ pub fn save_m3u(playlist: &Playlist, library: &Library, path: &Path) -> Result<(
             } else {
                 item.title.clone()
             };
-            writeln!(file, "#EXTINF:{},{}", duration_secs, title)
-                .map_err(|e| JalwaError::Io(e))?;
-            writeln!(file, "{}", item.path.display())
-                .map_err(|e| JalwaError::Io(e))?;
+            writeln!(file, "#EXTINF:{},{}", duration_secs, title).map_err(JalwaError::Io)?;
+            writeln!(file, "{}", item.path.display()).map_err(JalwaError::Io)?;
         }
     }
 
@@ -51,8 +49,8 @@ mod tests {
     use super::*;
     use crate::{MediaItem, MediaType};
     use std::time::Duration;
-    use uuid::Uuid;
     use tarang_core::{AudioCodec, ContainerFormat};
+    use uuid::Uuid;
 
     fn make_item(title: &str, artist: &str, path: &str) -> MediaItem {
         MediaItem {

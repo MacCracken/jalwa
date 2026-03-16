@@ -18,8 +18,8 @@ pub struct LibraryDb {
 impl LibraryDb {
     /// Open (or create) the library database at the given path.
     pub fn open(path: &Path) -> Result<Self> {
-        let conn = Connection::open(path)
-            .map_err(|e| JalwaError::Database(format!("open: {e}")))?;
+        let conn =
+            Connection::open(path).map_err(|e| JalwaError::Database(format!("open: {e}")))?;
 
         let db = Self { conn };
         db.migrate()?;
@@ -77,39 +77,72 @@ impl LibraryDb {
         let mut library = Library::new();
 
         // Load items
-        let mut stmt = self.conn.prepare(
-            "SELECT id, path, title, artist, album, duration_ms, format,
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, path, title, artist, album, duration_ms, format,
                     audio_codec, video_codec, media_type, added_at, last_played,
                     play_count, rating, tags
-             FROM media_items"
-        ).map_err(|e| JalwaError::Database(format!("prepare: {e}")))?;
+             FROM media_items",
+            )
+            .map_err(|e| JalwaError::Database(format!("prepare: {e}")))?;
 
-        let items = stmt.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let path: String = row.get(1)?;
-            let title: String = row.get(2)?;
-            let artist: Option<String> = row.get(3)?;
-            let album: Option<String> = row.get(4)?;
-            let duration_ms: Option<i64> = row.get(5)?;
-            let format: String = row.get(6)?;
-            let audio_codec: Option<String> = row.get(7)?;
-            let video_codec: Option<String> = row.get(8)?;
-            let media_type: String = row.get(9)?;
-            let added_at: String = row.get(10)?;
-            let last_played: Option<String> = row.get(11)?;
-            let play_count: u32 = row.get(12)?;
-            let rating: Option<u8> = row.get(13)?;
-            let tags_json: Option<String> = row.get(14)?;
+        let items = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let path: String = row.get(1)?;
+                let title: String = row.get(2)?;
+                let artist: Option<String> = row.get(3)?;
+                let album: Option<String> = row.get(4)?;
+                let duration_ms: Option<i64> = row.get(5)?;
+                let format: String = row.get(6)?;
+                let audio_codec: Option<String> = row.get(7)?;
+                let video_codec: Option<String> = row.get(8)?;
+                let media_type: String = row.get(9)?;
+                let added_at: String = row.get(10)?;
+                let last_played: Option<String> = row.get(11)?;
+                let play_count: u32 = row.get(12)?;
+                let rating: Option<u8> = row.get(13)?;
+                let tags_json: Option<String> = row.get(14)?;
 
-            Ok((id, path, title, artist, album, duration_ms, format,
-                audio_codec, video_codec, media_type, added_at, last_played,
-                play_count, rating, tags_json))
-        }).map_err(|e| JalwaError::Database(format!("query: {e}")))?;
+                Ok((
+                    id,
+                    path,
+                    title,
+                    artist,
+                    album,
+                    duration_ms,
+                    format,
+                    audio_codec,
+                    video_codec,
+                    media_type,
+                    added_at,
+                    last_played,
+                    play_count,
+                    rating,
+                    tags_json,
+                ))
+            })
+            .map_err(|e| JalwaError::Database(format!("query: {e}")))?;
 
         for row in items {
-            let (id, path, title, artist, album, duration_ms, format,
-                audio_codec, video_codec, media_type, added_at, last_played,
-                play_count, rating, tags_json) = row.map_err(|e| JalwaError::Database(format!("row: {e}")))?;
+            let (
+                id,
+                path,
+                title,
+                artist,
+                album,
+                duration_ms,
+                format,
+                audio_codec,
+                video_codec,
+                media_type,
+                added_at,
+                last_played,
+                play_count,
+                rating,
+                tags_json,
+            ) = row.map_err(|e| JalwaError::Database(format!("row: {e}")))?;
 
             let item = MediaItem {
                 id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
@@ -121,12 +154,18 @@ impl LibraryDb {
                 format: parse_format(&format),
                 audio_codec: audio_codec.as_deref().map(parse_audio_codec),
                 video_codec: video_codec.as_deref().map(parse_video_codec),
-                media_type: if media_type == "Video" { MediaType::Video } else { MediaType::Audio },
+                media_type: if media_type == "Video" {
+                    MediaType::Video
+                } else {
+                    MediaType::Audio
+                },
                 added_at: DateTime::parse_from_rfc3339(&added_at)
                     .map(|dt| dt.with_timezone(&Utc))
                     .unwrap_or_else(|_| Utc::now()),
                 last_played: last_played.and_then(|s| {
-                    DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))
+                    DateTime::parse_from_rfc3339(&s)
+                        .ok()
+                        .map(|dt| dt.with_timezone(&Utc))
                 }),
                 play_count,
                 rating,
@@ -140,19 +179,24 @@ impl LibraryDb {
         }
 
         // Load playlists
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, description, is_smart, created_at, modified_at FROM playlists"
-        ).map_err(|e| JalwaError::Database(format!("prepare playlists: {e}")))?;
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, description, is_smart, created_at, modified_at FROM playlists",
+            )
+            .map_err(|e| JalwaError::Database(format!("prepare playlists: {e}")))?;
 
-        let playlists = stmt.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let description: Option<String> = row.get(2)?;
-            let is_smart: bool = row.get(3)?;
-            let created_at: String = row.get(4)?;
-            let modified_at: String = row.get(5)?;
-            Ok((id, name, description, is_smart, created_at, modified_at))
-        }).map_err(|e| JalwaError::Database(format!("query playlists: {e}")))?;
+        let playlists = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let description: Option<String> = row.get(2)?;
+                let is_smart: bool = row.get(3)?;
+                let created_at: String = row.get(4)?;
+                let modified_at: String = row.get(5)?;
+                Ok((id, name, description, is_smart, created_at, modified_at))
+            })
+            .map_err(|e| JalwaError::Database(format!("query playlists: {e}")))?;
 
         for row in playlists {
             let (id, name, description, is_smart, created_at, modified_at) =
@@ -170,39 +214,45 @@ impl LibraryDb {
                 .unwrap_or_else(|_| Utc::now());
 
             // Load playlist items
-            let mut item_stmt = self.conn.prepare(
-                "SELECT item_id FROM playlist_items WHERE playlist_id = ? ORDER BY position"
-            ).map_err(|e| JalwaError::Database(format!("prepare playlist items: {e}")))?;
+            let mut item_stmt = self
+                .conn
+                .prepare(
+                    "SELECT item_id FROM playlist_items WHERE playlist_id = ? ORDER BY position",
+                )
+                .map_err(|e| JalwaError::Database(format!("prepare playlist items: {e}")))?;
 
-            let item_ids = item_stmt.query_map(params![id], |row| {
-                let item_id: String = row.get(0)?;
-                Ok(item_id)
-            }).map_err(|e| JalwaError::Database(format!("query playlist items: {e}")))?;
+            let item_ids = item_stmt
+                .query_map(params![id], |row| {
+                    let item_id: String = row.get(0)?;
+                    Ok(item_id)
+                })
+                .map_err(|e| JalwaError::Database(format!("query playlist items: {e}")))?;
 
             for item_id in item_ids {
-                if let Ok(id_str) = item_id {
-                    if let Ok(uuid) = Uuid::parse_str(&id_str) {
+                if let Ok(id_str) = item_id
+                    && let Ok(uuid) = Uuid::parse_str(&id_str) {
                         playlist.items.push(uuid);
                     }
-                }
             }
 
             library.playlists.push(playlist);
         }
 
         // Load scan paths
-        let mut stmt = self.conn.prepare("SELECT path FROM scan_paths")
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path FROM scan_paths")
             .map_err(|e| JalwaError::Database(format!("prepare scan_paths: {e}")))?;
 
-        let paths = stmt.query_map([], |row| {
-            let path: String = row.get(0)?;
-            Ok(PathBuf::from(path))
-        }).map_err(|e| JalwaError::Database(format!("query scan_paths: {e}")))?;
+        let paths = stmt
+            .query_map([], |row| {
+                let path: String = row.get(0)?;
+                Ok(PathBuf::from(path))
+            })
+            .map_err(|e| JalwaError::Database(format!("query scan_paths: {e}")))?;
 
-        for path in paths {
-            if let Ok(p) = path {
-                library.scan_paths.push(p);
-            }
+        for p in paths.flatten() {
+            library.scan_paths.push(p);
         }
 
         Ok(library)
@@ -211,61 +261,71 @@ impl LibraryDb {
     /// Save a media item (upsert by path).
     pub fn save_item(&self, item: &MediaItem) -> Result<()> {
         let tags_json = serde_json::to_string(&item.tags).unwrap_or_else(|_| "[]".to_string());
-        self.conn.execute(
-            "INSERT OR REPLACE INTO media_items
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO media_items
              (id, path, title, artist, album, duration_ms, format, audio_codec, video_codec,
               media_type, added_at, last_played, play_count, rating, tags)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-            params![
-                item.id.to_string(),
-                item.path.to_string_lossy().to_string(),
-                item.title,
-                item.artist,
-                item.album,
-                item.duration.map(|d| d.as_millis() as i64),
-                format!("{:?}", item.format),
-                item.audio_codec.map(|c| format!("{:?}", c)),
-                item.video_codec.map(|c| format!("{:?}", c)),
-                format!("{:?}", item.media_type),
-                item.added_at.to_rfc3339(),
-                item.last_played.map(|lp| lp.to_rfc3339()),
-                item.play_count,
-                item.rating,
-                tags_json,
-            ],
-        ).map_err(|e| JalwaError::Database(format!("save item: {e}")))?;
+                params![
+                    item.id.to_string(),
+                    item.path.to_string_lossy().to_string(),
+                    item.title,
+                    item.artist,
+                    item.album,
+                    item.duration.map(|d| d.as_millis() as i64),
+                    format!("{:?}", item.format),
+                    item.audio_codec.map(|c| format!("{:?}", c)),
+                    item.video_codec.map(|c| format!("{:?}", c)),
+                    format!("{:?}", item.media_type),
+                    item.added_at.to_rfc3339(),
+                    item.last_played.map(|lp| lp.to_rfc3339()),
+                    item.play_count,
+                    item.rating,
+                    tags_json,
+                ],
+            )
+            .map_err(|e| JalwaError::Database(format!("save item: {e}")))?;
         Ok(())
     }
 
     /// Delete a media item by UUID.
     pub fn delete_item(&self, id: Uuid) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM media_items WHERE id = ?",
-            params![id.to_string()],
-        ).map_err(|e| JalwaError::Database(format!("delete item: {e}")))?;
+        self.conn
+            .execute(
+                "DELETE FROM media_items WHERE id = ?",
+                params![id.to_string()],
+            )
+            .map_err(|e| JalwaError::Database(format!("delete item: {e}")))?;
         // Also remove from playlist_items
-        self.conn.execute(
-            "DELETE FROM playlist_items WHERE item_id = ?",
-            params![id.to_string()],
-        ).map_err(|e| JalwaError::Database(format!("delete playlist item refs: {e}")))?;
+        self.conn
+            .execute(
+                "DELETE FROM playlist_items WHERE item_id = ?",
+                params![id.to_string()],
+            )
+            .map_err(|e| JalwaError::Database(format!("delete playlist item refs: {e}")))?;
         Ok(())
     }
 
     /// Update play count and last_played for an item.
     pub fn update_play_count(&self, id: Uuid) -> Result<()> {
-        self.conn.execute(
-            "UPDATE media_items SET play_count = play_count + 1, last_played = ? WHERE id = ?",
-            params![Utc::now().to_rfc3339(), id.to_string()],
-        ).map_err(|e| JalwaError::Database(format!("update play count: {e}")))?;
+        self.conn
+            .execute(
+                "UPDATE media_items SET play_count = play_count + 1, last_played = ? WHERE id = ?",
+                params![Utc::now().to_rfc3339(), id.to_string()],
+            )
+            .map_err(|e| JalwaError::Database(format!("update play count: {e}")))?;
         Ok(())
     }
 
     /// Update rating for an item.
     pub fn update_rating(&self, id: Uuid, rating: Option<u8>) -> Result<()> {
-        self.conn.execute(
-            "UPDATE media_items SET rating = ? WHERE id = ?",
-            params![rating, id.to_string()],
-        ).map_err(|e| JalwaError::Database(format!("update rating: {e}")))?;
+        self.conn
+            .execute(
+                "UPDATE media_items SET rating = ? WHERE id = ?",
+                params![rating, id.to_string()],
+            )
+            .map_err(|e| JalwaError::Database(format!("update rating: {e}")))?;
         Ok(())
     }
 
@@ -285,10 +345,12 @@ impl LibraryDb {
         ).map_err(|e| JalwaError::Database(format!("save playlist: {e}")))?;
 
         // Replace playlist items
-        self.conn.execute(
-            "DELETE FROM playlist_items WHERE playlist_id = ?",
-            params![playlist.id.to_string()],
-        ).map_err(|e| JalwaError::Database(format!("clear playlist items: {e}")))?;
+        self.conn
+            .execute(
+                "DELETE FROM playlist_items WHERE playlist_id = ?",
+                params![playlist.id.to_string()],
+            )
+            .map_err(|e| JalwaError::Database(format!("clear playlist items: {e}")))?;
 
         for (pos, item_id) in playlist.items.iter().enumerate() {
             self.conn.execute(
@@ -302,40 +364,48 @@ impl LibraryDb {
 
     /// Delete a playlist by UUID.
     pub fn delete_playlist(&self, id: Uuid) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM playlist_items WHERE playlist_id = ?",
-            params![id.to_string()],
-        ).map_err(|e| JalwaError::Database(format!("delete playlist items: {e}")))?;
-        self.conn.execute(
-            "DELETE FROM playlists WHERE id = ?",
-            params![id.to_string()],
-        ).map_err(|e| JalwaError::Database(format!("delete playlist: {e}")))?;
+        self.conn
+            .execute(
+                "DELETE FROM playlist_items WHERE playlist_id = ?",
+                params![id.to_string()],
+            )
+            .map_err(|e| JalwaError::Database(format!("delete playlist items: {e}")))?;
+        self.conn
+            .execute(
+                "DELETE FROM playlists WHERE id = ?",
+                params![id.to_string()],
+            )
+            .map_err(|e| JalwaError::Database(format!("delete playlist: {e}")))?;
         Ok(())
     }
 
     /// Save a scan path.
     pub fn save_scan_path(&self, path: &Path) -> Result<()> {
-        self.conn.execute(
-            "INSERT OR IGNORE INTO scan_paths (path) VALUES (?)",
-            params![path.to_string_lossy().to_string()],
-        ).map_err(|e| JalwaError::Database(format!("save scan path: {e}")))?;
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO scan_paths (path) VALUES (?)",
+                params![path.to_string_lossy().to_string()],
+            )
+            .map_err(|e| JalwaError::Database(format!("save scan path: {e}")))?;
         Ok(())
     }
 
     /// Load all scan paths.
     pub fn load_scan_paths(&self) -> Result<Vec<PathBuf>> {
-        let mut stmt = self.conn.prepare("SELECT path FROM scan_paths")
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path FROM scan_paths")
             .map_err(|e| JalwaError::Database(format!("prepare: {e}")))?;
-        let paths = stmt.query_map([], |row| {
-            let path: String = row.get(0)?;
-            Ok(PathBuf::from(path))
-        }).map_err(|e| JalwaError::Database(format!("query: {e}")))?;
+        let paths = stmt
+            .query_map([], |row| {
+                let path: String = row.get(0)?;
+                Ok(PathBuf::from(path))
+            })
+            .map_err(|e| JalwaError::Database(format!("query: {e}")))?;
 
         let mut result = Vec::new();
-        for p in paths {
-            if let Ok(path) = p {
-                result.push(path);
-            }
+        for path in paths.flatten() {
+            result.push(path);
         }
         Ok(result)
     }
@@ -391,7 +461,12 @@ impl PersistentLibrary {
     pub fn save_playlist(&mut self, playlist: &Playlist) -> Result<()> {
         self.db.save_playlist(playlist)?;
         // Update in-memory
-        if let Some(pos) = self.library.playlists.iter().position(|p| p.id == playlist.id) {
+        if let Some(pos) = self
+            .library
+            .playlists
+            .iter()
+            .position(|p| p.id == playlist.id)
+        {
             self.library.playlists[pos] = playlist.clone();
         } else {
             self.library.playlists.push(playlist.clone());

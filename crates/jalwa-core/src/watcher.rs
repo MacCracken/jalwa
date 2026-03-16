@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher, Event, EventKind};
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 use crate::{JalwaError, Result};
 
@@ -44,28 +44,29 @@ impl LibraryWatcher {
         let (tx, rx) = mpsc::channel();
 
         let event_tx = tx.clone();
-        let mut watcher = notify::recommended_watcher(move |res: std::result::Result<Event, notify::Error>| {
-            let event = match res {
-                Ok(e) => e,
-                Err(_) => return,
-            };
-
-            for path in &event.paths {
-                if !is_media_file(path) {
-                    continue;
-                }
-
-                let lib_event = match event.kind {
-                    EventKind::Create(_) => LibraryEvent::FileCreated(path.clone()),
-                    EventKind::Modify(_) => LibraryEvent::FileModified(path.clone()),
-                    EventKind::Remove(_) => LibraryEvent::FileRemoved(path.clone()),
-                    _ => continue,
+        let mut watcher =
+            notify::recommended_watcher(move |res: std::result::Result<Event, notify::Error>| {
+                let event = match res {
+                    Ok(e) => e,
+                    Err(_) => return,
                 };
 
-                let _ = event_tx.send(lib_event);
-            }
-        })
-        .map_err(|e| JalwaError::Scanner(format!("watcher init: {e}")))?;
+                for path in &event.paths {
+                    if !is_media_file(path) {
+                        continue;
+                    }
+
+                    let lib_event = match event.kind {
+                        EventKind::Create(_) => LibraryEvent::FileCreated(path.clone()),
+                        EventKind::Modify(_) => LibraryEvent::FileModified(path.clone()),
+                        EventKind::Remove(_) => LibraryEvent::FileRemoved(path.clone()),
+                        _ => continue,
+                    };
+
+                    let _ = event_tx.send(lib_event);
+                }
+            })
+            .map_err(|e| JalwaError::Scanner(format!("watcher init: {e}")))?;
 
         for path in paths {
             if path.is_dir() {

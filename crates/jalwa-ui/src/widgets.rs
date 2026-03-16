@@ -1,14 +1,14 @@
 //! Ratatui widgets for the Jalwa TUI.
 
+use crate::app::{App, InputMode, View};
 use jalwa_core::{MediaItem, PlaybackState, RepeatMode};
 use jalwa_playback::EqSettings;
 use jalwa_playback::format_duration;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph};
-use ratatui::Frame;
-use crate::app::{App, InputMode, View};
 
 /// Render the full TUI layout.
 pub fn render(frame: &mut Frame, app: &App) {
@@ -16,7 +16,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2), // status bar + progress
-            Constraint::Min(5),   // main view
+            Constraint::Min(5),    // main view
             Constraint::Length(1), // keybind help
         ])
         .split(frame.area());
@@ -41,9 +41,10 @@ fn render_status_area(frame: &mut Frame, area: Rect, app: &App) {
         PlaybackState::Buffering => "…",
     };
 
-    let now_playing = app.engine.current_path().and_then(|p| {
-        app.library.library.find_by_path(p)
-    });
+    let now_playing = app
+        .engine
+        .current_path()
+        .and_then(|p| app.library.library.find_by_path(p));
 
     let title_str = match now_playing {
         Some(item) => {
@@ -72,7 +73,9 @@ fn render_status_area(frame: &mut Frame, area: Rect, app: &App) {
     let status_line = Line::from(vec![
         Span::styled(
             format!(" {state_icon} "),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(&title_str),
         Span::raw("  "),
@@ -114,18 +117,18 @@ fn render_library_view(frame: &mut Frame, area: Rect, app: &App) {
         format!("Library ({} items)", app.library.library.items.len())
     };
 
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .title(header);
+    let block = Block::default().borders(Borders::TOP).title(header);
 
     let items: Vec<ListItem> = if !app.search_query.is_empty() {
         app.search_results
             .iter()
             .enumerate()
             .filter_map(|(display_idx, &lib_idx)| {
-                app.library.library.items.get(lib_idx).map(|item| {
-                    make_list_item(item, display_idx)
-                })
+                app.library
+                    .library
+                    .items
+                    .get(lib_idx)
+                    .map(|item| make_list_item(item, display_idx))
             })
             .collect()
     } else {
@@ -157,13 +160,12 @@ fn render_library_view(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_now_playing_view(frame: &mut Frame, area: Rect, app: &App) {
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .title("Now Playing");
+    let block = Block::default().borders(Borders::TOP).title("Now Playing");
 
-    let now_playing = app.engine.current_path().and_then(|p| {
-        app.library.library.find_by_path(p)
-    });
+    let now_playing = app
+        .engine
+        .current_path()
+        .and_then(|p| app.library.library.find_by_path(p));
 
     let text = match now_playing {
         Some(item) => {
@@ -182,16 +184,29 @@ fn render_now_playing_view(frame: &mut Frame, area: Rect, app: &App) {
                 Line::from(""),
                 Line::from(vec![Span::styled(
                     &item.title,
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 )]),
-                Line::from(vec![Span::styled(artist, Style::default().fg(Color::White))]),
-                Line::from(vec![Span::styled(album, Style::default().fg(Color::DarkGray))]),
+                Line::from(vec![Span::styled(
+                    artist,
+                    Style::default().fg(Color::White),
+                )]),
+                Line::from(vec![Span::styled(
+                    album,
+                    Style::default().fg(Color::DarkGray),
+                )]),
                 Line::from(""),
-                Line::from(format!("Duration: {duration}  Codec: {codec}  Format: {}", item.format)),
+                Line::from(format!(
+                    "Duration: {duration}  Codec: {codec}  Format: {}",
+                    item.format
+                )),
                 Line::from(format!(
                     "Plays: {}  Rating: {}",
                     item.play_count,
-                    item.rating.map(|r| format!("{r}/5")).unwrap_or_else(|| "-".to_string())
+                    item.rating
+                        .map(|r| format!("{r}/5"))
+                        .unwrap_or_else(|| "-".to_string())
                 )),
             ]
         }
@@ -217,9 +232,7 @@ fn render_queue_view(frame: &mut Frame, area: Rect, app: &App) {
         if app.queue.shuffle { " [S]" } else { "" }
     );
 
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .title(header);
+    let block = Block::default().borders(Borders::TOP).title(header);
 
     let items: Vec<ListItem> = app
         .queue
@@ -247,14 +260,12 @@ fn render_queue_view(frame: &mut Frame, area: Rect, app: &App) {
         state.select(Some(app.selected_index.min(items.len().saturating_sub(1))));
     }
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
+    let list = List::new(items).block(block).highlight_style(
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
 
     frame.render_stateful_widget(list, area, &mut state);
 }
@@ -267,9 +278,7 @@ fn render_eq_view(frame: &mut Frame, area: Rect, app: &App) {
     let norm_status = if norm { "ON" } else { "OFF" };
 
     let header = format!("Equalizer [{}]  Normalize [{}]", eq_status, norm_status);
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .title(header);
+    let block = Block::default().borders(Borders::TOP).title(header);
 
     let items: Vec<ListItem> = (0..10)
         .map(|i| {
@@ -292,10 +301,7 @@ fn render_eq_view(frame: &mut Frame, area: Rect, app: &App) {
             }
             let bar_str: String = bar.into_iter().collect();
 
-            ListItem::new(format!(
-                "{:>6}  [{bar_str}]  {:+.1} dB",
-                name, gain,
-            ))
+            ListItem::new(format!("{:>6}  [{bar_str}]  {:+.1} dB", name, gain,))
         })
         .collect();
 
