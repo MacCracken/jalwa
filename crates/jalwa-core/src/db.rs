@@ -301,13 +301,13 @@ impl LibraryDb {
     /// Delete a playlist by UUID.
     pub fn delete_playlist(&self, id: Uuid) -> Result<()> {
         self.conn.execute(
-            "DELETE FROM playlists WHERE id = ?",
-            params![id.to_string()],
-        ).map_err(|e| JalwaError::Database(format!("delete playlist: {e}")))?;
-        self.conn.execute(
             "DELETE FROM playlist_items WHERE playlist_id = ?",
             params![id.to_string()],
         ).map_err(|e| JalwaError::Database(format!("delete playlist items: {e}")))?;
+        self.conn.execute(
+            "DELETE FROM playlists WHERE id = ?",
+            params![id.to_string()],
+        ).map_err(|e| JalwaError::Database(format!("delete playlist: {e}")))?;
         Ok(())
     }
 
@@ -553,5 +553,169 @@ mod tests {
             assert_eq!(plib.library.items[0].title, "Song");
         }
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn db_update_play_count() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_test_{}.db", Uuid::new_v4()));
+        let db = LibraryDb::open(&tmp).unwrap();
+        let item = make_test_item("Song", "Artist");
+        let id = item.id;
+        db.save_item(&item).unwrap();
+
+        db.update_play_count(id).unwrap();
+        db.update_play_count(id).unwrap();
+
+        let lib = db.load_library().unwrap();
+        assert_eq!(lib.items[0].play_count, 2);
+        assert!(lib.items[0].last_played.is_some());
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn db_update_rating() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_test_{}.db", Uuid::new_v4()));
+        let db = LibraryDb::open(&tmp).unwrap();
+        let item = make_test_item("Song", "Artist");
+        let id = item.id;
+        db.save_item(&item).unwrap();
+
+        db.update_rating(id, Some(4)).unwrap();
+        let lib = db.load_library().unwrap();
+        assert_eq!(lib.items[0].rating, Some(4));
+
+        db.update_rating(id, None).unwrap();
+        let lib = db.load_library().unwrap();
+        assert_eq!(lib.items[0].rating, None);
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn db_scan_paths() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_test_{}.db", Uuid::new_v4()));
+        let db = LibraryDb::open(&tmp).unwrap();
+
+        db.save_scan_path(Path::new("/home/user/Music")).unwrap();
+        db.save_scan_path(Path::new("/home/user/Music")).unwrap(); // duplicate
+        db.save_scan_path(Path::new("/home/user/Videos")).unwrap();
+
+        let paths = db.load_scan_paths().unwrap();
+        assert_eq!(paths.len(), 2);
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn db_delete_playlist() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_test_{}.db", Uuid::new_v4()));
+        let db = LibraryDb::open(&tmp).unwrap();
+
+        let playlist = Playlist::new("Temp");
+        let pl_id = playlist.id;
+        db.save_playlist(&playlist).unwrap();
+
+        db.delete_playlist(pl_id).unwrap();
+        let lib = db.load_library().unwrap();
+        assert!(lib.playlists.is_empty());
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn persistent_library_play_count_and_rating() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_test_{}.db", Uuid::new_v4()));
+        let mut plib = PersistentLibrary::open(&tmp).unwrap();
+        let item = make_test_item("Song", "Artist");
+        let id = plib.add_item(item).unwrap();
+
+        plib.update_play_count(id).unwrap();
+        assert_eq!(plib.library.find_by_id(id).unwrap().play_count, 1);
+
+        plib.update_rating(id, Some(5)).unwrap();
+        assert_eq!(plib.library.find_by_id(id).unwrap().rating, Some(5));
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn persistent_library_playlist_crud() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_test_{}.db", Uuid::new_v4()));
+        let mut plib = PersistentLibrary::open(&tmp).unwrap();
+
+        // Add an item so we can reference it in the playlist
+        let item = make_test_item("Song", "Artist");
+        let item_id = plib.add_item(item).unwrap();
+
+        let playlist = Playlist::new("Favs");
+        let pl_id = playlist.id;
+        plib.save_playlist(&playlist).unwrap();
+        assert_eq!(plib.library.playlists.len(), 1);
+
+        // Update existing — add the real item
+        let mut updated = playlist.clone();
+        updated.add(item_id);
+        plib.save_playlist(&updated).unwrap();
+        assert_eq!(plib.library.playlists.len(), 1);
+        assert_eq!(plib.library.playlists[0].items.len(), 1);
+
+        plib.delete_playlist(pl_id).unwrap();
+        assert!(plib.library.playlists.is_empty());
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn persistent_library_scan_path_and_remove() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_test_{}.db", Uuid::new_v4()));
+        let mut plib = PersistentLibrary::open(&tmp).unwrap();
+
+        plib.add_scan_path(PathBuf::from("/music")).unwrap();
+        assert_eq!(plib.library.scan_paths.len(), 1);
+
+        let item = make_test_item("Song", "Artist");
+        let id = plib.add_item(item).unwrap();
+        assert!(plib.remove_item(id).unwrap());
+        assert!(plib.library.items.is_empty());
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn parse_helpers() {
+        assert_eq!(parse_format("Mp4"), ContainerFormat::Mp4);
+        assert_eq!(parse_format("Mkv"), ContainerFormat::Mkv);
+        assert_eq!(parse_format("WebM"), ContainerFormat::WebM);
+        assert_eq!(parse_format("Ogg"), ContainerFormat::Ogg);
+        assert_eq!(parse_format("Wav"), ContainerFormat::Wav);
+        assert_eq!(parse_format("Flac"), ContainerFormat::Flac);
+        assert_eq!(parse_format("Mp3"), ContainerFormat::Mp3);
+        assert_eq!(parse_format("Avi"), ContainerFormat::Avi);
+        assert_eq!(parse_format("unknown"), ContainerFormat::Mp3);
+
+        assert_eq!(parse_audio_codec("Pcm"), AudioCodec::Pcm);
+        assert_eq!(parse_audio_codec("Mp3"), AudioCodec::Mp3);
+        assert_eq!(parse_audio_codec("Aac"), AudioCodec::Aac);
+        assert_eq!(parse_audio_codec("Flac"), AudioCodec::Flac);
+        assert_eq!(parse_audio_codec("Vorbis"), AudioCodec::Vorbis);
+        assert_eq!(parse_audio_codec("Opus"), AudioCodec::Opus);
+        assert_eq!(parse_audio_codec("Alac"), AudioCodec::Alac);
+        assert_eq!(parse_audio_codec("Wma"), AudioCodec::Wma);
+        assert_eq!(parse_audio_codec("???"), AudioCodec::Pcm);
+
+        assert_eq!(parse_video_codec("H264"), VideoCodec::H264);
+        assert_eq!(parse_video_codec("H265"), VideoCodec::H265);
+        assert_eq!(parse_video_codec("Vp8"), VideoCodec::Vp8);
+        assert_eq!(parse_video_codec("Vp9"), VideoCodec::Vp9);
+        assert_eq!(parse_video_codec("Av1"), VideoCodec::Av1);
+        assert_eq!(parse_video_codec("Theora"), VideoCodec::Theora);
+        assert_eq!(parse_video_codec("???"), VideoCodec::H264);
+    }
+
+    #[test]
+    fn default_db_path_ends_correctly() {
+        let path = default_db_path();
+        assert!(path.ends_with("jalwa/library.db"));
     }
 }

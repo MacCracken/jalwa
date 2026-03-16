@@ -127,3 +127,190 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jalwa_core::db::PersistentLibrary;
+    use jalwa_core::{MediaItem, MediaType};
+    use jalwa_playback::EngineConfig;
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use tarang_core::{AudioCodec, ContainerFormat};
+    use uuid::Uuid;
+
+    fn make_test_app() -> App {
+        let tmp = std::env::temp_dir().join(format!("jalwa_app_test_{}.db", Uuid::new_v4()));
+        let plib = PersistentLibrary::open(&tmp).unwrap();
+        let engine = PlaybackEngine::new(EngineConfig::default());
+        App::new(plib, engine)
+    }
+
+    fn make_item(title: &str, artist: &str) -> MediaItem {
+        MediaItem {
+            id: Uuid::new_v4(),
+            path: PathBuf::from(format!("/music/{title}.flac")),
+            title: title.to_string(),
+            artist: Some(artist.to_string()),
+            album: Some("Album".to_string()),
+            duration: Some(Duration::from_secs(200)),
+            format: ContainerFormat::Flac,
+            audio_codec: Some(AudioCodec::Flac),
+            video_codec: None,
+            media_type: MediaType::Audio,
+            added_at: chrono::Utc::now(),
+            last_played: None,
+            play_count: 0,
+            rating: None,
+            tags: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn view_cycle() {
+        assert_eq!(View::Library.cycle(), View::NowPlaying);
+        assert_eq!(View::NowPlaying.cycle(), View::Queue);
+        assert_eq!(View::Queue.cycle(), View::Library);
+    }
+
+    #[test]
+    fn app_new_defaults() {
+        let app = make_test_app();
+        assert_eq!(app.view, View::Library);
+        assert_eq!(app.selected_index, 0);
+        assert!(app.search_query.is_empty());
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.running);
+    }
+
+    #[test]
+    fn list_len_empty_library() {
+        let app = make_test_app();
+        assert_eq!(app.list_len(), 0);
+    }
+
+    #[test]
+    fn list_len_with_items() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("A", "X"));
+        app.library.library.add_item(make_item("B", "Y"));
+        assert_eq!(app.list_len(), 2);
+    }
+
+    #[test]
+    fn list_len_queue_view() {
+        let mut app = make_test_app();
+        app.view = View::Queue;
+        app.queue.enqueue(Uuid::new_v4());
+        assert_eq!(app.list_len(), 1);
+    }
+
+    #[test]
+    fn list_len_now_playing_always_zero() {
+        let mut app = make_test_app();
+        app.view = View::NowPlaying;
+        assert_eq!(app.list_len(), 0);
+    }
+
+    #[test]
+    fn select_prev_at_zero() {
+        let mut app = make_test_app();
+        app.select_prev();
+        assert_eq!(app.selected_index, 0);
+    }
+
+    #[test]
+    fn select_next_clamps() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("A", "X"));
+        app.library.library.add_item(make_item("B", "Y"));
+        app.select_next();
+        assert_eq!(app.selected_index, 1);
+        app.select_next(); // should clamp
+        assert_eq!(app.selected_index, 1);
+    }
+
+    #[test]
+    fn select_nav_up_down() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("A", "X"));
+        app.library.library.add_item(make_item("B", "Y"));
+        app.library.library.add_item(make_item("C", "Z"));
+        app.select_next();
+        app.select_next();
+        assert_eq!(app.selected_index, 2);
+        app.select_prev();
+        assert_eq!(app.selected_index, 1);
+    }
+
+    #[test]
+    fn update_search_empty_query() {
+        let mut app = make_test_app();
+        app.search_results = vec![0, 1];
+        app.update_search();
+        assert!(app.search_results.is_empty());
+    }
+
+    #[test]
+    fn update_search_finds_matches() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("Bohemian Rhapsody", "Queen"));
+        app.library.library.add_item(make_item("Time", "Pink Floyd"));
+        app.search_query = "queen".to_string();
+        app.update_search();
+        assert_eq!(app.search_results.len(), 1);
+        assert_eq!(app.search_results[0], 0);
+    }
+
+    #[test]
+    fn update_search_clamps_selection() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("A", "X"));
+        app.selected_index = 5;
+        app.search_query = "A".to_string();
+        app.update_search();
+        assert_eq!(app.selected_index, 0); // clamped to results len - 1
+    }
+
+    #[test]
+    fn list_len_with_search() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("Unique", "X"));
+        app.library.library.add_item(make_item("Other", "Y"));
+        app.search_query = "Unique".to_string();
+        app.update_search();
+        assert_eq!(app.list_len(), 1);
+    }
+
+    #[test]
+    fn selected_library_index_normal() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("A", "X"));
+        app.selected_index = 0;
+        assert_eq!(app.selected_library_index(), Some(0));
+    }
+
+    #[test]
+    fn selected_library_index_out_of_range() {
+        let app = make_test_app();
+        assert_eq!(app.selected_library_index(), None);
+    }
+
+    #[test]
+    fn selected_library_index_search() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("Alpha", "X"));
+        app.library.library.add_item(make_item("Beta", "Y"));
+        app.search_query = "Beta".to_string();
+        app.update_search();
+        app.selected_index = 0;
+        assert_eq!(app.selected_library_index(), Some(1)); // maps through search_results
+    }
+
+    #[test]
+    fn selected_library_index_wrong_view() {
+        let mut app = make_test_app();
+        app.view = View::Queue;
+        assert_eq!(app.selected_library_index(), None);
+    }
+}

@@ -398,4 +398,64 @@ mod tests {
         assert_eq!(format_duration(Duration::from_secs(3661)), "1:01:01");
         assert_eq!(format_duration(Duration::from_secs(7200)), "2:00:00");
     }
+
+    #[test]
+    fn pause_when_stopped() {
+        let mut engine = PlaybackEngine::new(EngineConfig::default());
+        engine.pause(); // should not panic
+        assert_eq!(engine.state(), PlaybackState::Stopped);
+    }
+
+    #[test]
+    fn stop_when_stopped() {
+        let mut engine = PlaybackEngine::new(EngineConfig::default());
+        engine.stop(); // idempotent
+        assert_eq!(engine.state(), PlaybackState::Stopped);
+    }
+
+    #[test]
+    fn toggle_without_file() {
+        let mut engine = PlaybackEngine::new(EngineConfig::default());
+        assert!(engine.toggle().is_err());
+    }
+
+    #[test]
+    fn events_none_without_thread() {
+        let engine = PlaybackEngine::new(EngineConfig::default());
+        assert!(engine.events().is_none());
+    }
+
+    #[test]
+    fn poll_events_empty() {
+        let mut engine = PlaybackEngine::new(EngineConfig::default());
+        let events = engine.poll_events();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn prepare_next_no_crash_without_thread() {
+        let engine = PlaybackEngine::new(EngineConfig::default());
+        engine.prepare_next(Path::new("/some/file.mp3")); // should not panic
+    }
+
+    #[test]
+    fn config_accessor() {
+        let engine = PlaybackEngine::new(EngineConfig::default());
+        assert_eq!(engine.config().sample_rate, 48000);
+    }
+
+    #[test]
+    fn duration_none_before_open() {
+        let engine = PlaybackEngine::new(EngineConfig::default());
+        assert!(engine.duration().is_none());
+    }
+
+    #[test]
+    fn decode_status_default() {
+        let status = DecodeStatus::default();
+        assert_eq!(status.state, PlaybackState::Stopped);
+        assert_eq!(status.position, Duration::ZERO);
+        assert_eq!(status.volume, 1.0);
+        assert!(!status.muted);
+    }
 }
