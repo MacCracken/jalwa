@@ -9,7 +9,12 @@ permissions:
   contents: write
 
 jobs:
+  ci:
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: [ci]
     strategy:
       matrix:
         include:
@@ -27,15 +32,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install system dependencies
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies (amd64)
+        if: matrix.arch == 'amd64'
         run: |
           sudo apt-get update
           sudo apt-get install -y libpipewire-0.3-dev libclang-dev libdbus-1-dev pkg-config
 
-      - name: Install cross-compilation tools
+      - name: Install cross-compilation tools (arm64)
         if: matrix.arch == 'arm64'
         run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libclang-dev libdbus-1-dev pkg-config
           echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
 
@@ -49,6 +58,7 @@ jobs:
           tar czf "${ARCHIVE}" -C target/${{ matrix.target }}/release jalwa
           sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
           echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -59,13 +69,15 @@ jobs:
             jalwa-*.sha256
 
   release:
-    needs: build
+    needs: [ci, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
