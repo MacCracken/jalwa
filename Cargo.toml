@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/jalwa-core",
+    "crates/jalwa-playback",
+    "crates/jalwa-ui",
+    "crates/jalwa-ai",
+]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "io-util", "io-std", "sync"] }
+reqwest = { version = "0.12", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+
+# Tarang media framework
+tarang-core = { path = "../tarang/crates/tarang-core" }
+tarang-demux = { path = "../tarang/crates/tarang-demux" }
+tarang-audio = { path = "../tarang/crates/tarang-audio" }
+tarang-video = { path = "../tarang/crates/tarang-video" }
+tarang-ai = { path = "../tarang/crates/tarang-ai" }
+
+[package]
+name = "jalwa"
+version = "2026.3.16"
+edition = "2024"
+description = "Jalwa — AI-native media player for AGNOS, built on the Tarang media framework"
+license = "GPL-3.0"
+
+[dependencies]
+jalwa-core = { path = "crates/jalwa-core" }
+jalwa-playback = { path = "crates/jalwa-playback" }
+jalwa-ui = { path = "crates/jalwa-ui" }
+jalwa-ai = { path = "crates/jalwa-ai" }
+tarang-core = { workspace = true }
+tarang-audio = { workspace = true }
+tarang-ai = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "jalwa"
+path = "src/main.rs"

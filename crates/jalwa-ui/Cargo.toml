@@ -1,0 +1,17 @@
+[package]
+name = "jalwa-ui"
+version = "2026.3.16"
+edition = "2024"
+description = "UI layer for Jalwa media player — terminal and desktop interfaces"
+license = "GPL-3.0"
+
+[dependencies]
+jalwa-core = { path = "../jalwa-core" }
+jalwa-playback = { path = "../jalwa-playback" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tarang-core = { workspace = true }
+uuid = { workspace = true }

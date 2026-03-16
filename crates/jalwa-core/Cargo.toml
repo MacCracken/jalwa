@@ -1,0 +1,14 @@
+[package]
+name = "jalwa-core"
+version = "2026.3.16"
+edition = "2024"
+description = "Core types for Jalwa media player — library, playlists, queue, playback state"
+license = "GPL-3.0"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tarang-core = { workspace = true }

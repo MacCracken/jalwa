@@ -1,0 +1,16 @@
+[package]
+name = "jalwa-playback"
+version = "2026.3.16"
+edition = "2024"
+description = "Playback engine for Jalwa — tarang decode pipeline + PipeWire audio output"
+license = "GPL-3.0"
+
+[dependencies]
+jalwa-core = { path = "../jalwa-core" }
+tarang-core = { workspace = true }
+tarang-demux = { workspace = true }
+tarang-audio = { workspace = true }
+tarang-video = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
