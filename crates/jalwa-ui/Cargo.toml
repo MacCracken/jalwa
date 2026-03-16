@@ -7,7 +7,7 @@ license = "GPL-3.0"
 
 [dependencies]
 jalwa-core = { path = "../jalwa-core" }
-jalwa-playback = { path = "../jalwa-playback" }
+jalwa-playback = { path = "../jalwa-playback", default-features = false }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
