@@ -2,6 +2,10 @@
 //!
 //! Media library, playlists, play queue, playback state, and settings.
 
+pub mod db;
+pub mod playlist_io;
+pub mod scanner;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -418,6 +422,10 @@ pub enum JalwaError {
     Library(String),
     #[error("unsupported format: {0}")]
     UnsupportedFormat(String),
+    #[error("database error: {0}")]
+    Database(String),
+    #[error("scanner error: {0}")]
+    Scanner(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("tarang error: {0}")]

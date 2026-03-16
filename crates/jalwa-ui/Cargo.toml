@@ -11,6 +11,8 @@ jalwa-playback = { path = "../jalwa-playback" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
 
 [dev-dependencies]
 tarang-core = { workspace = true }

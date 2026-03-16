@@ -12,3 +12,8 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 tarang-core = { workspace = true }
+tarang-audio = { workspace = true }
+rusqlite = { workspace = true }
+lofty = { workspace = true }
+walkdir = { workspace = true }
+tracing = { workspace = true }

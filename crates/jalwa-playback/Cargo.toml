@@ -5,6 +5,10 @@ edition = "2024"
 description = "Playback engine for Jalwa — tarang decode pipeline + PipeWire audio output"
 license = "GPL-3.0"
 
+[features]
+default = ["pipewire"]
+pipewire = ["tarang-audio/pipewire"]
+
 [dependencies]
 jalwa-core = { path = "../jalwa-core" }
 tarang-core = { workspace = true }
@@ -14,3 +18,4 @@ tarang-video = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
+bytes = { workspace = true }

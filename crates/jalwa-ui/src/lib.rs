@@ -3,6 +3,10 @@
 //! Terminal UI (TUI) for initial MVP, desktop GUI planned.
 //! Renders playback status, library browser, and queue.
 
+pub mod app;
+pub mod tui;
+pub mod widgets;
+
 use jalwa_core::{Library, MediaItem, PlayQueue, PlaybackState, PlaybackStatus, RepeatMode};
 use jalwa_playback::format_duration;
 use std::time::Duration;

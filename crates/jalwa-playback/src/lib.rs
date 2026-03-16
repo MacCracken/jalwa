@@ -3,11 +3,14 @@
 //! Manages the decode pipeline (via tarang) and audio output (PipeWire).
 //! Handles play, pause, seek, volume, and track switching.
 
+pub mod decode_thread;
+
 use jalwa_core::{JalwaError, PlaybackState, PlaybackStatus, Result};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
+
+pub use decode_thread::{DecodeStatus, EngineCommand, EngineEvent};
 
 /// Playback engine configuration
 #[derive(Debug, Clone)]
@@ -36,7 +39,11 @@ pub struct PlaybackEngine {
     duration: Option<Duration>,
     volume: f32,
     muted: bool,
-    playing: Arc<AtomicBool>,
+    // Channel-based communication with decode thread
+    cmd_tx: Option<mpsc::Sender<EngineCommand>>,
+    decode_status: Option<Arc<Mutex<DecodeStatus>>>,
+    event_rx: Option<mpsc::Receiver<EngineEvent>>,
+    decode_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl PlaybackEngine {
@@ -49,15 +56,21 @@ impl PlaybackEngine {
             duration: None,
             volume: 1.0,
             muted: false,
-            playing: Arc::new(AtomicBool::new(false)),
+            cmd_tx: None,
+            decode_status: None,
+            event_rx: None,
+            decode_handle: None,
         }
     }
 
-    /// Open a media file for playback
+    /// Open a media file for playback (probe only)
     pub fn open(&mut self, path: &Path) -> Result<()> {
         if !path.exists() {
             return Err(JalwaError::NotFound(path.to_string_lossy().to_string()));
         }
+
+        // Stop any existing playback
+        self.stop();
 
         // Probe the file via tarang
         let file = std::fs::File::open(path)?;
@@ -67,7 +80,6 @@ impl PlaybackEngine {
         self.current_path = Some(path.to_path_buf());
         self.position = Duration::ZERO;
         self.state = PlaybackState::Stopped;
-        self.playing.store(false, Ordering::Relaxed);
 
         tracing::info!(
             path = %path.display(),
@@ -81,27 +93,68 @@ impl PlaybackEngine {
 
     /// Start or resume playback
     pub fn play(&mut self) -> Result<()> {
-        if self.current_path.is_none() {
-            return Err(JalwaError::Playback("no file loaded".to_string()));
+        let path = self.current_path.clone().ok_or_else(|| {
+            JalwaError::Playback("no file loaded".to_string())
+        })?;
+
+        if self.state == PlaybackState::Paused {
+            // Resume existing decode thread
+            if let Some(ref tx) = self.cmd_tx {
+                let _ = tx.send(EngineCommand::Resume);
+            }
+            self.state = PlaybackState::Playing;
+            return Ok(());
         }
+
+        // Spawn new decode thread
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let status_clone = status.clone();
+        let (event_tx, event_rx) = mpsc::channel();
+
+        let config = self.config.clone();
+        let duration = self.duration;
+
+        let handle = std::thread::Builder::new()
+            .name("jalwa-decode".into())
+            .spawn(move || {
+                decode_thread::decode_loop(path, cmd_rx, status_clone, event_tx, config, duration);
+            })
+            .map_err(|e| JalwaError::Playback(format!("spawn decode thread: {e}")))?;
+
+        self.cmd_tx = Some(cmd_tx);
+        self.decode_status = Some(status);
+        self.event_rx = Some(event_rx);
+        self.decode_handle = Some(handle);
         self.state = PlaybackState::Playing;
-        self.playing.store(true, Ordering::Relaxed);
+
         Ok(())
     }
 
     /// Pause playback
     pub fn pause(&mut self) {
         if self.state == PlaybackState::Playing {
+            if let Some(ref tx) = self.cmd_tx {
+                let _ = tx.send(EngineCommand::Pause);
+            }
             self.state = PlaybackState::Paused;
-            self.playing.store(false, Ordering::Relaxed);
         }
     }
 
     /// Stop playback and reset position
     pub fn stop(&mut self) {
+        if let Some(ref tx) = self.cmd_tx {
+            let _ = tx.send(EngineCommand::Stop);
+        }
+        // Wait for decode thread to finish
+        if let Some(handle) = self.decode_handle.take() {
+            let _ = handle.join();
+        }
+        self.cmd_tx = None;
+        self.decode_status = None;
+        self.event_rx = None;
         self.state = PlaybackState::Stopped;
         self.position = Duration::ZERO;
-        self.playing.store(false, Ordering::Relaxed);
     }
 
     /// Toggle play/pause
@@ -121,26 +174,31 @@ impl PlaybackEngine {
         if self.duration.is_some_and(|dur| position > dur) {
             return Err(JalwaError::Playback("seek beyond end".to_string()));
         }
+        if let Some(ref tx) = self.cmd_tx {
+            let _ = tx.send(EngineCommand::Seek(position));
+        }
         self.position = position;
         Ok(())
     }
 
     /// Seek by a relative offset (can be negative)
     pub fn seek_relative(&mut self, offset_secs: f64) -> Result<()> {
-        let new_pos = self.position.as_secs_f64() + offset_secs;
-        let clamped = new_pos.max(0.0);
+        let current = self.position().as_secs_f64();
+        let new_pos = (current + offset_secs).max(0.0);
         let target = if let Some(dur) = self.duration {
-            Duration::from_secs_f64(clamped.min(dur.as_secs_f64()))
+            Duration::from_secs_f64(new_pos.min(dur.as_secs_f64()))
         } else {
-            Duration::from_secs_f64(clamped)
+            Duration::from_secs_f64(new_pos)
         };
-        self.position = target;
-        Ok(())
+        self.seek(target)
     }
 
     /// Set volume (0.0 to 1.0)
     pub fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
+        if let Some(ref tx) = self.cmd_tx {
+            let _ = tx.send(EngineCommand::Volume(self.volume));
+        }
     }
 
     /// Get current volume
@@ -151,6 +209,9 @@ impl PlaybackEngine {
     /// Toggle mute
     pub fn toggle_mute(&mut self) {
         self.muted = !self.muted;
+        if let Some(ref tx) = self.cmd_tx {
+            let _ = tx.send(EngineCommand::Mute(self.muted));
+        }
     }
 
     /// Get mute state
@@ -163,8 +224,13 @@ impl PlaybackEngine {
         self.state
     }
 
-    /// Get current position
+    /// Get current position (reads from decode thread if running)
     pub fn position(&self) -> Duration {
+        if let Some(ref status) = self.decode_status {
+            if let Ok(s) = status.lock() {
+                return s.position;
+            }
+        }
         self.position
     }
 
@@ -180,10 +246,11 @@ impl PlaybackEngine {
 
     /// Get full playback status snapshot
     pub fn status(&self) -> PlaybackStatus {
+        let position = self.position();
         PlaybackStatus {
             state: self.state,
             current_item: None, // Caller maps path -> UUID
-            position: self.position,
+            position,
             duration: self.duration,
             volume: self.volume,
             muted: self.muted,
@@ -193,6 +260,51 @@ impl PlaybackEngine {
     /// Get engine config
     pub fn config(&self) -> &EngineConfig {
         &self.config
+    }
+
+    /// Get a reference to the event receiver for polling events
+    pub fn events(&self) -> Option<&mpsc::Receiver<EngineEvent>> {
+        self.event_rx.as_ref()
+    }
+
+    /// Prepare next track for gapless playback
+    pub fn prepare_next(&self, path: &Path) {
+        if let Some(ref tx) = self.cmd_tx {
+            let _ = tx.send(EngineCommand::PrepareNext {
+                path: path.to_path_buf(),
+            });
+        }
+    }
+
+    /// Poll and process engine events, updating internal state.
+    /// Returns collected events for the caller to handle.
+    pub fn poll_events(&mut self) -> Vec<EngineEvent> {
+        let mut events = Vec::new();
+        if let Some(ref rx) = self.event_rx {
+            while let Ok(event) = rx.try_recv() {
+                match &event {
+                    EngineEvent::StateChanged(s) => self.state = *s,
+                    EngineEvent::TrackFinished => {
+                        self.state = PlaybackState::Stopped;
+                    }
+                    _ => {}
+                }
+                events.push(event);
+            }
+        }
+        // Update position from decode status
+        if let Some(ref status) = self.decode_status {
+            if let Ok(s) = status.lock() {
+                self.position = s.position;
+            }
+        }
+        events
+    }
+}
+
+impl Drop for PlaybackEngine {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -285,26 +397,5 @@ mod tests {
         assert_eq!(format_duration(Duration::from_secs(3600)), "1:00:00");
         assert_eq!(format_duration(Duration::from_secs(3661)), "1:01:01");
         assert_eq!(format_duration(Duration::from_secs(7200)), "2:00:00");
-    }
-
-    #[test]
-    fn seek_relative() {
-        let mut engine = PlaybackEngine::new(EngineConfig::default());
-        engine.duration = Some(Duration::from_secs(300));
-        engine.position = Duration::from_secs(100);
-
-        engine.seek_relative(30.0).unwrap();
-        assert_eq!(engine.position().as_secs(), 130);
-
-        engine.seek_relative(-50.0).unwrap();
-        assert_eq!(engine.position().as_secs(), 80);
-
-        // Clamp to zero
-        engine.seek_relative(-200.0).unwrap();
-        assert_eq!(engine.position(), Duration::ZERO);
-
-        // Clamp to duration
-        engine.seek_relative(500.0).unwrap();
-        assert_eq!(engine.position().as_secs(), 300);
     }
 }

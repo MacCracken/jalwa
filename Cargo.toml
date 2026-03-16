@@ -20,6 +20,20 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 
+bytes = "1"
+
+# Library
+rusqlite = { version = "0.32", features = ["bundled"] }
+lofty = "0.22"
+walkdir = "2"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# System
+libc = "0.2"
+
 # Tarang media framework
 tarang-core = { path = "../tarang/crates/tarang-core" }
 tarang-demux = { path = "../tarang/crates/tarang-demux" }
@@ -42,6 +56,8 @@ jalwa-ai = { path = "crates/jalwa-ai" }
 tarang-core = { workspace = true }
 tarang-audio = { workspace = true }
 tarang-ai = { workspace = true }
+uuid = { workspace = true }
+libc = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
