@@ -1,6 +1,7 @@
 //! Ratatui widgets for the Jalwa TUI.
 
 use jalwa_core::{MediaItem, PlaybackState, RepeatMode};
+use jalwa_playback::EqSettings;
 use jalwa_playback::format_duration;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -98,6 +99,7 @@ fn render_main_view(frame: &mut Frame, area: Rect, app: &App) {
         View::Library => render_library_view(frame, area, app),
         View::NowPlaying => render_now_playing_view(frame, area, app),
         View::Queue => render_queue_view(frame, area, app),
+        View::Equalizer => render_eq_view(frame, area, app),
     }
 }
 
@@ -257,11 +259,71 @@ fn render_queue_view(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
+fn render_eq_view(frame: &mut Frame, area: Rect, app: &App) {
+    let eq = app.engine.eq_settings();
+    let norm = app.engine.normalize_enabled();
+
+    let eq_status = if eq.enabled { "ON" } else { "OFF" };
+    let norm_status = if norm { "ON" } else { "OFF" };
+
+    let header = format!("Equalizer [{}]  Normalize [{}]", eq_status, norm_status);
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .title(header);
+
+    let items: Vec<ListItem> = (0..10)
+        .map(|i| {
+            let name = EqSettings::band_name(i);
+            let gain = eq.bands[i];
+            let bar_width = 20;
+            let center = bar_width / 2;
+            let filled = ((gain / 12.0) * center as f32) as i32;
+
+            let mut bar = vec![' '; bar_width];
+            bar[center] = '|';
+            if filled > 0 {
+                for j in 1..=filled.min(center as i32) {
+                    bar[(center as i32 + j) as usize] = '=';
+                }
+            } else if filled < 0 {
+                for j in filled..0 {
+                    bar[(center as i32 + j) as usize] = '=';
+                }
+            }
+            let bar_str: String = bar.into_iter().collect();
+
+            ListItem::new(format!(
+                "{:>6}  [{bar_str}]  {:+.1} dB",
+                name, gain,
+            ))
+        })
+        .collect();
+
+    let mut state = ListState::default();
+    if app.view == View::Equalizer {
+        state.select(Some(app.selected_index.min(9)));
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▸ ");
+
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
 fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
     let binds = if app.input_mode == InputMode::Search {
         "type to search | Esc:cancel | Enter:select"
+    } else if app.view == View::Equalizer {
+        "↑↓:band  ←→:gain  e:toggle EQ  N:normalize  Tab:view  ␣:play/pause  q:quit"
     } else {
-        "␣:play/pause  /:search  ←→:seek  ↑↓:nav  Enter:play  Tab:view  a:enqueue  q:quit  +/-:vol  m:mute  n/p:next/prev  r:repeat  s:shuffle"
+        "␣:play/pause  /:search  ←→:seek  ↑↓:nav  Enter:play  Tab:view  a:enqueue  q:quit  +/-:vol  m:mute  n/p:next/prev  r:repeat  s:shuffle  e:EQ  N:norm"
     };
     let line = Line::from(Span::styled(binds, Style::default().fg(Color::DarkGray)));
     frame.render_widget(Paragraph::new(line), area);

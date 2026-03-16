@@ -10,6 +10,7 @@ pub enum View {
     Library,
     NowPlaying,
     Queue,
+    Equalizer,
 }
 
 impl View {
@@ -17,7 +18,8 @@ impl View {
         match self {
             Self::Library => Self::NowPlaying,
             Self::NowPlaying => Self::Queue,
-            Self::Queue => Self::Library,
+            Self::Queue => Self::Equalizer,
+            Self::Equalizer => Self::Library,
         }
     }
 }
@@ -69,6 +71,7 @@ impl App {
             }
             View::Queue => self.queue.len(),
             View::NowPlaying => 0,
+            View::Equalizer => 10, // 10 EQ bands
         }
     }
 
@@ -172,7 +175,8 @@ mod tests {
     fn view_cycle() {
         assert_eq!(View::Library.cycle(), View::NowPlaying);
         assert_eq!(View::NowPlaying.cycle(), View::Queue);
-        assert_eq!(View::Queue.cycle(), View::Library);
+        assert_eq!(View::Queue.cycle(), View::Equalizer);
+        assert_eq!(View::Equalizer.cycle(), View::Library);
     }
 
     #[test]

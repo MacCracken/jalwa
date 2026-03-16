@@ -12,6 +12,7 @@ use tarang_audio::{AudioOutput, ChannelLayout, FileDecoder, OutputConfig, mix_ch
 use tarang_core::TarangError;
 
 use crate::EngineConfig;
+use crate::dsp::{self, Equalizer};
 
 /// Commands sent from the engine to the decode thread.
 #[derive(Debug)]
@@ -24,6 +25,10 @@ pub enum EngineCommand {
     Volume(f32),
     Mute(bool),
     PrepareNext { path: PathBuf },
+    /// Update EQ settings (bands + enabled).
+    EqUpdate(crate::dsp::EqSettings),
+    /// Enable/disable volume normalization.
+    Normalize(bool),
 }
 
 /// Events sent from the decode thread back to the engine / UI.
@@ -82,6 +87,8 @@ pub fn decode_loop(
 ) {
     let mut volume: f32 = 1.0;
     let mut muted = false;
+    let mut equalizer = Equalizer::new(config.sample_rate);
+    let mut normalize_enabled = false;
 
     // Open decoder
     let mut decoder = match FileDecoder::open_path(&path) {
@@ -169,6 +176,13 @@ pub fn decode_loop(
                         }
                     }
                 }
+                Some(EngineCommand::EqUpdate(settings)) => {
+                    equalizer.settings = settings;
+                    equalizer.update_coefficients();
+                }
+                Some(EngineCommand::Normalize(enabled)) => {
+                    normalize_enabled = enabled;
+                }
                 None => break,
             }
         }
@@ -224,6 +238,17 @@ pub fn decode_loop(
                     buf
                 }
             }
+        } else {
+            buf
+        };
+
+        // Apply equalizer
+        let buf = equalizer.process(&buf);
+
+        // Apply normalization
+        let buf = if normalize_enabled {
+            let info = dsp::analyze_loudness(&buf);
+            dsp::normalize(&buf, info.gain)
         } else {
             buf
         };

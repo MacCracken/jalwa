@@ -103,10 +103,22 @@ fn handle_normal_input(app: &mut App, key: KeyCode) {
         }
 
         KeyCode::Left => {
-            let _ = app.engine.seek_relative(-10.0);
+            if app.view == View::Equalizer {
+                let band = app.selected_index.min(9);
+                let gain = app.engine.eq_settings().bands[band] - 1.0;
+                app.engine.set_eq_band(band, gain);
+            } else {
+                let _ = app.engine.seek_relative(-10.0);
+            }
         }
         KeyCode::Right => {
-            let _ = app.engine.seek_relative(10.0);
+            if app.view == View::Equalizer {
+                let band = app.selected_index.min(9);
+                let gain = app.engine.eq_settings().bands[band] + 1.0;
+                app.engine.set_eq_band(band, gain);
+            } else {
+                let _ = app.engine.seek_relative(10.0);
+            }
         }
 
         KeyCode::Up => app.select_prev(),
@@ -194,6 +206,19 @@ fn handle_normal_input(app: &mut App, key: KeyCode) {
         }
         KeyCode::Char('s') => {
             app.queue.shuffle = !app.queue.shuffle;
+        }
+
+        KeyCode::Char('e') => {
+            if app.view == View::Equalizer {
+                app.engine.toggle_eq();
+            } else {
+                app.view = View::Equalizer;
+                app.selected_index = 0;
+            }
+        }
+
+        KeyCode::Char('N') => {
+            app.engine.toggle_normalize();
         }
 
         KeyCode::Char('a') => {

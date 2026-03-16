@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 pub use decode_thread::{DecodeStatus, EngineCommand, EngineEvent};
+pub use dsp::EqSettings;
 
 /// Playback engine configuration
 #[derive(Debug, Clone)]
@@ -40,6 +41,8 @@ pub struct PlaybackEngine {
     duration: Option<Duration>,
     volume: f32,
     muted: bool,
+    eq_settings: EqSettings,
+    normalize_enabled: bool,
     // Channel-based communication with decode thread
     cmd_tx: Option<mpsc::Sender<EngineCommand>>,
     decode_status: Option<Arc<Mutex<DecodeStatus>>>,
@@ -57,6 +60,8 @@ impl PlaybackEngine {
             duration: None,
             volume: 1.0,
             muted: false,
+            eq_settings: EqSettings::default(),
+            normalize_enabled: false,
             cmd_tx: None,
             decode_status: None,
             event_rx: None,
@@ -218,6 +223,48 @@ impl PlaybackEngine {
     /// Get mute state
     pub fn muted(&self) -> bool {
         self.muted
+    }
+
+    /// Get EQ settings.
+    pub fn eq_settings(&self) -> &EqSettings {
+        &self.eq_settings
+    }
+
+    /// Update EQ settings and send to decode thread.
+    pub fn set_eq_settings(&mut self, settings: EqSettings) {
+        self.eq_settings = settings.clone();
+        if let Some(ref tx) = self.cmd_tx {
+            let _ = tx.send(EngineCommand::EqUpdate(settings));
+        }
+    }
+
+    /// Set a single EQ band gain (dB) and push update.
+    pub fn set_eq_band(&mut self, band: usize, gain_db: f32) {
+        self.eq_settings.set_band(band, gain_db);
+        if let Some(ref tx) = self.cmd_tx {
+            let _ = tx.send(EngineCommand::EqUpdate(self.eq_settings.clone()));
+        }
+    }
+
+    /// Toggle EQ enabled state.
+    pub fn toggle_eq(&mut self) {
+        self.eq_settings.enabled = !self.eq_settings.enabled;
+        if let Some(ref tx) = self.cmd_tx {
+            let _ = tx.send(EngineCommand::EqUpdate(self.eq_settings.clone()));
+        }
+    }
+
+    /// Get normalization state.
+    pub fn normalize_enabled(&self) -> bool {
+        self.normalize_enabled
+    }
+
+    /// Toggle volume normalization.
+    pub fn toggle_normalize(&mut self) {
+        self.normalize_enabled = !self.normalize_enabled;
+        if let Some(ref tx) = self.cmd_tx {
+            let _ = tx.send(EngineCommand::Normalize(self.normalize_enabled));
+        }
     }
 
     /// Get current playback state
@@ -449,6 +496,50 @@ mod tests {
     fn duration_none_before_open() {
         let engine = PlaybackEngine::new(EngineConfig::default());
         assert!(engine.duration().is_none());
+    }
+
+    #[test]
+    fn eq_defaults() {
+        let engine = PlaybackEngine::new(EngineConfig::default());
+        assert!(!engine.eq_settings().enabled);
+        assert!(engine.eq_settings().is_flat());
+        assert!(!engine.normalize_enabled());
+    }
+
+    #[test]
+    fn toggle_eq() {
+        let mut engine = PlaybackEngine::new(EngineConfig::default());
+        engine.toggle_eq();
+        assert!(engine.eq_settings().enabled);
+        engine.toggle_eq();
+        assert!(!engine.eq_settings().enabled);
+    }
+
+    #[test]
+    fn set_eq_band() {
+        let mut engine = PlaybackEngine::new(EngineConfig::default());
+        engine.set_eq_band(5, 6.0);
+        assert_eq!(engine.eq_settings().bands[5], 6.0);
+    }
+
+    #[test]
+    fn toggle_normalize() {
+        let mut engine = PlaybackEngine::new(EngineConfig::default());
+        engine.toggle_normalize();
+        assert!(engine.normalize_enabled());
+        engine.toggle_normalize();
+        assert!(!engine.normalize_enabled());
+    }
+
+    #[test]
+    fn set_eq_settings() {
+        let mut engine = PlaybackEngine::new(EngineConfig::default());
+        let mut settings = EqSettings::default();
+        settings.enabled = true;
+        settings.set_band(0, 3.0);
+        engine.set_eq_settings(settings);
+        assert!(engine.eq_settings().enabled);
+        assert_eq!(engine.eq_settings().bands[0], 3.0);
     }
 
     #[test]
