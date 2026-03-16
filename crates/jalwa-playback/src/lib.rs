@@ -5,6 +5,7 @@
 
 pub mod decode_thread;
 pub mod dsp;
+pub mod mpris;
 
 use jalwa_core::{JalwaError, PlaybackState, PlaybackStatus, Result};
 use std::path::{Path, PathBuf};

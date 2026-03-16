@@ -9,7 +9,9 @@ use crossterm::execute;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
+use jalwa_core::watcher::LibraryWatcher;
 use jalwa_playback::EngineEvent;
+use jalwa_playback::mpris::{MprisCommand, spawn_mpris_server};
 
 use crate::app::{App, InputMode, View};
 use crate::widgets;
@@ -25,6 +27,15 @@ pub fn run(mut app: App) -> io::Result<()> {
 
     let tick_rate = Duration::from_millis(50);
 
+    // Start MPRIS D-Bus server for media key support
+    let mpris_rx = spawn_mpris_server();
+
+    // Start file watcher for library directories
+    let watcher = LibraryWatcher::new(&app.library.library.scan_paths).ok();
+
+    // Track the currently playing item ID for play count
+    let mut current_playing_id: Option<uuid::Uuid> = None;
+
     while app.running {
         // Draw
         terminal.draw(|frame| {
@@ -36,19 +47,27 @@ pub fn run(mut app: App) -> io::Result<()> {
         for ev in &events {
             match ev {
                 EngineEvent::TrackFinished => {
+                    // Update play count for finished track
+                    if let Some(id) = current_playing_id.take() {
+                        let _ = app.library.update_play_count(id);
+                    }
                     // Advance queue
                     if let Some(next_id) = app.queue.advance() {
                         if let Some(item) = app.library.library.find_by_id(next_id) {
                             let path = item.path.clone();
+                            current_playing_id = Some(next_id);
                             let _ = app.engine.open(&path);
                             let _ = app.engine.play();
                         }
                     }
                 }
                 EngineEvent::TrackChanged => {
-                    // Gapless transition happened in decode thread
+                    // Gapless transition — update play count for previous track
+                    if let Some(id) = current_playing_id.take() {
+                        let _ = app.library.update_play_count(id);
+                    }
                     if let Some(_) = app.queue.advance() {
-                        // Queue advanced
+                        current_playing_id = app.queue.current();
                     }
                 }
                 EngineEvent::NearEnd => {
@@ -65,10 +84,45 @@ pub fn run(mut app: App) -> io::Result<()> {
             }
         }
 
-        // Handle input
+        // Poll MPRIS commands (media keys)
+        while let Ok(cmd) = mpris_rx.try_recv() {
+            handle_mpris_command(&mut app, &cmd, &mut current_playing_id);
+        }
+
+        // Poll file watcher events
+        if let Some(ref w) = watcher {
+            for ev in w.poll() {
+                match ev {
+                    jalwa_core::watcher::LibraryEvent::FileCreated(path) => {
+                        // Auto-add new media files to library
+                        if app.library.library.find_by_path(&path).is_none() {
+                            if let Ok(scanned) = jalwa_core::scanner::scan_directory(
+                                path.parent().unwrap_or(&path),
+                            ) {
+                                for s in scanned {
+                                    if s.path == path {
+                                        let item = jalwa_core::scanner::scanned_to_media_item(s);
+                                        let _ = app.library.add_item(item);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    jalwa_core::watcher::LibraryEvent::FileRemoved(path) => {
+                        if let Some(item) = app.library.library.find_by_path(&path) {
+                            let id = item.id;
+                            let _ = app.library.remove_item(id);
+                        }
+                    }
+                    _ => {} // FileModified — could re-scan metadata
+                }
+            }
+        }
+
+        // Handle keyboard input
         if event::poll(tick_rate)? {
             if let Event::Key(key) = event::read()? {
-                // Ctrl+C always quits
                 if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c')
                 {
                     app.running = false;
@@ -77,7 +131,7 @@ pub fn run(mut app: App) -> io::Result<()> {
 
                 match app.input_mode {
                     InputMode::Search => handle_search_input(&mut app, key.code),
-                    InputMode::Normal => handle_normal_input(&mut app, key.code),
+                    InputMode::Normal => handle_normal_input(&mut app, key.code, &mut current_playing_id),
                 }
             }
         }
@@ -94,7 +148,38 @@ pub fn run(mut app: App) -> io::Result<()> {
     Ok(())
 }
 
-fn handle_normal_input(app: &mut App, key: KeyCode) {
+fn handle_mpris_command(app: &mut App, cmd: &MprisCommand, current_id: &mut Option<uuid::Uuid>) {
+    match cmd {
+        MprisCommand::PlayPause => { let _ = app.engine.toggle(); }
+        MprisCommand::Play => { let _ = app.engine.play(); }
+        MprisCommand::Pause => { app.engine.pause(); }
+        MprisCommand::Stop => { app.engine.stop(); }
+        MprisCommand::Next => {
+            if let Some(next_id) = app.queue.advance() {
+                if let Some(item) = app.library.library.find_by_id(next_id) {
+                    let path = item.path.clone();
+                    *current_id = Some(next_id);
+                    let _ = app.engine.open(&path);
+                    let _ = app.engine.play();
+                }
+            }
+        }
+        MprisCommand::Previous => {
+            if let Some(prev_id) = app.queue.go_back() {
+                if let Some(item) = app.library.library.find_by_id(prev_id) {
+                    let path = item.path.clone();
+                    *current_id = Some(prev_id);
+                    let _ = app.engine.open(&path);
+                    let _ = app.engine.play();
+                }
+            }
+        }
+        MprisCommand::Seek(offset) => { let _ = app.engine.seek_relative(*offset); }
+        MprisCommand::SetVolume(vol) => { app.engine.set_volume(*vol as f32); }
+    }
+}
+
+fn handle_normal_input(app: &mut App, key: KeyCode, current_id: &mut Option<uuid::Uuid>) {
     match key {
         KeyCode::Char('q') => app.running = false,
 
@@ -131,26 +216,49 @@ fn handle_normal_input(app: &mut App, key: KeyCode) {
                         let item = &app.library.library.items[idx];
                         let path = item.path.clone();
                         let id = item.id;
+                        *current_id = Some(id);
                         let _ = app.engine.open(&path);
                         let _ = app.engine.play();
-                        // Also enqueue if queue is empty
                         if app.queue.is_empty() {
                             app.queue.enqueue(id);
                         }
                     }
                 }
                 View::Queue => {
-                    // Jump to selected queue item
                     if app.selected_index < app.queue.len() {
                         app.queue.position = Some(app.selected_index);
                         if let Some(id) = app.queue.current() {
                             if let Some(item) = app.library.library.find_by_id(id) {
                                 let path = item.path.clone();
+                                *current_id = Some(id);
                                 let _ = app.engine.open(&path);
                                 let _ = app.engine.play();
                             }
                         }
                     }
+                }
+                View::Equalizer => {
+                    // Enter on EQ band cycles through presets
+                    let names = jalwa_playback::EqSettings::preset_names();
+                    let current = &app.engine.eq_settings().bands;
+                    // Find next preset
+                    let mut next_idx = 0;
+                    for (i, name) in names.iter().enumerate() {
+                        let preset = jalwa_playback::EqSettings::preset(name);
+                        if preset.bands == *current {
+                            next_idx = (i + 1) % names.len();
+                            break;
+                        }
+                    }
+                    let preset_name = names[next_idx];
+                    let settings = if preset_name == "flat" {
+                        let mut s = jalwa_playback::EqSettings::flat();
+                        s.enabled = app.engine.eq_settings().enabled;
+                        s
+                    } else {
+                        jalwa_playback::EqSettings::preset(preset_name)
+                    };
+                    app.engine.set_eq_settings(settings);
                 }
                 _ => {}
             }
@@ -181,20 +289,20 @@ fn handle_normal_input(app: &mut App, key: KeyCode) {
         }
 
         KeyCode::Char('n') => {
-            // Next track
             if let Some(next_id) = app.queue.advance() {
                 if let Some(item) = app.library.library.find_by_id(next_id) {
                     let path = item.path.clone();
+                    *current_id = Some(next_id);
                     let _ = app.engine.open(&path);
                     let _ = app.engine.play();
                 }
             }
         }
         KeyCode::Char('p') => {
-            // Previous track
             if let Some(prev_id) = app.queue.go_back() {
                 if let Some(item) = app.library.library.find_by_id(prev_id) {
                     let path = item.path.clone();
+                    *current_id = Some(prev_id);
                     let _ = app.engine.open(&path);
                     let _ = app.engine.play();
                 }
@@ -222,7 +330,6 @@ fn handle_normal_input(app: &mut App, key: KeyCode) {
         }
 
         KeyCode::Char('a') => {
-            // Add selected library item to queue
             if app.view == View::Library {
                 if let Some(idx) = app.selected_library_index() {
                     let id = app.library.library.items[idx].id;
@@ -232,13 +339,11 @@ fn handle_normal_input(app: &mut App, key: KeyCode) {
         }
 
         KeyCode::Char('d') => {
-            // Remove selected item from queue
             if app.view == View::Queue && app.selected_index < app.queue.len() {
                 app.queue.items.remove(app.selected_index);
                 if app.selected_index >= app.queue.len() && app.queue.len() > 0 {
                     app.selected_index = app.queue.len() - 1;
                 }
-                // Fix position
                 if let Some(pos) = app.queue.position {
                     if app.selected_index <= pos && pos > 0 {
                         app.queue.position = Some(pos - 1);
@@ -248,7 +353,6 @@ fn handle_normal_input(app: &mut App, key: KeyCode) {
         }
 
         KeyCode::Char('c') => {
-            // Clear queue
             if app.view == View::Queue {
                 app.queue.clear();
                 app.selected_index = 0;
@@ -269,7 +373,6 @@ fn handle_search_input(app: &mut App, key: KeyCode) {
         }
         KeyCode::Enter => {
             app.input_mode = InputMode::Normal;
-            // Keep search results visible
         }
         KeyCode::Backspace => {
             app.search_query.pop();

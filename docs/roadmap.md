@@ -2,23 +2,22 @@
 
 ## Test Coverage Backlog (ongoing)
 
-Current: 51.2% (800/1563 lines). Target: 80%.
+Current: 46.6% (829/1778 lines). Target: 80%.
 
-### Tier 1 — Pure rendering (est. +150 lines)
-- [ ] `widgets.rs`: ratatui TestBackend tests for all views
-- [ ] Test all PlaybackState icons, progress bar, volume display, keybind bar
+### Tier 1 — Pure rendering (est. +198 lines)
+- [ ] `widgets.rs`: ratatui TestBackend tests for all views (Library, NowPlaying, Queue, Equalizer)
 
-### Tier 2 — TUI input handlers (est. +70 lines)
-- [ ] `tui.rs`: unit test `handle_normal_input` and `handle_search_input`
+### Tier 2 — TUI input handlers (est. +100 lines)
+- [ ] `tui.rs`: unit test `handle_normal_input`, `handle_search_input`, `handle_mpris_command`
 
-### Tier 3 — Decode thread + playback engine (est. +55 lines)
-- [ ] `decode_thread.rs`: `decode_loop` integration test with NullOutput + minimal WAV
-- [ ] `playback/lib.rs`: open temp WAV, test seek with real duration
+### Tier 3 — Decode thread + MPRIS (est. +80 lines)
+- [ ] `decode_thread.rs`: integration test with NullOutput + minimal WAV
+- [ ] `mpris.rs`: test MPRIS command dispatch
 
 ### Tier 4 — CLI commands (est. +70 lines)
 - [ ] `main.rs`: extract `cmd_*` into testable module or integration tests
 
-## Phase 6 — Video Playback
+## Phase 6 — Video Playback (v2)
 - [ ] tarang-video decode integration (dav1d, openh264, libvpx)
 - [ ] Wayland surface for video output (via aethersafha)
 - [ ] Subtitle rendering (SRT, VTT, ASS)

@@ -34,6 +34,9 @@ crossterm = "0.28"
 # File watching
 notify = { version = "7", default-features = false, features = ["macos_kqueue"] }
 
+# D-Bus (MPRIS)
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
 # System
 libc = "0.2"
 

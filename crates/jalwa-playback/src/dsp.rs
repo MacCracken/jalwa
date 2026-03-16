@@ -110,6 +110,29 @@ impl EqSettings {
         }
     }
 
+    /// Load a named preset.
+    pub fn preset(name: &str) -> Self {
+        //                       31   62  125  250  500   1k   2k   4k   8k  16k
+        let bands = match name {
+            "rock"      => [ 4.0, 3.0, 1.0, -1.0, -2.0, 0.0, 2.0, 3.0, 4.0, 4.0],
+            "pop"       => [-1.0, 1.0, 3.0,  4.0,  3.0, 0.0, -1.0, 0.0, 1.0, 2.0],
+            "jazz"      => [ 2.0, 1.0, 0.0,  1.0, -1.0, -1.0, 0.0, 1.0, 2.0, 3.0],
+            "classical" => [ 0.0, 0.0, 0.0,  0.0,  0.0, 0.0, -2.0, -3.0, -2.0, 0.0],
+            "bass"      => [ 6.0, 5.0, 4.0,  2.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "treble"    => [ 0.0, 0.0, 0.0,  0.0,  0.0, 0.0, 2.0, 4.0, 5.0, 6.0],
+            "vocal"     => [-2.0, -1.0, 0.0, 2.0,  4.0, 4.0, 3.0, 1.0, 0.0, -1.0],
+            "electronic"=> [ 5.0, 4.0, 1.0,  0.0, -2.0, 0.0, 1.0, 3.0, 4.0, 5.0],
+            "acoustic"  => [ 2.0, 1.0, 0.0,  1.0,  2.0, 1.0, 2.0, 3.0, 2.0, 1.0],
+            _           => [0.0; 10],
+        };
+        Self { bands, enabled: true }
+    }
+
+    /// List all available preset names.
+    pub fn preset_names() -> &'static [&'static str] {
+        &["flat", "rock", "pop", "jazz", "classical", "bass", "treble", "vocal", "electronic", "acoustic"]
+    }
+
     /// Get the band index for a display name.
     pub fn band_name(band: usize) -> &'static str {
         match band {
@@ -488,6 +511,48 @@ mod tests {
         let c = peaking_eq(1000.0, 0.0, 1.4, 48000.0);
         // At 0 dB gain, filter should be near unity: b0≈1, b1≈a1, b2≈a2
         assert!((c.b0 - 1.0).abs() < 0.01, "b0={}", c.b0);
+    }
+
+    // ---- Preset tests ----
+
+    #[test]
+    fn preset_names_list() {
+        let names = EqSettings::preset_names();
+        assert!(names.contains(&"rock"));
+        assert!(names.contains(&"jazz"));
+        assert!(names.contains(&"flat"));
+        assert!(names.len() >= 9);
+    }
+
+    #[test]
+    fn preset_rock() {
+        let eq = EqSettings::preset("rock");
+        assert!(eq.enabled);
+        assert!(!eq.is_flat());
+        // Rock has bass boost
+        assert!(eq.bands[0] > 0.0);
+    }
+
+    #[test]
+    fn preset_flat_is_default() {
+        let eq = EqSettings::preset("flat");
+        assert!(eq.bands.iter().all(|b| *b == 0.0));
+    }
+
+    #[test]
+    fn preset_unknown_returns_flat() {
+        let eq = EqSettings::preset("nonexistent");
+        assert!(eq.bands.iter().all(|b| *b == 0.0));
+    }
+
+    #[test]
+    fn all_presets_valid_range() {
+        for name in EqSettings::preset_names() {
+            let eq = EqSettings::preset(name);
+            for &b in &eq.bands {
+                assert!(b >= -12.0 && b <= 12.0, "preset '{name}' band out of range: {b}");
+            }
+        }
     }
 
     fn rms(samples: &[f32]) -> f32 {

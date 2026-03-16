@@ -2,6 +2,32 @@
 
 ## 2026.3.16
 
+### Audio Gap Closure
+
+**MPRIS2 D-Bus Media Key Support**
+- Hardware media keys: play/pause, next, previous, stop via D-Bus
+- Desktop integration: visible to KDE/GNOME/Sway media controls
+- MPRIS2 Player interface: PlayPause, Play, Pause, Stop, Next, Previous, Seek, Volume
+- Runs on dedicated background thread, non-blocking
+
+**Play Count Tracking**
+- Wired into TUI: play count increments on track finish and gapless transition
+- Persists to SQLite via `PersistentLibrary::update_play_count()`
+- Tracks `last_played` timestamp for recently-played queries
+
+**File Watcher (Auto-Rescan)**
+- `LibraryWatcher` now wired into TUI event loop
+- New media files in library directories auto-added on creation
+- Removed files auto-cleaned from library
+- Filters to media extensions only (no false triggers on non-audio files)
+
+**EQ Presets**
+- 9 named presets: Rock, Pop, Jazz, Classical, Bass, Treble, Vocal, Electronic, Acoustic
+- `Enter` in EQ view cycles through presets
+- `EqSettings::preset("rock")` API for programmatic access
+- `EqSettings::preset_names()` lists all available presets
+- All presets validated to ±12 dB range
+
 ### Audio Polish (Phase 5)
 
 **Volume Normalization / ReplayGain**
@@ -14,25 +40,19 @@
 - ISO standard center frequencies: 31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz
 - Peaking EQ biquad filters with configurable ±12 dB gain per band
 - Per-channel filter state (stereo-aware)
-- Flat bands skip processing for zero overhead when disabled
-- `EqSettings` with enable/disable, per-band gain, band names
+- DSP chain: decode → resample → mix → EQ → normalize → volume → output
 
 **Album Art Extraction**
-- `MediaItem` now carries `art_mime` and `art_data` fields
-- Scanner extracts embedded album art via lofty (prefers CoverFront, falls back to first picture)
-- Supports JPEG, PNG, and other embedded formats from ID3v2, Vorbis Comment, MP4 atoms
+- `MediaItem` carries `art_mime` and `art_data` fields
+- Scanner extracts embedded album art via lofty (prefers CoverFront)
+- Supports JPEG, PNG from ID3v2, Vorbis Comment, MP4 atoms
 
 **File Watcher (inotify)**
-- `LibraryWatcher` monitors library directories for create/modify/remove events
-- Cross-platform via `notify` crate (inotify on Linux, FSEvents on macOS)
-- Filters to media file extensions only
-- Non-blocking `poll()` and blocking `recv_timeout()` APIs
+- `LibraryWatcher` monitors directories for create/modify/remove events
+- Cross-platform via `notify` crate
 
 **Testing**
-- 134 tests across workspace (51.2% line coverage, +5.6%)
-- 18 DSP tests: loudness analysis, normalization, EQ boost/cut/passthrough/stereo/reset
-- 7 scanner tests: extension filtering, empty/non-dir, art extraction, tag override
-- 5 watcher tests: media filtering, event detection, empty paths
+- 146 tests across workspace (46.6% line coverage)
 
 ### MVP Release
 
@@ -53,11 +73,11 @@
 
 **Interactive TUI (MVP-3)**
 - ratatui + crossterm terminal UI launched via `jalwa` (default) or `jalwa tui`
-- Three views: Library, Now Playing, Queue (Tab to cycle)
+- Four views: Library, Now Playing, Queue, Equalizer (Tab to cycle)
 - Library browser with live search filtering (/ to search, Esc to cancel)
 - Playback controls: Space (play/pause), Left/Right (seek ±10s), +/- (volume), m (mute)
 - Queue management: a (enqueue), d (remove), c (clear), n/p (next/prev), r (repeat), s (shuffle)
-- 50ms tick rate for smooth progress bar updates
+- EQ controls: e (toggle/open), Left/Right (adjust band), Enter (cycle presets), N (normalize)
 
 **Gapless Playback (MVP-4)**
 - PrepareNext command pre-opens next decoder in decode thread
