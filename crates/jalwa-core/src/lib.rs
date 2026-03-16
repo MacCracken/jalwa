@@ -5,6 +5,7 @@
 pub mod db;
 pub mod playlist_io;
 pub mod scanner;
+pub mod watcher;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,11 @@ pub struct MediaItem {
     pub play_count: u32,
     pub rating: Option<u8>,
     pub tags: Vec<String>,
+    /// Album art MIME type (e.g. "image/jpeg") if embedded art was found.
+    pub art_mime: Option<String>,
+    /// Album art data (raw bytes, typically JPEG or PNG).
+    #[serde(skip)]
+    pub art_data: Option<Vec<u8>>,
 }
 
 impl MediaItem {
@@ -63,6 +69,8 @@ impl MediaItem {
             play_count: 0,
             rating: None,
             tags: Vec::new(),
+            art_mime: None,
+            art_data: None,
         }
     }
 

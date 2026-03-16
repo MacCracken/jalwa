@@ -133,6 +133,8 @@ impl LibraryDb {
                 tags: tags_json
                     .and_then(|j| serde_json::from_str(&j).ok())
                     .unwrap_or_default(),
+                art_mime: None, // Art is extracted on scan, not stored in DB
+                art_data: None,
             };
             library.add_item(item);
         }
@@ -492,6 +494,8 @@ mod tests {
             play_count: 0,
             rating: None,
             tags: vec!["rock".to_string()],
+            art_mime: None,
+            art_data: None,
         }
     }
 

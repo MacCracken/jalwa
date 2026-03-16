@@ -163,6 +163,8 @@ mod tests {
             play_count: 0,
             rating: None,
             tags: Vec::new(),
+            art_mime: None,
+            art_data: None,
         }
     }
 

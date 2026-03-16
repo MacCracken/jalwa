@@ -4,6 +4,7 @@
 //! Handles play, pause, seek, volume, and track switching.
 
 pub mod decode_thread;
+pub mod dsp;
 
 use jalwa_core::{JalwaError, PlaybackState, PlaybackStatus, Result};
 use std::path::{Path, PathBuf};

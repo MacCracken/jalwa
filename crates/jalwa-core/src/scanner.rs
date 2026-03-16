@@ -17,6 +17,10 @@ pub struct ScannedFile {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
+    /// Album art MIME type (e.g. "image/jpeg")
+    pub art_mime: Option<String>,
+    /// Raw album art bytes
+    pub art_data: Option<Vec<u8>>,
 }
 
 /// Scan a directory recursively for supported media files.
@@ -61,27 +65,32 @@ pub fn scan_directory(path: &Path) -> Result<Vec<ScannedFile>> {
     Ok(results)
 }
 
-/// Scan a single file: probe with tarang, then extract rich tags with lofty.
+/// Scan a single file: probe with tarang, then extract rich tags + album art with lofty.
 fn scan_file(path: &Path) -> Result<ScannedFile> {
     // Probe with tarang for duration/codec/format info
     let file = std::fs::File::open(path)?;
     let info = tarang_audio::probe_audio(file).map_err(JalwaError::Tarang)?;
 
-    // Extract rich tags with lofty
-    let (title, artist, album) = match lofty::read_from_path(path) {
+    // Extract rich tags + album art with lofty
+    let (title, artist, album, art_mime, art_data) = match lofty::read_from_path(path) {
         Ok(tagged_file) => {
             use lofty::prelude::*;
             let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
             match tag {
-                Some(t) => (
-                    t.title().map(|s| s.to_string()),
-                    t.artist().map(|s| s.to_string()),
-                    t.album().map(|s| s.to_string()),
-                ),
-                None => (None, None, None),
+                Some(t) => {
+                    let title = t.title().map(|s| s.to_string());
+                    let artist = t.artist().map(|s| s.to_string());
+                    let album = t.album().map(|s| s.to_string());
+
+                    // Extract album art (prefer front cover)
+                    let (art_mime, art_data) = extract_art(t.pictures());
+
+                    (title, artist, album, art_mime, art_data)
+                }
+                None => (None, None, None, None, None),
             }
         }
-        Err(_) => (None, None, None),
+        Err(_) => (None, None, None, None, None),
     };
 
     Ok(ScannedFile {
@@ -90,7 +99,35 @@ fn scan_file(path: &Path) -> Result<ScannedFile> {
         title,
         artist,
         album,
+        art_mime,
+        art_data,
     })
+}
+
+/// Extract the best album art picture from a list of tag pictures.
+fn extract_art(pictures: &[lofty::picture::Picture]) -> (Option<String>, Option<Vec<u8>>) {
+    if pictures.is_empty() {
+        return (None, None);
+    }
+
+    // Prefer CoverFront, fall back to first picture
+    let pic = pictures
+        .iter()
+        .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
+        .or_else(|| pictures.first());
+
+    match pic {
+        Some(p) => {
+            let mime = p.mime_type().map(|m| m.as_str().to_string());
+            let data = p.data().to_vec();
+            if data.is_empty() {
+                (None, None)
+            } else {
+                (mime, Some(data))
+            }
+        }
+        None => (None, None),
+    }
 }
 
 /// Convert a scanned file to a MediaItem, preferring lofty tags over probe-derived metadata.
@@ -107,6 +144,140 @@ pub fn scanned_to_media_item(scanned: ScannedFile) -> MediaItem {
     if scanned.album.is_some() {
         item.album = scanned.album;
     }
+    item.art_mime = scanned.art_mime;
+    item.art_data = scanned.art_data;
 
     item
+}
+
+/// Check if a file extension is a supported media format.
+pub fn is_supported_extension(ext: &str) -> bool {
+    SUPPORTED_EXTENSIONS.contains(&ext.to_lowercase().as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supported_extensions() {
+        assert!(is_supported_extension("mp3"));
+        assert!(is_supported_extension("FLAC"));
+        assert!(is_supported_extension("wav"));
+        assert!(is_supported_extension("ogg"));
+        assert!(is_supported_extension("m4a"));
+        assert!(is_supported_extension("opus"));
+        assert!(!is_supported_extension("txt"));
+        assert!(!is_supported_extension("pdf"));
+        assert!(!is_supported_extension("rs"));
+    }
+
+    #[test]
+    fn scan_not_a_directory() {
+        let result = scan_directory(Path::new("/nonexistent/path"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn scan_empty_directory() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_scan_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let result = scan_directory(&tmp).unwrap();
+        assert!(result.is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn scan_skips_non_media() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_scan_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("readme.txt"), "hello").unwrap();
+        std::fs::write(tmp.join("code.rs"), "fn main() {}").unwrap();
+        let result = scan_directory(&tmp).unwrap();
+        assert!(result.is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn extract_art_empty() {
+        let (mime, data) = extract_art(&[]);
+        assert!(mime.is_none());
+        assert!(data.is_none());
+    }
+
+    #[test]
+    fn scanned_to_media_item_applies_tags() {
+        use tarang_core::*;
+        let info = MediaInfo {
+            id: uuid::Uuid::new_v4(),
+            format: ContainerFormat::Mp3,
+            streams: vec![StreamInfo::Audio(AudioStreamInfo {
+                codec: AudioCodec::Mp3,
+                sample_rate: 44100,
+                channels: 2,
+                sample_format: SampleFormat::F32,
+                bitrate: Some(320_000),
+                duration: Some(std::time::Duration::from_secs(200)),
+            })],
+            duration: Some(std::time::Duration::from_secs(200)),
+            file_size: Some(8_000_000),
+            title: None,
+            artist: None,
+            album: None,
+        };
+
+        let scanned = ScannedFile {
+            path: PathBuf::from("/music/track.mp3"),
+            info,
+            title: Some("My Song".to_string()),
+            artist: Some("My Artist".to_string()),
+            album: Some("My Album".to_string()),
+            art_mime: Some("image/jpeg".to_string()),
+            art_data: Some(vec![0xFF, 0xD8, 0xFF]),
+        };
+
+        let item = scanned_to_media_item(scanned);
+        assert_eq!(item.title, "My Song");
+        assert_eq!(item.artist, Some("My Artist".to_string()));
+        assert_eq!(item.album, Some("My Album".to_string()));
+        assert_eq!(item.art_mime, Some("image/jpeg".to_string()));
+        assert!(item.art_data.is_some());
+    }
+
+    #[test]
+    fn scanned_to_media_item_no_tags() {
+        use tarang_core::*;
+        let info = MediaInfo {
+            id: uuid::Uuid::new_v4(),
+            format: ContainerFormat::Flac,
+            streams: vec![StreamInfo::Audio(AudioStreamInfo {
+                codec: AudioCodec::Flac,
+                sample_rate: 44100,
+                channels: 2,
+                sample_format: SampleFormat::I16,
+                bitrate: None,
+                duration: Some(std::time::Duration::from_secs(180)),
+            })],
+            duration: Some(std::time::Duration::from_secs(180)),
+            file_size: Some(20_000_000),
+            title: Some("Probe Title".to_string()),
+            artist: Some("Probe Artist".to_string()),
+            album: None,
+        };
+
+        let scanned = ScannedFile {
+            path: PathBuf::from("/music/song.flac"),
+            info,
+            title: None,
+            artist: None,
+            album: None,
+            art_mime: None,
+            art_data: None,
+        };
+
+        let item = scanned_to_media_item(scanned);
+        // Title falls back to filename stem since lofty title is None
+        assert_eq!(item.title, "song");
+        assert!(item.art_data.is_none());
+    }
 }
