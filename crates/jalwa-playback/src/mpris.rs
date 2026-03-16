@@ -177,4 +177,69 @@ mod tests {
         ];
         assert_eq!(cmds.len(), 7);
     }
+
+    #[test]
+    fn mpris_command_clone() {
+        let cmd = MprisCommand::Seek(5.0);
+        let cloned = cmd.clone();
+        assert!(format!("{:?}", cloned).contains("Seek"));
+    }
+
+    #[test]
+    fn mpris_root_properties() {
+        let root = MprisRoot;
+        assert!(root.can_quit());
+        assert!(!root.can_raise());
+        assert!(!root.has_track_list());
+        assert_eq!(root.identity(), "Jalwa");
+        assert_eq!(root.desktop_entry(), "jalwa");
+        assert!(root.supported_uri_schemes().contains(&"file".to_string()));
+        assert!(root.supported_mime_types().contains(&"audio/flac".to_string()));
+        assert!(root.supported_mime_types().contains(&"audio/mpeg".to_string()));
+    }
+
+    #[test]
+    fn mpris_player_properties() {
+        let (tx, _rx) = mpsc::channel();
+        let player = MprisPlayer { cmd_tx: tx };
+        assert!(player.can_play());
+        assert!(player.can_pause());
+        assert!(player.can_go_next());
+        assert!(player.can_go_previous());
+        assert!(player.can_seek());
+        assert!(player.can_control());
+        assert_eq!(player.playback_status(), "Stopped");
+    }
+
+    #[test]
+    fn mpris_player_sends_commands() {
+        let (tx, rx) = mpsc::channel();
+        let player = MprisPlayer { cmd_tx: tx };
+        player.play_pause();
+        player.play();
+        player.pause();
+        player.stop();
+        player.next();
+        player.previous();
+
+        let mut cmds = Vec::new();
+        while let Ok(cmd) = rx.try_recv() {
+            cmds.push(format!("{:?}", cmd));
+        }
+        assert_eq!(cmds.len(), 6);
+        assert!(cmds[0].contains("PlayPause"));
+        assert!(cmds[1].contains("Play"));
+        assert!(cmds[2].contains("Pause"));
+        assert!(cmds[3].contains("Stop"));
+        assert!(cmds[4].contains("Next"));
+        assert!(cmds[5].contains("Previous"));
+    }
+
+    #[test]
+    fn spawn_mpris_returns_receiver() {
+        // Just verify it doesn't panic — actual D-Bus connection may fail without session bus
+        let rx = spawn_mpris_server();
+        // Should be empty (no commands sent)
+        assert!(rx.try_recv().is_err());
+    }
 }

@@ -551,4 +551,65 @@ mod tests {
         assert_eq!(status.volume, 1.0);
         assert!(!status.muted);
     }
+
+    // ---- apply_volume tests ----
+
+    fn make_test_buf(samples: &[f32]) -> tarang_core::AudioBuffer {
+        let bytes = unsafe {
+            std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4)
+        };
+        tarang_core::AudioBuffer {
+            data: bytes::Bytes::copy_from_slice(bytes),
+            sample_format: tarang_core::SampleFormat::F32,
+            channels: 1,
+            sample_rate: 44100,
+            num_samples: samples.len(),
+            timestamp: Duration::ZERO,
+        }
+    }
+
+    fn read_f32(buf: &tarang_core::AudioBuffer) -> Vec<f32> {
+        let s = unsafe {
+            std::slice::from_raw_parts(buf.data.as_ptr() as *const f32, buf.data.len() / 4)
+        };
+        s.to_vec()
+    }
+
+    #[test]
+    fn apply_volume_unity() {
+        let buf = make_test_buf(&[0.5, -0.3, 0.8]);
+        let out = decode_thread::apply_volume(&buf, 1.0);
+        let samples = read_f32(&out);
+        assert!((samples[0] - 0.5).abs() < 1e-6);
+        assert!((samples[1] - -0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn apply_volume_half() {
+        let buf = make_test_buf(&[1.0, -1.0]);
+        let out = decode_thread::apply_volume(&buf, 0.5);
+        let samples = read_f32(&out);
+        assert!((samples[0] - 0.5).abs() < 1e-6);
+        assert!((samples[1] - -0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn apply_volume_muted() {
+        let buf = make_test_buf(&[0.7, -0.9, 0.3]);
+        let out = decode_thread::apply_volume(&buf, 0.0);
+        let samples = read_f32(&out);
+        for s in &samples {
+            assert_eq!(*s, 0.0);
+        }
+    }
+
+    #[test]
+    fn apply_volume_preserves_metadata() {
+        let buf = make_test_buf(&[0.5]);
+        let out = decode_thread::apply_volume(&buf, 0.8);
+        assert_eq!(out.channels, buf.channels);
+        assert_eq!(out.sample_rate, buf.sample_rate);
+        assert_eq!(out.num_samples, buf.num_samples);
+        assert_eq!(out.timestamp, buf.timestamp);
+    }
 }

@@ -289,7 +289,7 @@ pub fn decode_loop(
 }
 
 /// Apply volume gain to an AudioBuffer, returning a new buffer.
-fn apply_volume(buf: &tarang_core::AudioBuffer, gain: f32) -> tarang_core::AudioBuffer {
+pub(crate) fn apply_volume(buf: &tarang_core::AudioBuffer, gain: f32) -> tarang_core::AudioBuffer {
     let samples: &[f32] = unsafe {
         std::slice::from_raw_parts(buf.data.as_ptr() as *const f32, buf.data.len() / 4)
     };
