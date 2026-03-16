@@ -277,9 +277,10 @@ impl PlaybackEngine {
     /// Get current position (reads from decode thread if running)
     pub fn position(&self) -> Duration {
         if let Some(ref status) = self.decode_status
-            && let Ok(s) = status.lock() {
-                return s.position;
-            }
+            && let Ok(s) = status.lock()
+        {
+            return s.position;
+        }
         self.position
     }
 
@@ -343,9 +344,10 @@ impl PlaybackEngine {
         }
         // Update position from decode status
         if let Some(ref status) = self.decode_status
-            && let Ok(s) = status.lock() {
-                self.position = s.position;
-            }
+            && let Ok(s) = status.lock()
+        {
+            self.position = s.position;
+        }
         events
     }
 }

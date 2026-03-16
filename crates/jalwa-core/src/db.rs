@@ -230,9 +230,10 @@ impl LibraryDb {
 
             for item_id in item_ids {
                 if let Ok(id_str) = item_id
-                    && let Ok(uuid) = Uuid::parse_str(&id_str) {
-                        playlist.items.push(uuid);
-                    }
+                    && let Ok(uuid) = Uuid::parse_str(&id_str)
+                {
+                    playlist.items.push(uuid);
+                }
             }
 
             library.playlists.push(playlist);

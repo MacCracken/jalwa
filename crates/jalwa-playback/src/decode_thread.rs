@@ -279,10 +279,11 @@ pub fn decode_loop(
         // Check near-end for gapless prebuffer hint
         if !near_end_sent
             && let Some(dur) = duration
-                && dur.as_secs_f64() - buf.timestamp.as_secs_f64() < 2.0 {
-                    let _ = event_tx.send(EngineEvent::NearEnd);
-                    near_end_sent = true;
-                }
+            && dur.as_secs_f64() - buf.timestamp.as_secs_f64() < 2.0
+        {
+            let _ = event_tx.send(EngineEvent::NearEnd);
+            near_end_sent = true;
+        }
 
         // Write to output
         if let Err(e) = output.write(&buf) {

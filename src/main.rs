@@ -566,9 +566,10 @@ mod ctrlc {
 
     extern "C" fn signal_handler(_: libc::c_int) {
         if let Ok(guard) = HANDLER.lock()
-            && let Some(ref handler) = *guard {
-                handler();
-            }
+            && let Some(ref handler) = *guard
+        {
+            handler();
+        }
     }
 }
 
@@ -684,7 +685,12 @@ mod tests {
         let (path, plib) = tmp_db();
         let plib = Arc::new(Mutex::new(plib));
         let result = handle_tool_call("jalwa_pause", &json!({}), &plib);
-        assert!(result["content"][0]["text"].as_str().unwrap().contains("paused"));
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("paused")
+        );
         let _ = std::fs::remove_file(&path);
     }
 

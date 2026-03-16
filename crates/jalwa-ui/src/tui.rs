@@ -53,12 +53,13 @@ pub fn run(mut app: App) -> io::Result<()> {
                     }
                     // Advance queue
                     if let Some(next_id) = app.queue.advance()
-                        && let Some(item) = app.library.library.find_by_id(next_id) {
-                            let path = item.path.clone();
-                            current_playing_id = Some(next_id);
-                            let _ = app.engine.open(&path);
-                            let _ = app.engine.play();
-                        }
+                        && let Some(item) = app.library.library.find_by_id(next_id)
+                    {
+                        let path = item.path.clone();
+                        current_playing_id = Some(next_id);
+                        let _ = app.engine.open(&path);
+                        let _ = app.engine.play();
+                    }
                 }
                 EngineEvent::TrackChanged => {
                     // Gapless transition — update play count for previous track
@@ -73,9 +74,10 @@ pub fn run(mut app: App) -> io::Result<()> {
                     // Prepare next track for gapless playback
                     if let Some(next_pos) = app.queue.position.map(|p| p + 1)
                         && let Some(next_id) = app.queue.items.get(next_pos)
-                            && let Some(item) = app.library.library.find_by_id(*next_id) {
-                                app.engine.prepare_next(&item.path);
-                            }
+                        && let Some(item) = app.library.library.find_by_id(*next_id)
+                    {
+                        app.engine.prepare_next(&item.path);
+                    }
                 }
                 _ => {}
             }
@@ -95,15 +97,15 @@ pub fn run(mut app: App) -> io::Result<()> {
                         if app.library.library.find_by_path(&path).is_none()
                             && let Ok(scanned) =
                                 jalwa_core::scanner::scan_directory(path.parent().unwrap_or(&path))
-                            {
-                                for s in scanned {
-                                    if s.path == path {
-                                        let item = jalwa_core::scanner::scanned_to_media_item(s);
-                                        let _ = app.library.add_item(item);
-                                        break;
-                                    }
+                        {
+                            for s in scanned {
+                                if s.path == path {
+                                    let item = jalwa_core::scanner::scanned_to_media_item(s);
+                                    let _ = app.library.add_item(item);
+                                    break;
                                 }
                             }
+                        }
                     }
                     jalwa_core::watcher::LibraryEvent::FileRemoved(path) => {
                         if let Some(item) = app.library.library.find_by_path(&path) {
@@ -118,19 +120,20 @@ pub fn run(mut app: App) -> io::Result<()> {
 
         // Handle keyboard input
         if event::poll(tick_rate)?
-            && let Event::Key(key) = event::read()? {
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-                    app.running = false;
-                    continue;
-                }
+            && let Event::Key(key) = event::read()?
+        {
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                app.running = false;
+                continue;
+            }
 
-                match app.input_mode {
-                    InputMode::Search => handle_search_input(&mut app, key.code),
-                    InputMode::Normal => {
-                        handle_normal_input(&mut app, key.code, &mut current_playing_id)
-                    }
+            match app.input_mode {
+                InputMode::Search => handle_search_input(&mut app, key.code),
+                InputMode::Normal => {
+                    handle_normal_input(&mut app, key.code, &mut current_playing_id)
                 }
             }
+        }
     }
 
     // Restore terminal
@@ -160,21 +163,23 @@ fn handle_mpris_command(app: &mut App, cmd: &MprisCommand, current_id: &mut Opti
         }
         MprisCommand::Next => {
             if let Some(next_id) = app.queue.advance()
-                && let Some(item) = app.library.library.find_by_id(next_id) {
-                    let path = item.path.clone();
-                    *current_id = Some(next_id);
-                    let _ = app.engine.open(&path);
-                    let _ = app.engine.play();
-                }
+                && let Some(item) = app.library.library.find_by_id(next_id)
+            {
+                let path = item.path.clone();
+                *current_id = Some(next_id);
+                let _ = app.engine.open(&path);
+                let _ = app.engine.play();
+            }
         }
         MprisCommand::Previous => {
             if let Some(prev_id) = app.queue.go_back()
-                && let Some(item) = app.library.library.find_by_id(prev_id) {
-                    let path = item.path.clone();
-                    *current_id = Some(prev_id);
-                    let _ = app.engine.open(&path);
-                    let _ = app.engine.play();
-                }
+                && let Some(item) = app.library.library.find_by_id(prev_id)
+            {
+                let path = item.path.clone();
+                *current_id = Some(prev_id);
+                let _ = app.engine.open(&path);
+                let _ = app.engine.play();
+            }
         }
         MprisCommand::Seek(offset) => {
             let _ = app.engine.seek_relative(*offset);
@@ -234,12 +239,13 @@ fn handle_normal_input(app: &mut App, key: KeyCode, current_id: &mut Option<uuid
                     if app.selected_index < app.queue.len() {
                         app.queue.position = Some(app.selected_index);
                         if let Some(id) = app.queue.current()
-                            && let Some(item) = app.library.library.find_by_id(id) {
-                                let path = item.path.clone();
-                                *current_id = Some(id);
-                                let _ = app.engine.open(&path);
-                                let _ = app.engine.play();
-                            }
+                            && let Some(item) = app.library.library.find_by_id(id)
+                        {
+                            let path = item.path.clone();
+                            *current_id = Some(id);
+                            let _ = app.engine.open(&path);
+                            let _ = app.engine.play();
+                        }
                     }
                 }
                 View::Equalizer => {
@@ -295,21 +301,23 @@ fn handle_normal_input(app: &mut App, key: KeyCode, current_id: &mut Option<uuid
 
         KeyCode::Char('n') => {
             if let Some(next_id) = app.queue.advance()
-                && let Some(item) = app.library.library.find_by_id(next_id) {
-                    let path = item.path.clone();
-                    *current_id = Some(next_id);
-                    let _ = app.engine.open(&path);
-                    let _ = app.engine.play();
-                }
+                && let Some(item) = app.library.library.find_by_id(next_id)
+            {
+                let path = item.path.clone();
+                *current_id = Some(next_id);
+                let _ = app.engine.open(&path);
+                let _ = app.engine.play();
+            }
         }
         KeyCode::Char('p') => {
             if let Some(prev_id) = app.queue.go_back()
-                && let Some(item) = app.library.library.find_by_id(prev_id) {
-                    let path = item.path.clone();
-                    *current_id = Some(prev_id);
-                    let _ = app.engine.open(&path);
-                    let _ = app.engine.play();
-                }
+                && let Some(item) = app.library.library.find_by_id(prev_id)
+            {
+                let path = item.path.clone();
+                *current_id = Some(prev_id);
+                let _ = app.engine.open(&path);
+                let _ = app.engine.play();
+            }
         }
 
         KeyCode::Char('r') => {
@@ -334,10 +342,11 @@ fn handle_normal_input(app: &mut App, key: KeyCode, current_id: &mut Option<uuid
 
         KeyCode::Char('a') => {
             if app.view == View::Library
-                && let Some(idx) = app.selected_library_index() {
-                    let id = app.library.library.items[idx].id;
-                    app.queue.enqueue(id);
-                }
+                && let Some(idx) = app.selected_library_index()
+            {
+                let id = app.library.library.items[idx].id;
+                app.queue.enqueue(id);
+            }
         }
 
         KeyCode::Char('d') => {
@@ -347,9 +356,11 @@ fn handle_normal_input(app: &mut App, key: KeyCode, current_id: &mut Option<uuid
                     app.selected_index = app.queue.len() - 1;
                 }
                 if let Some(pos) = app.queue.position
-                    && app.selected_index <= pos && pos > 0 {
-                        app.queue.position = Some(pos - 1);
-                    }
+                    && app.selected_index <= pos
+                    && pos > 0
+                {
+                    app.queue.position = Some(pos - 1);
+                }
             }
         }
 
