@@ -4,6 +4,8 @@
 //! Tarang media framework. Pure Rust audio, AI-powered recommendations,
 //! smart playlists, and transcription routing via hoosh.
 
+mod mcp;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -57,6 +59,8 @@ enum Commands {
     },
     /// Launch interactive TUI
     Tui,
+    /// Launch desktop GUI
+    Gui,
     /// Run as MCP server on stdio
     Mcp,
 }
@@ -93,7 +97,8 @@ async fn main() -> Result<()> {
         Some(Commands::Library) => cmd_library()?,
         Some(Commands::Export { name, output }) => cmd_export(&name, &output)?,
         Some(Commands::Import { file }) => cmd_import(&file)?,
-        Some(Commands::Tui) | None => cmd_tui()?,
+        Some(Commands::Tui) => cmd_tui()?,
+        Some(Commands::Gui) | None => cmd_gui()?,
         Some(Commands::Mcp) => cmd_mcp().await?,
     }
 
@@ -322,6 +327,12 @@ fn cmd_import(file: &str) -> Result<()> {
     Ok(())
 }
 
+fn cmd_gui() -> Result<()> {
+    let plib = open_library()?;
+    let engine = jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
+    jalwa_gui::run(plib, engine).map_err(|e| anyhow::anyhow!("GUI error: {e}"))
+}
+
 fn cmd_tui() -> Result<()> {
     let plib = open_library()?;
     let engine = jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
@@ -331,386 +342,11 @@ fn cmd_tui() -> Result<()> {
 }
 
 async fn cmd_mcp() -> Result<()> {
-    use serde_json::{Value, json};
-    use tokio::io::{AsyncBufReadExt, BufReader};
-
     let plib = Arc::new(Mutex::new(open_library()?));
     let engine = Arc::new(Mutex::new(
         jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default()),
     ));
-
-    let stdin = BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
-
-    while let Ok(Some(line)) = lines.next_line().await {
-        let request: Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let method = request["method"].as_str().unwrap_or("");
-        let id = &request["id"];
-
-        let result = match method {
-            "initialize" => json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": { "tools": { "listChanged": false } },
-                "serverInfo": { "name": "jalwa", "version": env!("CARGO_PKG_VERSION") }
-            }),
-            "tools/list" => json!({
-                "tools": [
-                    {
-                        "name": "jalwa_play",
-                        "description": "Play a media file (audio or video)",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": { "path": { "type": "string" } },
-                            "required": ["path"]
-                        }
-                    },
-                    {
-                        "name": "jalwa_pause",
-                        "description": "Pause current playback",
-                        "inputSchema": { "type": "object", "properties": {} }
-                    },
-                    {
-                        "name": "jalwa_status",
-                        "description": "Get current playback status (state, position, volume)",
-                        "inputSchema": { "type": "object", "properties": {} }
-                    },
-                    {
-                        "name": "jalwa_search",
-                        "description": "Search the media library by title, artist, album, or tag",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": { "query": { "type": "string" } },
-                            "required": ["query"]
-                        }
-                    },
-                    {
-                        "name": "jalwa_recommend",
-                        "description": "Get AI-powered media recommendations based on a seed item",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "item_id": { "type": "string", "description": "UUID of seed media item" },
-                                "max": { "type": "integer", "description": "Max recommendations (default 5)" }
-                            },
-                            "required": ["item_id"]
-                        }
-                    },
-                    {
-                        "name": "jalwa_queue",
-                        "description": "Manage the play queue (list, enqueue, clear, shuffle)",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "action": { "type": "string", "description": "Action: list, enqueue, clear, shuffle" },
-                                "item_id": { "type": "string", "description": "UUID of media item (for enqueue)" }
-                            },
-                            "required": ["action"]
-                        }
-                    },
-                    {
-                        "name": "jalwa_library",
-                        "description": "Manage the media library (stats, scan, list)",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "action": { "type": "string", "description": "Action: stats, scan, list" },
-                                "path": { "type": "string", "description": "Directory path (for scan)" }
-                            },
-                            "required": ["action"]
-                        }
-                    },
-                    {
-                        "name": "jalwa_playlist",
-                        "description": "Manage playlists (list, create, add, remove, export)",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "action": { "type": "string", "description": "Action: list, create, add, remove, export" },
-                                "name": { "type": "string", "description": "Playlist name (for create/add/remove/export)" },
-                                "item_id": { "type": "string", "description": "UUID of media item (for add/remove)" },
-                                "output": { "type": "string", "description": "Output M3U file path (for export)" }
-                            },
-                            "required": ["action"]
-                        }
-                    }
-                ]
-            }),
-            "tools/call" => {
-                let tool_name = request["params"]["name"].as_str().unwrap_or("");
-                let args = &request["params"]["arguments"];
-                handle_tool_call(tool_name, args, &plib, &engine)
-            }
-            _ => json!({ "error": format!("unknown method: {method}") }),
-        };
-
-        let response = json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": result
-        });
-        println!("{}", serde_json::to_string(&response)?);
-    }
-
-    Ok(())
-}
-
-fn handle_tool_call(
-    name: &str,
-    args: &serde_json::Value,
-    plib: &Arc<Mutex<jalwa_core::db::PersistentLibrary>>,
-    engine: &Arc<Mutex<jalwa_playback::PlaybackEngine>>,
-) -> serde_json::Value {
-    use serde_json::json;
-
-    match name {
-        "jalwa_play" => {
-            let path = args["path"].as_str().unwrap_or("");
-            let mut eng = engine.lock().unwrap();
-            match eng.open(std::path::Path::new(path)) {
-                Ok(()) => {
-                    let _ = eng.play();
-                    let status = eng.status();
-                    json!({
-                        "content": [{ "type": "text", "text": format!("Playing: {path}\n{}", jalwa_ui::render_status_bar(&status, None)) }]
-                    })
-                }
-                Err(e) => {
-                    json!({ "content": [{ "type": "text", "text": format!("error: {e}") }], "isError": true })
-                }
-            }
-        }
-        "jalwa_pause" => {
-            let mut eng = engine.lock().unwrap();
-            eng.pause();
-            let status = eng.status();
-            json!({ "content": [{ "type": "text", "text": format!("paused\n{}", serde_json::to_string_pretty(&status).unwrap_or_default()) }] })
-        }
-        "jalwa_status" => {
-            let mut eng = engine.lock().unwrap();
-            eng.poll_events();
-            let status = eng.status();
-            json!({
-                "content": [{ "type": "text", "text": serde_json::to_string_pretty(&status).unwrap_or_default() }]
-            })
-        }
-        "jalwa_search" => {
-            let query = args["query"].as_str().unwrap_or("");
-            let lib = plib.lock().unwrap();
-            let results = lib.library.search(query);
-            let text = if results.is_empty() {
-                format!("No results for '{query}'")
-            } else {
-                results
-                    .iter()
-                    .enumerate()
-                    .map(|(i, item)| jalwa_ui::render_library_item(item, i))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            };
-            json!({ "content": [{ "type": "text", "text": text }] })
-        }
-        "jalwa_recommend" => {
-            let item_id_str = args["item_id"].as_str().unwrap_or("");
-            let max = args["max"].as_u64().unwrap_or(5) as usize;
-            let lib = plib.lock().unwrap();
-
-            match uuid::Uuid::parse_str(item_id_str) {
-                Ok(seed_id) => {
-                    let recs = jalwa_ai::recommend(&lib.library, seed_id, max);
-                    if recs.is_empty() {
-                        json!({ "content": [{ "type": "text", "text": "No recommendations found" }] })
-                    } else {
-                        let text: Vec<String> = recs
-                            .iter()
-                            .map(|r| {
-                                let title = lib
-                                    .library
-                                    .find_by_id(r.item_id)
-                                    .map(|i| {
-                                        let artist = i.artist.as_deref().unwrap_or("Unknown");
-                                        format!("{} - {}", artist, i.title)
-                                    })
-                                    .unwrap_or_else(|| r.item_id.to_string());
-                                let reasons: Vec<String> =
-                                    r.reasons.iter().map(|r| r.to_string()).collect();
-                                format!("  {:.0}% {} ({})", r.score, title, reasons.join(", "))
-                            })
-                            .collect();
-                        json!({ "content": [{ "type": "text", "text": text.join("\n") }] })
-                    }
-                }
-                Err(_) => {
-                    json!({ "content": [{ "type": "text", "text": "invalid item_id UUID" }], "isError": true })
-                }
-            }
-        }
-        "jalwa_queue" => {
-            let action = args["action"].as_str().unwrap_or("");
-            match action {
-                "list" => {
-                    let lib = plib.lock().unwrap();
-                    // Queue state is not persisted in the MCP server — report current engine state
-                    let eng = engine.lock().unwrap();
-                    let path_info = eng.current_path()
-                        .and_then(|p| lib.library.find_by_path(p))
-                        .map(|item| {
-                            let artist = item.artist.as_deref().unwrap_or("Unknown");
-                            format!("Now playing: {} - {}", artist, item.title)
-                        })
-                        .unwrap_or_else(|| "Queue is empty".to_string());
-                    json!({ "content": [{ "type": "text", "text": path_info }] })
-                }
-                "enqueue" => {
-                    let item_id = args["item_id"].as_str().unwrap_or("");
-                    if item_id.is_empty() {
-                        json!({ "content": [{ "type": "text", "text": "item_id required for enqueue" }], "isError": true })
-                    } else {
-                        let lib = plib.lock().unwrap();
-                        match uuid::Uuid::parse_str(item_id).ok().and_then(|id| lib.library.find_by_id(id)) {
-                            Some(item) => {
-                                json!({ "content": [{ "type": "text", "text": format!("Enqueued: {} - {}", item.artist.as_deref().unwrap_or("Unknown"), item.title) }] })
-                            }
-                            None => {
-                                json!({ "content": [{ "type": "text", "text": format!("Item not found: {item_id}") }], "isError": true })
-                            }
-                        }
-                    }
-                }
-                "clear" => {
-                    let mut eng = engine.lock().unwrap();
-                    eng.stop();
-                    json!({ "content": [{ "type": "text", "text": "Queue cleared and playback stopped" }] })
-                }
-                "shuffle" => {
-                    json!({ "content": [{ "type": "text", "text": "Queue shuffled" }] })
-                }
-                _ => json!({ "content": [{ "type": "text", "text": format!("unknown queue action: {action}") }], "isError": true }),
-            }
-        }
-        "jalwa_library" => {
-            let action = args["action"].as_str().unwrap_or("");
-            match action {
-                "stats" => {
-                    let lib = plib.lock().unwrap();
-                    let stats = jalwa_ui::render_library_stats(&lib.library);
-                    json!({ "content": [{ "type": "text", "text": stats }] })
-                }
-                "scan" => {
-                    let path = args["path"].as_str().unwrap_or("");
-                    if path.is_empty() {
-                        json!({ "content": [{ "type": "text", "text": "path required for scan" }], "isError": true })
-                    } else {
-                        match jalwa_core::scanner::scan_directory(std::path::Path::new(path)) {
-                            Ok(scanned) => {
-                                let mut lib = plib.lock().unwrap();
-                                let mut added = 0;
-                                for file in scanned {
-                                    let p = file.path.clone();
-                                    if lib.library.find_by_path(&p).is_some() {
-                                        continue;
-                                    }
-                                    let item = jalwa_core::scanner::scanned_to_media_item(file);
-                                    if lib.add_item(item).is_ok() {
-                                        added += 1;
-                                    }
-                                }
-                                let _ = lib.add_scan_path(std::path::Path::new(path).to_path_buf());
-                                json!({ "content": [{ "type": "text", "text": format!("Scanned {path}: added {added} new items\n{}", jalwa_ui::render_library_stats(&lib.library)) }] })
-                            }
-                            Err(e) => json!({ "content": [{ "type": "text", "text": format!("scan error: {e}") }], "isError": true }),
-                        }
-                    }
-                }
-                "list" => {
-                    let lib = plib.lock().unwrap();
-                    if lib.library.items.is_empty() {
-                        json!({ "content": [{ "type": "text", "text": "Library is empty" }] })
-                    } else {
-                        let text: Vec<String> = lib.library.items.iter().enumerate()
-                            .map(|(i, item)| jalwa_ui::render_library_item(item, i))
-                            .collect();
-                        json!({ "content": [{ "type": "text", "text": text.join("\n") }] })
-                    }
-                }
-                _ => json!({ "content": [{ "type": "text", "text": format!("unknown library action: {action}") }], "isError": true }),
-            }
-        }
-        "jalwa_playlist" => {
-            let action = args["action"].as_str().unwrap_or("");
-            match action {
-                "list" => {
-                    let lib = plib.lock().unwrap();
-                    if lib.library.playlists.is_empty() {
-                        json!({ "content": [{ "type": "text", "text": "No playlists" }] })
-                    } else {
-                        let text: Vec<String> = lib.library.playlists.iter()
-                            .map(|p| format!("{} ({} tracks{})", p.name, p.len(), if p.is_smart { ", smart" } else { "" }))
-                            .collect();
-                        json!({ "content": [{ "type": "text", "text": text.join("\n") }] })
-                    }
-                }
-                "create" => {
-                    let name = args["name"].as_str().unwrap_or("");
-                    if name.is_empty() {
-                        json!({ "content": [{ "type": "text", "text": "name required for create" }], "isError": true })
-                    } else {
-                        let mut lib = plib.lock().unwrap();
-                        let playlist = jalwa_core::Playlist::new(name);
-                        match lib.save_playlist(&playlist) {
-                            Ok(_) => json!({ "content": [{ "type": "text", "text": format!("Created playlist: {name}") }] }),
-                            Err(e) => json!({ "content": [{ "type": "text", "text": format!("error: {e}") }], "isError": true }),
-                        }
-                    }
-                }
-                "add" => {
-                    let name = args["name"].as_str().unwrap_or("");
-                    let item_id = args["item_id"].as_str().unwrap_or("");
-                    if name.is_empty() || item_id.is_empty() {
-                        json!({ "content": [{ "type": "text", "text": "name and item_id required" }], "isError": true })
-                    } else {
-                        let mut lib = plib.lock().unwrap();
-                        match uuid::Uuid::parse_str(item_id) {
-                            Ok(id) => {
-                                if let Some(pl) = lib.library.playlists.iter_mut().find(|p| p.name.eq_ignore_ascii_case(name)) {
-                                    pl.add(id);
-                                    json!({ "content": [{ "type": "text", "text": format!("Added to '{name}'") }] })
-                                } else {
-                                    json!({ "content": [{ "type": "text", "text": format!("Playlist '{name}' not found") }], "isError": true })
-                                }
-                            }
-                            Err(_) => json!({ "content": [{ "type": "text", "text": "invalid UUID" }], "isError": true }),
-                        }
-                    }
-                }
-                "export" => {
-                    let name = args["name"].as_str().unwrap_or("");
-                    let output = args["output"].as_str().unwrap_or("");
-                    if name.is_empty() || output.is_empty() {
-                        json!({ "content": [{ "type": "text", "text": "name and output required" }], "isError": true })
-                    } else {
-                        let lib = plib.lock().unwrap();
-                        match lib.library.playlists.iter().find(|p| p.name.eq_ignore_ascii_case(name)) {
-                            Some(pl) => {
-                                match jalwa_core::playlist_io::save_m3u(pl, &lib.library, std::path::Path::new(output)) {
-                                    Ok(_) => json!({ "content": [{ "type": "text", "text": format!("Exported '{name}' ({} tracks) to {output}", pl.len()) }] }),
-                                    Err(e) => json!({ "content": [{ "type": "text", "text": format!("export error: {e}") }], "isError": true }),
-                                }
-                            }
-                            None => json!({ "content": [{ "type": "text", "text": format!("Playlist '{name}' not found") }], "isError": true }),
-                        }
-                    }
-                }
-                _ => json!({ "content": [{ "type": "text", "text": format!("unknown playlist action: {action}") }], "isError": true }),
-            }
-        }
-        _ => {
-            json!({ "content": [{ "type": "text", "text": format!("unknown tool: {name}") }], "isError": true })
-        }
-    }
+    mcp::run(plib, engine).await
 }
 
 fn ctrlc_handler(running: Arc<std::sync::atomic::AtomicBool>) {
@@ -719,35 +355,10 @@ fn ctrlc_handler(running: Arc<std::sync::atomic::AtomicBool>) {
     });
 }
 
-/// Minimal WAV generator for tests.
+/// Minimal WAV generator for tests — delegates to shared fixture.
 #[cfg(test)]
 fn make_test_wav(num_samples: u32, sample_rate: u32) -> Vec<u8> {
-    let channels: u16 = 1;
-    let bits: u16 = 16;
-    let data_size = num_samples * channels as u32 * (bits as u32 / 8);
-    let file_size = 36 + data_size;
-    let byte_rate = sample_rate * channels as u32 * (bits as u32 / 8);
-    let block_align = channels * (bits / 8);
-    let mut buf = Vec::new();
-    buf.extend_from_slice(b"RIFF");
-    buf.extend_from_slice(&file_size.to_le_bytes());
-    buf.extend_from_slice(b"WAVE");
-    buf.extend_from_slice(b"fmt ");
-    buf.extend_from_slice(&16u32.to_le_bytes());
-    buf.extend_from_slice(&1u16.to_le_bytes());
-    buf.extend_from_slice(&channels.to_le_bytes());
-    buf.extend_from_slice(&sample_rate.to_le_bytes());
-    buf.extend_from_slice(&byte_rate.to_le_bytes());
-    buf.extend_from_slice(&block_align.to_le_bytes());
-    buf.extend_from_slice(&bits.to_le_bytes());
-    buf.extend_from_slice(b"data");
-    buf.extend_from_slice(&data_size.to_le_bytes());
-    for i in 0..num_samples {
-        let t = i as f64 / sample_rate as f64;
-        let s = (t * 440.0 * 2.0 * std::f64::consts::PI).sin();
-        buf.extend_from_slice(&((s * 16000.0) as i16).to_le_bytes());
-    }
-    buf
+    jalwa_core::test_fixtures::make_test_wav(num_samples, sample_rate)
 }
 
 /// Simple ctrlc handler module (inline, no extra dep needed — uses signal directly)
@@ -779,18 +390,11 @@ mod ctrlc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     fn tmp_db() -> (PathBuf, jalwa_core::db::PersistentLibrary) {
         let path = std::env::temp_dir().join(format!("jalwa_cmd_test_{}.db", uuid::Uuid::new_v4()));
         let plib = open_library_at(&path).unwrap();
         (path, plib)
-    }
-
-    fn test_engine() -> Arc<Mutex<jalwa_playback::PlaybackEngine>> {
-        Arc::new(Mutex::new(
-            jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default()),
-        ))
     }
 
     fn tmp_dir_with_wav() -> PathBuf {
@@ -800,8 +404,6 @@ mod tests {
         std::fs::write(dir.join("test.wav"), &wav).unwrap();
         dir
     }
-
-    // ---- cmd_info ----
 
     #[test]
     fn info_with_wav() {
@@ -818,20 +420,14 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ---- cmd_search ----
-
     #[test]
     fn search_empty_library() {
         let (path, _plib) = tmp_db();
-        // Temporarily override db_path by using open_library_at directly
-        // We test the search logic via the library directly
         let plib = open_library_at(&path).unwrap();
         let results = plib.library.search("anything");
         assert!(results.is_empty());
         let _ = std::fs::remove_file(&path);
     }
-
-    // ---- cmd_stats ----
 
     #[test]
     fn stats_empty_library() {
@@ -841,16 +437,12 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    // ---- cmd_library ----
-
     #[test]
     fn library_empty() {
         let (path, plib) = tmp_db();
         assert!(plib.library.items.is_empty());
         let _ = std::fs::remove_file(&path);
     }
-
-    // ---- cmd_scan ----
 
     #[test]
     fn scan_with_wav() {
@@ -877,98 +469,11 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ---- cmd_export ----
-
     #[test]
     fn export_missing_playlist() {
         let (path, plib) = tmp_db();
         let found = plib.library.playlists.iter().find(|p| p.name == "nope");
         assert!(found.is_none());
-        let _ = std::fs::remove_file(&path);
-    }
-
-    // ---- handle_tool_call ----
-
-    #[test]
-    fn tool_call_pause() {
-        let (path, plib) = tmp_db();
-        let plib = Arc::new(Mutex::new(plib));
-        let eng = test_engine();
-        let result = handle_tool_call("jalwa_pause", &json!({}), &plib, &eng);
-        assert!(
-            result["content"][0]["text"]
-                .as_str()
-                .unwrap()
-                .contains("paused")
-        );
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn tool_call_status() {
-        let (path, plib) = tmp_db();
-        let plib = Arc::new(Mutex::new(plib));
-        let eng = test_engine();
-        let result = handle_tool_call("jalwa_status", &json!({}), &plib, &eng);
-        let text = result["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("Stopped"));
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn tool_call_search_empty() {
-        let (path, plib) = tmp_db();
-        let plib = Arc::new(Mutex::new(plib));
-        let eng = test_engine();
-        let result = handle_tool_call("jalwa_search", &json!({"query": "test"}), &plib, &eng);
-        let text = result["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("No results"));
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn tool_call_recommend_invalid_uuid() {
-        let (path, plib) = tmp_db();
-        let plib = Arc::new(Mutex::new(plib));
-        let eng = test_engine();
-        let result = handle_tool_call("jalwa_recommend", &json!({"item_id": "not-a-uuid"}), &plib, &eng);
-        assert!(result["isError"].as_bool().unwrap_or(false));
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn tool_call_recommend_empty_library() {
-        let (path, plib) = tmp_db();
-        let plib = Arc::new(Mutex::new(plib));
-        let eng = test_engine();
-        let result = handle_tool_call(
-            "jalwa_recommend",
-            &json!({"item_id": uuid::Uuid::new_v4().to_string()}),
-            &plib,
-            &eng,
-        );
-        let text = result["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("No recommendations"));
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn tool_call_unknown() {
-        let (path, plib) = tmp_db();
-        let plib = Arc::new(Mutex::new(plib));
-        let eng = test_engine();
-        let result = handle_tool_call("nonexistent_tool", &json!({}), &plib, &eng);
-        assert!(result["isError"].as_bool().unwrap_or(false));
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn tool_call_play_nonexistent() {
-        let (path, plib) = tmp_db();
-        let plib = Arc::new(Mutex::new(plib));
-        let eng = test_engine();
-        let result = handle_tool_call("jalwa_play", &json!({"path": "/nonexistent.wav"}), &plib, &eng);
-        assert!(result["isError"].as_bool().unwrap_or(false));
         let _ = std::fs::remove_file(&path);
     }
 

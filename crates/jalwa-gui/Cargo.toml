@@ -1,0 +1,19 @@
+[package]
+name = "jalwa-gui"
+version = "2026.3.16-1"
+edition = "2024"
+description = "Desktop GUI for Jalwa media player — egui/eframe with wgpu backend"
+license = "GPL-3.0"
+
+[dependencies]
+jalwa-core = { path = "../jalwa-core" }
+jalwa-playback = { path = "../jalwa-playback", default-features = false }
+egui = { workspace = true }
+eframe = { workspace = true }
+image = { workspace = true }
+lofty = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+uuid = { workspace = true }

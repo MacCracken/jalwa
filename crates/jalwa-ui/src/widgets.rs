@@ -354,35 +354,14 @@ fn make_list_item(item: &MediaItem, index: usize) -> ListItem<'static> {
 mod tests {
     use super::*;
     use jalwa_core::db::PersistentLibrary;
-    use jalwa_core::{MediaItem, MediaType, RepeatMode};
+    use jalwa_core::{MediaItem, RepeatMode};
     use jalwa_playback::EngineConfig;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
-    use std::path::PathBuf;
-    use std::time::Duration;
-    use tarang_core::{AudioCodec, ContainerFormat};
     use uuid::Uuid;
 
     fn make_item(title: &str, artist: &str, duration_secs: u64) -> MediaItem {
-        MediaItem {
-            id: Uuid::new_v4(),
-            path: PathBuf::from(format!("/music/{title}.flac")),
-            title: title.to_string(),
-            artist: Some(artist.to_string()),
-            album: Some("Test Album".to_string()),
-            duration: Some(Duration::from_secs(duration_secs)),
-            format: ContainerFormat::Flac,
-            audio_codec: Some(AudioCodec::Flac),
-            video_codec: None,
-            media_type: MediaType::Audio,
-            added_at: chrono::Utc::now(),
-            last_played: None,
-            play_count: 3,
-            rating: Some(4),
-            tags: vec!["rock".to_string()],
-            art_mime: None,
-            art_data: None,
-        }
+        jalwa_core::test_fixtures::make_media_item(title, artist, duration_secs)
     }
 
     fn make_test_app() -> App {

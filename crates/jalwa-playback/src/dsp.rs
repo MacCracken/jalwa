@@ -33,9 +33,9 @@ pub fn analyze_loudness(buf: &AudioBuffer) -> LoudnessInfo {
 
     let mut sum_sq: f64 = 0.0;
     let mut peak: f32 = 0.0;
-    for &s in samples {
+    for &s in samples.iter() {
         sum_sq += (s as f64) * (s as f64);
-        let abs = s.abs();
+        let abs: f32 = s.abs();
         if abs > peak {
             peak = abs;
         }
@@ -226,14 +226,17 @@ fn biquad_process(c: &BiquadCoeffs, s: &mut BiquadState, input: f32) -> f32 {
     output
 }
 
+/// Maximum number of channels supported by the EQ.
+const MAX_EQ_CHANNELS: usize = 8;
+
 /// 10-band graphic equalizer processor.
 ///
-/// Holds per-band biquad filter state for each channel.
+/// Holds per-band biquad filter state for each channel (up to 8).
 /// Call `process()` on each decoded buffer in the decode loop.
 pub struct Equalizer {
     coeffs: [BiquadCoeffs; 10],
     /// Per-band, per-channel state. Indexed as [band][channel].
-    state: [[BiquadState; 2]; 10],
+    state: [[BiquadState; MAX_EQ_CHANNELS]; 10],
     sample_rate: u32,
     pub settings: EqSettings,
 }
@@ -248,7 +251,7 @@ impl Equalizer {
                 a1: 0.0,
                 a2: 0.0,
             }; 10],
-            state: [[BiquadState::default(); 2]; 10],
+            state: [[BiquadState::default(); MAX_EQ_CHANNELS]; 10],
             sample_rate,
             settings: EqSettings::default(),
         };
@@ -266,7 +269,7 @@ impl Equalizer {
 
     /// Reset filter state (call on seek or track change).
     pub fn reset(&mut self) {
-        self.state = [[BiquadState::default(); 2]; 10];
+        self.state = [[BiquadState::default(); MAX_EQ_CHANNELS]; 10];
     }
 
     /// Process an audio buffer through the 10-band EQ in-place.
@@ -283,6 +286,7 @@ impl Equalizer {
 
         let samples = buf_to_f32(buf);
         let channels = buf.channels as usize;
+        let active_channels = channels.min(MAX_EQ_CHANNELS);
         let mut output = samples.to_vec();
 
         // Apply each band's biquad filter in series
@@ -292,7 +296,7 @@ impl Equalizer {
             }
             let coeffs = &self.coeffs[band];
             for frame in 0..(output.len() / channels) {
-                for ch in 0..channels.min(2) {
+                for ch in 0..active_channels {
                     let idx = frame * channels + ch;
                     output[idx] = biquad_process(coeffs, &mut self.state[band][ch], output[idx]);
                 }
@@ -305,16 +309,36 @@ impl Equalizer {
 
 // ---- Helpers ----
 
-fn buf_to_f32(buf: &AudioBuffer) -> &[f32] {
+/// Safely interpret an AudioBuffer's bytes as `&[f32]`.
+///
+/// If the underlying `Bytes` is not 4-byte aligned we copy into an
+/// aligned temporary. The returned `Cow` avoids the copy when alignment
+/// is already correct (the common path).
+pub(crate) fn buf_to_f32_safe(buf: &AudioBuffer) -> std::borrow::Cow<'_, [f32]> {
     if buf.data.is_empty() {
-        return &[];
+        return std::borrow::Cow::Borrowed(&[]);
     }
-    unsafe { std::slice::from_raw_parts(buf.data.as_ptr() as *const f32, buf.data.len() / 4) }
+    match bytemuck::try_cast_slice::<u8, f32>(&buf.data) {
+        Ok(s) => std::borrow::Cow::Borrowed(s),
+        Err(_) => {
+            // Fallback: copy into an aligned Vec
+            let n = buf.data.len() / 4;
+            let mut out = vec![0.0f32; n];
+            for (i, chunk) in buf.data.chunks_exact(4).enumerate() {
+                out[i] = f32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            }
+            std::borrow::Cow::Owned(out)
+        }
+    }
+}
+
+/// Legacy alias used by existing call sites that only need a `&[f32]` view.
+fn buf_to_f32(buf: &AudioBuffer) -> std::borrow::Cow<'_, [f32]> {
+    buf_to_f32_safe(buf)
 }
 
 fn f32_to_buf(samples: &[f32], template: &AudioBuffer) -> AudioBuffer {
-    let bytes =
-        unsafe { std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4) };
+    let bytes: &[u8] = bytemuck::cast_slice(samples);
     AudioBuffer {
         data: bytes::Bytes::copy_from_slice(bytes),
         sample_format: template.sample_format,
@@ -333,8 +357,7 @@ mod tests {
     use tarang_core::SampleFormat;
 
     fn make_buf(samples: &[f32], channels: u16, sample_rate: u32) -> AudioBuffer {
-        let bytes =
-            unsafe { std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4) };
+        let bytes: &[u8] = bytemuck::cast_slice(samples);
         AudioBuffer {
             data: Bytes::copy_from_slice(bytes),
             sample_format: SampleFormat::F32,
@@ -389,7 +412,7 @@ mod tests {
         let buf = make_buf(&samples, 1, 44100);
         let result = normalize(&buf, 3.0); // 3x gain would clip
         let out = buf_to_f32(&result);
-        for &s in out {
+        for &s in out.iter() {
             assert!(s.abs() <= 1.0, "sample {} exceeds 1.0", s);
         }
     }
@@ -400,7 +423,7 @@ mod tests {
         let buf = make_buf(&samples, 1, 44100);
         let result = normalize(&buf, 0.5);
         let out = buf_to_f32(&result);
-        for &s in out {
+        for &s in out.iter() {
             assert!((s - 0.4).abs() < 0.001, "expected 0.4, got {}", s);
         }
     }
@@ -487,8 +510,8 @@ mod tests {
         // Output should differ from input
         assert_ne!(out.data, buf.data);
         // RMS should be higher (boosted)
-        let in_rms = rms(buf_to_f32(&buf));
-        let out_rms = rms(buf_to_f32(&out));
+        let in_rms = rms(&buf_to_f32(&buf));
+        let out_rms = rms(&buf_to_f32(&out));
         assert!(
             out_rms > in_rms,
             "boost should increase RMS: in={in_rms}, out={out_rms}"
@@ -504,8 +527,8 @@ mod tests {
         eq.settings.set_band(5, -12.0); // cut 1kHz
         eq.update_coefficients();
         let out = eq.process(&buf);
-        let in_rms = rms(buf_to_f32(&buf));
-        let out_rms = rms(buf_to_f32(&out));
+        let in_rms = rms(&buf_to_f32(&buf));
+        let out_rms = rms(&buf_to_f32(&out));
         assert!(
             out_rms < in_rms,
             "cut should decrease RMS: in={in_rms}, out={out_rms}"

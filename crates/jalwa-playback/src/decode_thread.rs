@@ -91,6 +91,7 @@ pub fn decode_loop(
     let mut muted = false;
     let mut equalizer = Equalizer::new(config.sample_rate);
     let mut normalize_enabled = false;
+    let mut smooth_gain: f32 = 1.0; // Smoothed normalization gain to prevent pumping
 
     // Open decoder
     let mut decoder = match FileDecoder::open_path(&path) {
@@ -169,6 +170,8 @@ pub fn decode_loop(
                     if let Err(e) = decoder.seek(pos) {
                         let _ = event_tx.send(EngineEvent::Error(format!("seek: {e}")));
                     }
+                    // Reset EQ filter state to prevent transient click from stale samples
+                    equalizer.reset();
                     break;
                 }
                 Some(EngineCommand::Volume(v)) => {
@@ -202,6 +205,7 @@ pub fn decode_loop(
                 if let Some(next) = next_decoder.take() {
                     decoder = next;
                     near_end_sent = false;
+                    equalizer.reset();
                     let _ = event_tx.send(EngineEvent::TrackChanged);
                     continue;
                 }
@@ -223,8 +227,8 @@ pub fn decode_loop(
             match resample(&buf, config.sample_rate) {
                 Ok(b) => b,
                 Err(e) => {
-                    tracing::warn!("resample error: {e}");
-                    buf
+                    let _ = event_tx.send(EngineEvent::Error(format!("resample: {e}")));
+                    continue; // Skip this buffer rather than output at wrong rate
                 }
             }
         } else {
@@ -241,8 +245,8 @@ pub fn decode_loop(
             match mix_channels(&buf, target) {
                 Ok(b) => b,
                 Err(e) => {
-                    tracing::warn!("channel mix error: {e}");
-                    buf
+                    let _ = event_tx.send(EngineEvent::Error(format!("channel mix: {e}")));
+                    continue; // Skip this buffer rather than output wrong channel count
                 }
             }
         } else {
@@ -252,16 +256,19 @@ pub fn decode_loop(
         // Apply equalizer
         let buf = equalizer.process(&buf);
 
-        // Apply normalization
+        // Apply normalization with smoothed gain to prevent pumping
         let buf = if normalize_enabled {
             let info = dsp::analyze_loudness(&buf);
-            dsp::normalize(&buf, info.gain)
+            // Exponential moving average: attack fast (0.3), release slow (0.05)
+            let alpha = if info.gain < smooth_gain { 0.3 } else { 0.05 };
+            smooth_gain = smooth_gain + alpha * (info.gain - smooth_gain);
+            dsp::normalize(&buf, smooth_gain)
         } else {
             buf
         };
 
-        // Apply volume
-        let buf = if muted || (volume - 1.0).abs() > f32::EPSILON {
+        // Apply volume (tolerance accounts for f32 drift from repeated UI adjustments)
+        let buf = if muted || (volume - 1.0).abs() > 1e-4 {
             let gain = if muted { 0.0 } else { volume };
             apply_volume(&buf, gain)
         } else {
@@ -296,11 +303,9 @@ pub fn decode_loop(
 
 /// Apply volume gain to an AudioBuffer, returning a new buffer.
 pub(crate) fn apply_volume(buf: &tarang_core::AudioBuffer, gain: f32) -> tarang_core::AudioBuffer {
-    let samples: &[f32] =
-        unsafe { std::slice::from_raw_parts(buf.data.as_ptr() as *const f32, buf.data.len() / 4) };
+    let samples = dsp::buf_to_f32_safe(buf);
     let scaled: Vec<f32> = samples.iter().map(|s| s * gain).collect();
-    let bytes =
-        unsafe { std::slice::from_raw_parts(scaled.as_ptr() as *const u8, scaled.len() * 4) };
+    let bytes: &[u8] = bytemuck::cast_slice(&scaled);
     tarang_core::AudioBuffer {
         data: bytes::Bytes::copy_from_slice(bytes),
         sample_format: buf.sample_format,

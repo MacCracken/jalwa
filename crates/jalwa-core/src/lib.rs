@@ -442,6 +442,68 @@ pub enum JalwaError {
 
 pub type Result<T> = std::result::Result<T, JalwaError>;
 
+/// Shared test fixtures for use across the workspace.
+///
+/// Always compiled so downstream crate tests can use it.
+/// The functions are cheap (no I/O, no allocations beyond the returned struct).
+pub mod test_fixtures {
+    use super::*;
+    use tarang_core::{AudioCodec, ContainerFormat};
+
+    /// Create a `MediaItem` with common test defaults.
+    pub fn make_media_item(title: &str, artist: &str, duration_secs: u64) -> MediaItem {
+        MediaItem {
+            id: Uuid::new_v4(),
+            path: std::path::PathBuf::from(format!("/music/{title}.flac")),
+            title: title.to_string(),
+            artist: Some(artist.to_string()),
+            album: Some("Album".to_string()),
+            duration: Some(std::time::Duration::from_secs(duration_secs)),
+            format: ContainerFormat::Flac,
+            audio_codec: Some(AudioCodec::Flac),
+            video_codec: None,
+            media_type: MediaType::Audio,
+            added_at: chrono::Utc::now(),
+            last_played: None,
+            play_count: 0,
+            rating: None,
+            tags: Vec::new(),
+            art_mime: None,
+            art_data: None,
+        }
+    }
+
+    /// Generate a minimal valid WAV file in memory (mono 16-bit PCM, 440 Hz sine).
+    pub fn make_test_wav(num_samples: u32, sample_rate: u32) -> Vec<u8> {
+        let channels: u16 = 1;
+        let bits: u16 = 16;
+        let data_size = num_samples * channels as u32 * (bits as u32 / 8);
+        let file_size = 36 + data_size;
+        let byte_rate = sample_rate * channels as u32 * (bits as u32 / 8);
+        let block_align = channels * (bits / 8);
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&file_size.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&channels.to_le_bytes());
+        buf.extend_from_slice(&sample_rate.to_le_bytes());
+        buf.extend_from_slice(&byte_rate.to_le_bytes());
+        buf.extend_from_slice(&block_align.to_le_bytes());
+        buf.extend_from_slice(&bits.to_le_bytes());
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&data_size.to_le_bytes());
+        for i in 0..num_samples {
+            let t = i as f64 / sample_rate as f64;
+            let s = (t * 440.0 * 2.0 * std::f64::consts::PI).sin();
+            buf.extend_from_slice(&((s * 16000.0) as i16).to_le_bytes());
+        }
+        buf
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

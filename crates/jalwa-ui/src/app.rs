@@ -141,11 +141,8 @@ impl App {
 mod tests {
     use super::*;
     use jalwa_core::db::PersistentLibrary;
-    use jalwa_core::{MediaItem, MediaType};
+    use jalwa_core::MediaItem;
     use jalwa_playback::EngineConfig;
-    use std::path::PathBuf;
-    use std::time::Duration;
-    use tarang_core::{AudioCodec, ContainerFormat};
     use uuid::Uuid;
 
     fn make_test_app() -> App {
@@ -156,25 +153,7 @@ mod tests {
     }
 
     fn make_item(title: &str, artist: &str) -> MediaItem {
-        MediaItem {
-            id: Uuid::new_v4(),
-            path: PathBuf::from(format!("/music/{title}.flac")),
-            title: title.to_string(),
-            artist: Some(artist.to_string()),
-            album: Some("Album".to_string()),
-            duration: Some(Duration::from_secs(200)),
-            format: ContainerFormat::Flac,
-            audio_codec: Some(AudioCodec::Flac),
-            video_codec: None,
-            media_type: MediaType::Audio,
-            added_at: chrono::Utc::now(),
-            last_played: None,
-            play_count: 0,
-            rating: None,
-            tags: Vec::new(),
-            art_mime: None,
-            art_data: None,
-        }
+        jalwa_core::test_fixtures::make_media_item(title, artist, 200)
     }
 
     #[test]

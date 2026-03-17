@@ -4,6 +4,7 @@ members = [
     "crates/jalwa-core",
     "crates/jalwa-playback",
     "crates/jalwa-ui",
+    "crates/jalwa-gui",
     "crates/jalwa-ai",
 ]
 
@@ -21,6 +22,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 
 bytes = "1"
+bytemuck = { version = "1", features = ["derive"] }
 
 # Library
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -30,6 +32,11 @@ walkdir = "2"
 # TUI
 ratatui = "0.29"
 crossterm = "0.28"
+
+# GUI
+egui = "0.33"
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "wgpu", "wayland"] }
+image = { version = "0.25", features = ["jpeg", "png"] }
 
 # File watching
 notify = { version = "7", default-features = false, features = ["macos_kqueue"] }
@@ -49,7 +56,7 @@ tarang-ai = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16
 
 [package]
 name = "jalwa"
-version = "2026.3.16"
+version = "2026.3.16-1"
 edition = "2024"
 description = "Jalwa — AI-native media player for AGNOS, built on the Tarang media framework"
 license = "GPL-3.0"
@@ -62,6 +69,7 @@ pipewire = ["jalwa-playback/pipewire"]
 jalwa-core = { path = "crates/jalwa-core" }
 jalwa-playback = { path = "crates/jalwa-playback", default-features = false }
 jalwa-ui = { path = "crates/jalwa-ui" }
+jalwa-gui = { path = "crates/jalwa-gui" }
 jalwa-ai = { path = "crates/jalwa-ai" }
 tarang-core = { workspace = true }
 tarang-audio = { workspace = true }

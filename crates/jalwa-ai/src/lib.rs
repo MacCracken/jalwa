@@ -259,30 +259,7 @@ pub fn analyze_library(library: &Library) -> LibraryInsights {
 mod tests {
     use super::*;
     use jalwa_core::*;
-    use std::path::PathBuf;
-    use tarang_core::{AudioCodec, ContainerFormat};
-
-    fn make_item(title: &str, artist: &str, duration_secs: u64) -> MediaItem {
-        MediaItem {
-            id: Uuid::new_v4(),
-            path: PathBuf::from(format!("/music/{title}.flac")),
-            title: title.to_string(),
-            artist: Some(artist.to_string()),
-            album: Some("Album".to_string()),
-            duration: Some(Duration::from_secs(duration_secs)),
-            format: ContainerFormat::Flac,
-            audio_codec: Some(AudioCodec::Flac),
-            video_codec: None,
-            media_type: MediaType::Audio,
-            added_at: chrono::Utc::now(),
-            last_played: None,
-            play_count: 0,
-            rating: None,
-            tags: Vec::new(),
-            art_mime: None,
-            art_data: None,
-        }
-    }
+    use jalwa_core::test_fixtures::make_media_item as make_item;
 
     #[test]
     fn recommend_same_artist() {

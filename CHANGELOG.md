@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026.3.16-1
+
+Audio pipeline security audit, tarang upgrade, MCP fixes, fingerprint integration, test coverage push.
+
+### Security & Correctness (audit: 2 HIGH, 3 MEDIUM, 2 LOW)
+
+#### HIGH severity
+- **jalwa-playback/dsp.rs**: Unsafe `from_raw_parts` cast from `*const u8` → `*const f32` without alignment check (UB on unaligned `Bytes`) — replaced with `bytemuck::try_cast_slice` + fallback copy via `buf_to_f32_safe()`
+- **jalwa-playback/decode_thread.rs**: `apply_volume` same alignment UB — now uses `bytemuck::cast_slice`
+- **jalwa-ai/fingerprint.rs**: Decoded audio blindly cast to F32 regardless of actual sample format — added `decode_samples_to_f32()` with I16/I32/F32 dispatch
+
+#### MEDIUM severity
+- **jalwa-playback/decode_thread.rs**: EQ biquad state not reset on seek or track change — click/pop transients at seek points. Now calls `equalizer.reset()` on Seek command and gapless transition
+- **jalwa-playback/dsp.rs**: EQ hardcoded to 2 channels — channels 3+ passed through unfiltered. Expanded state to `MAX_EQ_CHANNELS = 8`
+- **jalwa-playback/decode_thread.rs**: Resample/channel-mix errors silently passed wrong-format buffers to PipeWire — now skips buffer and sends error event instead of outputting at wrong rate/channel count
+
+#### LOW severity
+- **jalwa-playback/decode_thread.rs**: Per-buffer normalization gain caused pumping/breathing — added exponential moving average smoothing (fast attack 0.3, slow release 0.05)
+- **jalwa-playback/decode_thread.rs**: Volume unity check used `f32::EPSILON` (~1.19e-7) — widened to `1e-4` to avoid unnecessary per-sample multiply from float drift after repeated UI adjustments
+
+### Tarang upgrade: 2026.3.16 → 2026.3.16-1
+- Picks up 26 upstream security fixes (18 HIGH, 8 MEDIUM) including: MP3 magic byte panic, `bytes_to_f32` assert panics, unsafe alignment in PipeWire output, NaN panics, MP4 OOM on size-0 boxes, dav1d plane slicing
+- Lock-free PipeWire SPSC ring buffer (replaces sleep-based loop)
+- openh264 0.6 → 0.9 (fixes RUSTSEC-2025-0008 heap overflow)
+- libvpx-sys → env-libvpx-sys 5.1 (eliminates RUSTSEC-2023-0018, RUSTSEC-2018-0017)
+- 110+ new upstream tests (200 → 310)
+
+### MCP server fixes
+- `jalwa_play`, `jalwa_pause`, `jalwa_status` now use shared `Arc<Mutex<PlaybackEngine>>` — no longer create throwaway engines per call
+- `jalwa_pause` actually calls `engine.pause()` and returns real playback status
+- `jalwa_status` polls events and returns live engine state
+- `jalwa_queue list` reports currently playing track from shared engine
+- `jalwa_queue clear` stops playback via shared engine
+
+### Local audio fingerprinting (jalwa-ai)
+- New `fingerprint.rs` module: `fingerprint_file()` and `find_similar_local()`
+- Decodes first 30s of audio via tarang, downmixes to mono, computes Chromaprint-style hash
+- `find_similar_local()` compares seed file against all library items by Hamming distance
+- Format-aware: handles I16, I32, F32 decoded buffers correctly
+- Dependencies added: `tarang-audio`, `bytes`, `bytemuck`
+
+### Test coverage: 235 tests (was 167)
+- **widgets.rs** +14: TestBackend rendering for Library, NowPlaying, Queue, Equalizer views, status bar, keybinds, search mode
+- **tui.rs** +28: `handle_normal_input` (quit, tab, nav, volume, mute, search, repeat, shuffle, enqueue, EQ, normalize, delete, clear), `handle_search_input` (type, backspace, escape, enter, nav), `handle_mpris_command` (all 7 MPRIS command variants)
+- **decode_thread.rs** +8: play-to-end integration, stop command, volume command, nonexistent file, pause/resume, defaults, debug/clone
+- **fingerprint.rs** +3: serialization, nonexistent file, empty library
+
+### Refactoring
+- **Shared test fixtures**: Consolidated 5 copies of `make_item()` and 3 copies of `make_test_wav()` into `jalwa_core::test_fixtures` module, used by all crate test suites
+- **MCP tool handlers**: Extracted 254-line `handle_tool_call()` into 8 focused functions (`tool_play`, `tool_pause`, `tool_status`, `tool_search`, `tool_recommend`, `tool_queue`, `tool_library`, `tool_playlist`) + `mcp_ok()`/`mcp_err()` response helpers
+- **Dead code removed**: `VectorSearchResponse`, `VectorSearchResult` structs and unused `Context` import from `daimon.rs`
+- Zero compiler warnings workspace-wide
+
+### Dependencies added
+- `bytemuck = "1"` (features: derive) — safe transmute for audio buffer alignment
+
+### Roadmap updates
+- Test coverage tiers 1-3 marked complete
+- Phase 8 audio fingerprinting marked done
+- Phase 6 (Video) annotated as prerequisites-met, planned not started
+
 ## 2026.3.16
 
 ### Audio Gap Closure

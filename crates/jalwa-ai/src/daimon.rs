@@ -6,7 +6,7 @@
 //! - Vector store for fingerprint-based similarity recommendations
 //! - LLM-powered recommendations via hoosh ("find me something chill")
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use jalwa_core::{Library, MediaItem};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -400,18 +400,6 @@ pub struct TranscriptionSegment {
 }
 
 #[derive(Debug, Deserialize)]
-struct VectorSearchResponse {
-    results: Vec<VectorSearchResult>,
-}
-
-#[derive(Debug, Deserialize)]
-struct VectorSearchResult {
-    content: String,
-    score: f64,
-    metadata: serde_json::Value,
-}
-
-#[derive(Debug, Deserialize)]
 struct RagQueryResponse {
     results: Vec<RagResult>,
 }
@@ -507,29 +495,7 @@ mod tests {
     use jalwa_core::*;
     use std::path::PathBuf;
     use std::time::Duration;
-    use tarang_core::{AudioCodec, ContainerFormat};
-
-    fn make_item(title: &str, artist: &str, duration_secs: u64) -> MediaItem {
-        MediaItem {
-            id: uuid::Uuid::new_v4(),
-            path: PathBuf::from(format!("/music/{title}.flac")),
-            title: title.to_string(),
-            artist: Some(artist.to_string()),
-            album: Some("Album".to_string()),
-            duration: Some(Duration::from_secs(duration_secs)),
-            format: ContainerFormat::Flac,
-            audio_codec: Some(AudioCodec::Flac),
-            video_codec: None,
-            media_type: MediaType::Audio,
-            added_at: chrono::Utc::now(),
-            last_played: None,
-            play_count: 0,
-            rating: None,
-            tags: Vec::new(),
-            art_mime: None,
-            art_data: None,
-        }
-    }
+    use jalwa_core::test_fixtures::make_media_item as make_item;
 
     #[test]
     fn daimon_config_defaults() {

@@ -556,8 +556,7 @@ mod tests {
     // ---- apply_volume tests ----
 
     fn make_test_buf(samples: &[f32]) -> tarang_core::AudioBuffer {
-        let bytes =
-            unsafe { std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4) };
+        let bytes: &[u8] = bytemuck::cast_slice(samples);
         tarang_core::AudioBuffer {
             data: bytes::Bytes::copy_from_slice(bytes),
             sample_format: tarang_core::SampleFormat::F32,
@@ -569,10 +568,7 @@ mod tests {
     }
 
     fn read_f32(buf: &tarang_core::AudioBuffer) -> Vec<f32> {
-        let s = unsafe {
-            std::slice::from_raw_parts(buf.data.as_ptr() as *const f32, buf.data.len() / 4)
-        };
-        s.to_vec()
+        dsp::buf_to_f32_safe(buf).into_owned()
     }
 
     #[test]
