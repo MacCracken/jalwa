@@ -3,6 +3,13 @@
 //! Smart playlists, content-based recommendations, transcription routing via hoosh,
 //! and media analysis powered by tarang-ai.
 
+pub mod daimon;
+
+pub use daimon::{
+    DaimonClient, DaimonConfig, HooshConfig as HooshLlmConfig, HooshLlmClient, LlmRecommendation,
+    LlmSuggestion, RagResult, SimilarMedia, TranscriptionResult,
+};
+
 use jalwa_core::{Library, MediaType, Playlist};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

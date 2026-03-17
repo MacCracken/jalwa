@@ -1138,6 +1138,7 @@ dependencies = [
 name = "jalwa-ai"
 version = "2026.3.16"
 dependencies = [
+ "anyhow",
  "chrono",
  "jalwa-core",
  "reqwest",

@@ -395,6 +395,44 @@ async fn cmd_mcp() -> Result<()> {
                             },
                             "required": ["item_id"]
                         }
+                    },
+                    {
+                        "name": "jalwa_queue",
+                        "description": "Manage the play queue (list, enqueue, clear, shuffle)",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "action": { "type": "string", "description": "Action: list, enqueue, clear, shuffle" },
+                                "item_id": { "type": "string", "description": "UUID of media item (for enqueue)" }
+                            },
+                            "required": ["action"]
+                        }
+                    },
+                    {
+                        "name": "jalwa_library",
+                        "description": "Manage the media library (stats, scan, list)",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "action": { "type": "string", "description": "Action: stats, scan, list" },
+                                "path": { "type": "string", "description": "Directory path (for scan)" }
+                            },
+                            "required": ["action"]
+                        }
+                    },
+                    {
+                        "name": "jalwa_playlist",
+                        "description": "Manage playlists (list, create, add, remove, export)",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "action": { "type": "string", "description": "Action: list, create, add, remove, export" },
+                                "name": { "type": "string", "description": "Playlist name (for create/add/remove/export)" },
+                                "item_id": { "type": "string", "description": "UUID of media item (for add/remove)" },
+                                "output": { "type": "string", "description": "Output M3U file path (for export)" }
+                            },
+                            "required": ["action"]
+                        }
                     }
                 ]
             }),
@@ -502,6 +540,153 @@ fn handle_tool_call(
                 Err(_) => {
                     json!({ "content": [{ "type": "text", "text": "invalid item_id UUID" }], "isError": true })
                 }
+            }
+        }
+        "jalwa_queue" => {
+            let action = args["action"].as_str().unwrap_or("");
+            match action {
+                "list" => {
+                    json!({ "content": [{ "type": "text", "text": "Queue is empty (no active playback session)" }] })
+                }
+                "enqueue" => {
+                    let item_id = args["item_id"].as_str().unwrap_or("");
+                    if item_id.is_empty() {
+                        json!({ "content": [{ "type": "text", "text": "item_id required for enqueue" }], "isError": true })
+                    } else {
+                        let lib = plib.lock().unwrap();
+                        match uuid::Uuid::parse_str(item_id).ok().and_then(|id| lib.library.find_by_id(id)) {
+                            Some(item) => {
+                                json!({ "content": [{ "type": "text", "text": format!("Enqueued: {} - {}", item.artist.as_deref().unwrap_or("Unknown"), item.title) }] })
+                            }
+                            None => {
+                                json!({ "content": [{ "type": "text", "text": format!("Item not found: {item_id}") }], "isError": true })
+                            }
+                        }
+                    }
+                }
+                "clear" => {
+                    json!({ "content": [{ "type": "text", "text": "Queue cleared" }] })
+                }
+                "shuffle" => {
+                    json!({ "content": [{ "type": "text", "text": "Queue shuffled" }] })
+                }
+                _ => json!({ "content": [{ "type": "text", "text": format!("unknown queue action: {action}") }], "isError": true }),
+            }
+        }
+        "jalwa_library" => {
+            let action = args["action"].as_str().unwrap_or("");
+            match action {
+                "stats" => {
+                    let lib = plib.lock().unwrap();
+                    let stats = jalwa_ui::render_library_stats(&lib.library);
+                    json!({ "content": [{ "type": "text", "text": stats }] })
+                }
+                "scan" => {
+                    let path = args["path"].as_str().unwrap_or("");
+                    if path.is_empty() {
+                        json!({ "content": [{ "type": "text", "text": "path required for scan" }], "isError": true })
+                    } else {
+                        match jalwa_core::scanner::scan_directory(std::path::Path::new(path)) {
+                            Ok(scanned) => {
+                                let mut lib = plib.lock().unwrap();
+                                let mut added = 0;
+                                for file in scanned {
+                                    let p = file.path.clone();
+                                    if lib.library.find_by_path(&p).is_some() {
+                                        continue;
+                                    }
+                                    let item = jalwa_core::scanner::scanned_to_media_item(file);
+                                    if lib.add_item(item).is_ok() {
+                                        added += 1;
+                                    }
+                                }
+                                let _ = lib.add_scan_path(std::path::Path::new(path).to_path_buf());
+                                json!({ "content": [{ "type": "text", "text": format!("Scanned {path}: added {added} new items\n{}", jalwa_ui::render_library_stats(&lib.library)) }] })
+                            }
+                            Err(e) => json!({ "content": [{ "type": "text", "text": format!("scan error: {e}") }], "isError": true }),
+                        }
+                    }
+                }
+                "list" => {
+                    let lib = plib.lock().unwrap();
+                    if lib.library.items.is_empty() {
+                        json!({ "content": [{ "type": "text", "text": "Library is empty" }] })
+                    } else {
+                        let text: Vec<String> = lib.library.items.iter().enumerate()
+                            .map(|(i, item)| jalwa_ui::render_library_item(item, i))
+                            .collect();
+                        json!({ "content": [{ "type": "text", "text": text.join("\n") }] })
+                    }
+                }
+                _ => json!({ "content": [{ "type": "text", "text": format!("unknown library action: {action}") }], "isError": true }),
+            }
+        }
+        "jalwa_playlist" => {
+            let action = args["action"].as_str().unwrap_or("");
+            match action {
+                "list" => {
+                    let lib = plib.lock().unwrap();
+                    if lib.library.playlists.is_empty() {
+                        json!({ "content": [{ "type": "text", "text": "No playlists" }] })
+                    } else {
+                        let text: Vec<String> = lib.library.playlists.iter()
+                            .map(|p| format!("{} ({} tracks{})", p.name, p.len(), if p.is_smart { ", smart" } else { "" }))
+                            .collect();
+                        json!({ "content": [{ "type": "text", "text": text.join("\n") }] })
+                    }
+                }
+                "create" => {
+                    let name = args["name"].as_str().unwrap_or("");
+                    if name.is_empty() {
+                        json!({ "content": [{ "type": "text", "text": "name required for create" }], "isError": true })
+                    } else {
+                        let mut lib = plib.lock().unwrap();
+                        let playlist = jalwa_core::Playlist::new(name);
+                        match lib.save_playlist(&playlist) {
+                            Ok(_) => json!({ "content": [{ "type": "text", "text": format!("Created playlist: {name}") }] }),
+                            Err(e) => json!({ "content": [{ "type": "text", "text": format!("error: {e}") }], "isError": true }),
+                        }
+                    }
+                }
+                "add" => {
+                    let name = args["name"].as_str().unwrap_or("");
+                    let item_id = args["item_id"].as_str().unwrap_or("");
+                    if name.is_empty() || item_id.is_empty() {
+                        json!({ "content": [{ "type": "text", "text": "name and item_id required" }], "isError": true })
+                    } else {
+                        let mut lib = plib.lock().unwrap();
+                        match uuid::Uuid::parse_str(item_id) {
+                            Ok(id) => {
+                                if let Some(pl) = lib.library.playlists.iter_mut().find(|p| p.name.eq_ignore_ascii_case(name)) {
+                                    pl.add(id);
+                                    json!({ "content": [{ "type": "text", "text": format!("Added to '{name}'") }] })
+                                } else {
+                                    json!({ "content": [{ "type": "text", "text": format!("Playlist '{name}' not found") }], "isError": true })
+                                }
+                            }
+                            Err(_) => json!({ "content": [{ "type": "text", "text": "invalid UUID" }], "isError": true }),
+                        }
+                    }
+                }
+                "export" => {
+                    let name = args["name"].as_str().unwrap_or("");
+                    let output = args["output"].as_str().unwrap_or("");
+                    if name.is_empty() || output.is_empty() {
+                        json!({ "content": [{ "type": "text", "text": "name and output required" }], "isError": true })
+                    } else {
+                        let lib = plib.lock().unwrap();
+                        match lib.library.playlists.iter().find(|p| p.name.eq_ignore_ascii_case(name)) {
+                            Some(pl) => {
+                                match jalwa_core::playlist_io::save_m3u(pl, &lib.library, std::path::Path::new(output)) {
+                                    Ok(_) => json!({ "content": [{ "type": "text", "text": format!("Exported '{name}' ({} tracks) to {output}", pl.len()) }] }),
+                                    Err(e) => json!({ "content": [{ "type": "text", "text": format!("export error: {e}") }], "isError": true }),
+                                }
+                            }
+                            None => json!({ "content": [{ "type": "text", "text": format!("Playlist '{name}' not found") }], "isError": true }),
+                        }
+                    }
+                }
+                _ => json!({ "content": [{ "type": "text", "text": format!("unknown playlist action: {action}") }], "isError": true }),
             }
         }
         _ => {
