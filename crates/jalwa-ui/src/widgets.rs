@@ -349,3 +349,204 @@ fn make_list_item(item: &MediaItem, index: usize) -> ListItem<'static> {
         duration
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jalwa_core::db::PersistentLibrary;
+    use jalwa_core::{MediaItem, MediaType, RepeatMode};
+    use jalwa_playback::EngineConfig;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use tarang_core::{AudioCodec, ContainerFormat};
+    use uuid::Uuid;
+
+    fn make_item(title: &str, artist: &str, duration_secs: u64) -> MediaItem {
+        MediaItem {
+            id: Uuid::new_v4(),
+            path: PathBuf::from(format!("/music/{title}.flac")),
+            title: title.to_string(),
+            artist: Some(artist.to_string()),
+            album: Some("Test Album".to_string()),
+            duration: Some(Duration::from_secs(duration_secs)),
+            format: ContainerFormat::Flac,
+            audio_codec: Some(AudioCodec::Flac),
+            video_codec: None,
+            media_type: MediaType::Audio,
+            added_at: chrono::Utc::now(),
+            last_played: None,
+            play_count: 3,
+            rating: Some(4),
+            tags: vec!["rock".to_string()],
+            art_mime: None,
+            art_data: None,
+        }
+    }
+
+    fn make_test_app() -> App {
+        let tmp = std::env::temp_dir().join(format!("jalwa_widget_test_{}.db", Uuid::new_v4()));
+        let plib = PersistentLibrary::open(&tmp).unwrap();
+        let engine = jalwa_playback::PlaybackEngine::new(EngineConfig::default());
+        App::new(plib, engine)
+    }
+
+    fn render_to_string(app: &App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render(frame, app);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut output = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                output.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
+            }
+            output.push('\n');
+        }
+        output
+    }
+
+    // ---- Library view ----
+
+    #[test]
+    fn render_library_view_empty() {
+        let app = make_test_app();
+        let output = render_to_string(&app, 80, 10);
+        assert!(output.contains("Library (0 items)"));
+    }
+
+    #[test]
+    fn render_library_view_with_items() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("Bohemian Rhapsody", "Queen", 354));
+        app.library.library.add_item(make_item("Time", "Pink Floyd", 413));
+        let output = render_to_string(&app, 80, 10);
+        assert!(output.contains("Library (2 items)"));
+        assert!(output.contains("Queen"));
+        assert!(output.contains("Bohemian Rhapsody"));
+        assert!(output.contains("Pink Floyd"));
+    }
+
+    #[test]
+    fn render_library_view_search() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("Bohemian Rhapsody", "Queen", 354));
+        app.library.library.add_item(make_item("Time", "Pink Floyd", 413));
+        app.search_query = "queen".to_string();
+        app.update_search();
+        let output = render_to_string(&app, 80, 10);
+        assert!(output.contains("1 matches"));
+        assert!(output.contains("Queen"));
+    }
+
+    // ---- Now Playing view ----
+
+    #[test]
+    fn render_now_playing_nothing() {
+        let mut app = make_test_app();
+        app.view = View::NowPlaying;
+        let output = render_to_string(&app, 80, 10);
+        assert!(output.contains("Now Playing"));
+        assert!(output.contains("Nothing playing"));
+    }
+
+    // ---- Queue view ----
+
+    #[test]
+    fn render_queue_view_empty() {
+        let mut app = make_test_app();
+        app.view = View::Queue;
+        let output = render_to_string(&app, 80, 10);
+        assert!(output.contains("Queue (0 items)"));
+    }
+
+    #[test]
+    fn render_queue_view_with_items() {
+        let mut app = make_test_app();
+        let item = make_item("Song A", "Artist X", 200);
+        let id = item.id;
+        app.library.library.add_item(item);
+        app.queue.enqueue(id);
+        app.view = View::Queue;
+        let output = render_to_string(&app, 80, 10);
+        assert!(output.contains("Queue (1 items)"));
+        assert!(output.contains("Artist X"));
+    }
+
+    #[test]
+    fn render_queue_view_repeat_shuffle() {
+        let mut app = make_test_app();
+        app.queue.repeat_mode = RepeatMode::All;
+        app.queue.shuffle = true;
+        app.view = View::Queue;
+        let output = render_to_string(&app, 80, 10);
+        assert!(output.contains("[RA]"));
+        assert!(output.contains("[S]"));
+    }
+
+    // ---- Equalizer view ----
+
+    #[test]
+    fn render_eq_view_default() {
+        let mut app = make_test_app();
+        app.view = View::Equalizer;
+        let output = render_to_string(&app, 80, 15);
+        assert!(output.contains("Equalizer [OFF]"));
+        assert!(output.contains("Normalize [OFF]"));
+        // Should show band names
+        assert!(output.contains("31 Hz"));
+        assert!(output.contains("1 kHz"));
+    }
+
+    #[test]
+    fn render_eq_view_enabled() {
+        let mut app = make_test_app();
+        app.engine.toggle_eq();
+        app.view = View::Equalizer;
+        let output = render_to_string(&app, 80, 15);
+        assert!(output.contains("Equalizer [ON]"));
+    }
+
+    // ---- Status area ----
+
+    #[test]
+    fn render_status_bar_stopped() {
+        let app = make_test_app();
+        let output = render_to_string(&app, 80, 10);
+        // Status bar should show stop icon and "No media loaded"
+        assert!(output.contains("No media loaded"));
+    }
+
+    // ---- Keybinds ----
+
+    #[test]
+    fn render_keybinds_normal() {
+        let app = make_test_app();
+        let output = render_to_string(&app, 120, 10);
+        assert!(output.contains("play/pause"));
+        assert!(output.contains("q:quit"));
+    }
+
+    #[test]
+    fn render_keybinds_search_mode() {
+        let mut app = make_test_app();
+        app.input_mode = InputMode::Search;
+        let output = render_to_string(&app, 80, 10);
+        assert!(output.contains("type to search"));
+        assert!(output.contains("Esc:cancel"));
+    }
+
+    #[test]
+    fn render_keybinds_eq_view() {
+        let mut app = make_test_app();
+        app.view = View::Equalizer;
+        let output = render_to_string(&app, 120, 15);
+        assert!(output.contains("band"));
+        assert!(output.contains("gain"));
+    }
+}

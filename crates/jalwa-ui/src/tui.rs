@@ -401,3 +401,338 @@ fn handle_search_input(app: &mut App, key: KeyCode) {
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jalwa_core::db::PersistentLibrary;
+    use jalwa_core::{MediaItem, MediaType};
+    use jalwa_playback::EngineConfig;
+    use jalwa_playback::mpris::MprisCommand;
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use tarang_core::{AudioCodec, ContainerFormat};
+    use uuid::Uuid;
+
+    fn make_item(title: &str, artist: &str) -> MediaItem {
+        MediaItem {
+            id: Uuid::new_v4(),
+            path: PathBuf::from(format!("/music/{title}.flac")),
+            title: title.to_string(),
+            artist: Some(artist.to_string()),
+            album: Some("Album".to_string()),
+            duration: Some(Duration::from_secs(200)),
+            format: ContainerFormat::Flac,
+            audio_codec: Some(AudioCodec::Flac),
+            video_codec: None,
+            media_type: MediaType::Audio,
+            added_at: chrono::Utc::now(),
+            last_played: None,
+            play_count: 0,
+            rating: None,
+            tags: Vec::new(),
+            art_mime: None,
+            art_data: None,
+        }
+    }
+
+    fn make_test_app() -> App {
+        let tmp = std::env::temp_dir().join(format!("jalwa_tui_test_{}.db", Uuid::new_v4()));
+        let plib = PersistentLibrary::open(&tmp).unwrap();
+        let engine = jalwa_playback::PlaybackEngine::new(EngineConfig::default());
+        App::new(plib, engine)
+    }
+
+    // ---- handle_normal_input tests ----
+
+    #[test]
+    fn normal_input_quit() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        handle_normal_input(&mut app, KeyCode::Char('q'), &mut current_id);
+        assert!(!app.running);
+    }
+
+    #[test]
+    fn normal_input_tab_cycles_view() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        assert_eq!(app.view, View::Library);
+        handle_normal_input(&mut app, KeyCode::Tab, &mut current_id);
+        assert_eq!(app.view, View::NowPlaying);
+        handle_normal_input(&mut app, KeyCode::Tab, &mut current_id);
+        assert_eq!(app.view, View::Queue);
+        handle_normal_input(&mut app, KeyCode::Tab, &mut current_id);
+        assert_eq!(app.view, View::Equalizer);
+        handle_normal_input(&mut app, KeyCode::Tab, &mut current_id);
+        assert_eq!(app.view, View::Library);
+    }
+
+    #[test]
+    fn normal_input_up_down_navigation() {
+        let mut app = make_test_app();
+        app.library.library.add_item(make_item("A", "X"));
+        app.library.library.add_item(make_item("B", "Y"));
+        app.library.library.add_item(make_item("C", "Z"));
+        let mut current_id = None;
+
+        handle_normal_input(&mut app, KeyCode::Down, &mut current_id);
+        assert_eq!(app.selected_index, 1);
+        handle_normal_input(&mut app, KeyCode::Down, &mut current_id);
+        assert_eq!(app.selected_index, 2);
+        handle_normal_input(&mut app, KeyCode::Up, &mut current_id);
+        assert_eq!(app.selected_index, 1);
+    }
+
+    #[test]
+    fn normal_input_volume_controls() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+
+        // Start at a level where both + and - are effective
+        app.engine.set_volume(0.5);
+        let mid = app.engine.volume();
+
+        handle_normal_input(&mut app, KeyCode::Char('+'), &mut current_id);
+        assert!(app.engine.volume() > mid);
+
+        handle_normal_input(&mut app, KeyCode::Char('-'), &mut current_id);
+        handle_normal_input(&mut app, KeyCode::Char('-'), &mut current_id);
+        assert!(app.engine.volume() < mid);
+    }
+
+    #[test]
+    fn normal_input_mute_toggle() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        assert!(!app.engine.muted());
+        handle_normal_input(&mut app, KeyCode::Char('m'), &mut current_id);
+        assert!(app.engine.muted());
+        handle_normal_input(&mut app, KeyCode::Char('m'), &mut current_id);
+        assert!(!app.engine.muted());
+    }
+
+    #[test]
+    fn normal_input_enter_search() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        handle_normal_input(&mut app, KeyCode::Char('/'), &mut current_id);
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.view, View::Library);
+    }
+
+    #[test]
+    fn normal_input_repeat_cycle() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        assert_eq!(app.queue.repeat_mode, jalwa_core::RepeatMode::Off);
+        handle_normal_input(&mut app, KeyCode::Char('r'), &mut current_id);
+        assert_eq!(app.queue.repeat_mode, jalwa_core::RepeatMode::One);
+        handle_normal_input(&mut app, KeyCode::Char('r'), &mut current_id);
+        assert_eq!(app.queue.repeat_mode, jalwa_core::RepeatMode::All);
+    }
+
+    #[test]
+    fn normal_input_shuffle_toggle() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        assert!(!app.queue.shuffle);
+        handle_normal_input(&mut app, KeyCode::Char('s'), &mut current_id);
+        assert!(app.queue.shuffle);
+    }
+
+    #[test]
+    fn normal_input_enqueue_from_library() {
+        let mut app = make_test_app();
+        let item = make_item("Song", "Artist");
+        let id = item.id;
+        app.library.library.add_item(item);
+        let mut current_id = None;
+        app.selected_index = 0;
+        handle_normal_input(&mut app, KeyCode::Char('a'), &mut current_id);
+        assert_eq!(app.queue.len(), 1);
+        assert_eq!(app.queue.items[0], id);
+    }
+
+    #[test]
+    fn normal_input_eq_toggle() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        app.view = View::Equalizer;
+        assert!(!app.engine.eq_settings().enabled);
+        handle_normal_input(&mut app, KeyCode::Char('e'), &mut current_id);
+        assert!(app.engine.eq_settings().enabled);
+    }
+
+    #[test]
+    fn normal_input_eq_band_adjust() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        app.view = View::Equalizer;
+        app.selected_index = 3;
+        let initial = app.engine.eq_settings().bands[3];
+        handle_normal_input(&mut app, KeyCode::Right, &mut current_id);
+        assert!(app.engine.eq_settings().bands[3] > initial);
+        handle_normal_input(&mut app, KeyCode::Left, &mut current_id);
+        assert!((app.engine.eq_settings().bands[3] - initial).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn normal_input_normalize_toggle() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        assert!(!app.engine.normalize_enabled());
+        handle_normal_input(&mut app, KeyCode::Char('N'), &mut current_id);
+        assert!(app.engine.normalize_enabled());
+    }
+
+    #[test]
+    fn normal_input_delete_from_queue() {
+        let mut app = make_test_app();
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        app.queue.enqueue(id1);
+        app.queue.enqueue(id2);
+        app.view = View::Queue;
+        app.selected_index = 0;
+        let mut current_id = None;
+        handle_normal_input(&mut app, KeyCode::Char('d'), &mut current_id);
+        assert_eq!(app.queue.len(), 1);
+        assert_eq!(app.queue.items[0], id2);
+    }
+
+    #[test]
+    fn normal_input_clear_queue() {
+        let mut app = make_test_app();
+        app.queue.enqueue(Uuid::new_v4());
+        app.queue.enqueue(Uuid::new_v4());
+        app.view = View::Queue;
+        let mut current_id = None;
+        handle_normal_input(&mut app, KeyCode::Char('c'), &mut current_id);
+        assert!(app.queue.is_empty());
+        assert_eq!(app.selected_index, 0);
+    }
+
+    // ---- handle_search_input tests ----
+
+    #[test]
+    fn search_input_type_query() {
+        let mut app = make_test_app();
+        app.input_mode = InputMode::Search;
+        app.library.library.add_item(make_item("Song", "Artist"));
+
+        handle_search_input(&mut app, KeyCode::Char('s'));
+        assert_eq!(app.search_query, "s");
+        handle_search_input(&mut app, KeyCode::Char('o'));
+        assert_eq!(app.search_query, "so");
+    }
+
+    #[test]
+    fn search_input_backspace() {
+        let mut app = make_test_app();
+        app.input_mode = InputMode::Search;
+        app.search_query = "test".to_string();
+
+        handle_search_input(&mut app, KeyCode::Backspace);
+        assert_eq!(app.search_query, "tes");
+    }
+
+    #[test]
+    fn search_input_escape() {
+        let mut app = make_test_app();
+        app.input_mode = InputMode::Search;
+        app.search_query = "query".to_string();
+        app.search_results = vec![0, 1];
+
+        handle_search_input(&mut app, KeyCode::Esc);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.search_query.is_empty());
+        assert!(app.search_results.is_empty());
+    }
+
+    #[test]
+    fn search_input_enter() {
+        let mut app = make_test_app();
+        app.input_mode = InputMode::Search;
+        app.search_query = "query".to_string();
+
+        handle_search_input(&mut app, KeyCode::Enter);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        // Query preserved after enter
+        assert_eq!(app.search_query, "query");
+    }
+
+    #[test]
+    fn search_input_navigation() {
+        let mut app = make_test_app();
+        app.input_mode = InputMode::Search;
+        app.library.library.add_item(make_item("A", "X"));
+        app.library.library.add_item(make_item("B", "X"));
+        app.search_query = "X".to_string();
+        app.update_search();
+
+        handle_search_input(&mut app, KeyCode::Down);
+        assert_eq!(app.selected_index, 1);
+        handle_search_input(&mut app, KeyCode::Up);
+        assert_eq!(app.selected_index, 0);
+    }
+
+    // ---- handle_mpris_command tests ----
+
+    #[test]
+    fn mpris_play_pause() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        // Toggle without loaded file — engine.toggle() will error but shouldn't panic
+        handle_mpris_command(&mut app, &MprisCommand::PlayPause, &mut current_id);
+    }
+
+    #[test]
+    fn mpris_pause() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        handle_mpris_command(&mut app, &MprisCommand::Pause, &mut current_id);
+        // Should not panic
+    }
+
+    #[test]
+    fn mpris_stop() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        handle_mpris_command(&mut app, &MprisCommand::Stop, &mut current_id);
+        assert_eq!(app.engine.state(), jalwa_core::PlaybackState::Stopped);
+    }
+
+    #[test]
+    fn mpris_seek() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        // Seek without loaded file — should gracefully handle
+        handle_mpris_command(&mut app, &MprisCommand::Seek(10.0), &mut current_id);
+    }
+
+    #[test]
+    fn mpris_set_volume() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        handle_mpris_command(&mut app, &MprisCommand::SetVolume(0.7), &mut current_id);
+        assert!((app.engine.volume() - 0.7).abs() < 0.01);
+    }
+
+    #[test]
+    fn mpris_next_empty_queue() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        handle_mpris_command(&mut app, &MprisCommand::Next, &mut current_id);
+        // Should not panic with empty queue
+        assert!(current_id.is_none());
+    }
+
+    #[test]
+    fn mpris_previous_empty_queue() {
+        let mut app = make_test_app();
+        let mut current_id = None;
+        handle_mpris_command(&mut app, &MprisCommand::Previous, &mut current_id);
+        assert!(current_id.is_none());
+    }
+}

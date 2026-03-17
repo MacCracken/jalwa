@@ -335,6 +335,9 @@ async fn cmd_mcp() -> Result<()> {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     let plib = Arc::new(Mutex::new(open_library()?));
+    let engine = Arc::new(Mutex::new(
+        jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default()),
+    ));
 
     let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
@@ -439,7 +442,7 @@ async fn cmd_mcp() -> Result<()> {
             "tools/call" => {
                 let tool_name = request["params"]["name"].as_str().unwrap_or("");
                 let args = &request["params"]["arguments"];
-                handle_tool_call(tool_name, args, &plib)
+                handle_tool_call(tool_name, args, &plib, &engine)
             }
             _ => json!({ "error": format!("unknown method: {method}") }),
         };
@@ -459,18 +462,18 @@ fn handle_tool_call(
     name: &str,
     args: &serde_json::Value,
     plib: &Arc<Mutex<jalwa_core::db::PersistentLibrary>>,
+    engine: &Arc<Mutex<jalwa_playback::PlaybackEngine>>,
 ) -> serde_json::Value {
     use serde_json::json;
 
     match name {
         "jalwa_play" => {
             let path = args["path"].as_str().unwrap_or("");
-            let mut engine =
-                jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
-            match engine.open(std::path::Path::new(path)) {
+            let mut eng = engine.lock().unwrap();
+            match eng.open(std::path::Path::new(path)) {
                 Ok(()) => {
-                    let _ = engine.play();
-                    let status = engine.status();
+                    let _ = eng.play();
+                    let status = eng.status();
                     json!({
                         "content": [{ "type": "text", "text": format!("Playing: {path}\n{}", jalwa_ui::render_status_bar(&status, None)) }]
                     })
@@ -481,12 +484,15 @@ fn handle_tool_call(
             }
         }
         "jalwa_pause" => {
-            json!({ "content": [{ "type": "text", "text": "paused" }] })
+            let mut eng = engine.lock().unwrap();
+            eng.pause();
+            let status = eng.status();
+            json!({ "content": [{ "type": "text", "text": format!("paused\n{}", serde_json::to_string_pretty(&status).unwrap_or_default()) }] })
         }
         "jalwa_status" => {
-            let engine =
-                jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
-            let status = engine.status();
+            let mut eng = engine.lock().unwrap();
+            eng.poll_events();
+            let status = eng.status();
             json!({
                 "content": [{ "type": "text", "text": serde_json::to_string_pretty(&status).unwrap_or_default() }]
             })
@@ -546,7 +552,17 @@ fn handle_tool_call(
             let action = args["action"].as_str().unwrap_or("");
             match action {
                 "list" => {
-                    json!({ "content": [{ "type": "text", "text": "Queue is empty (no active playback session)" }] })
+                    let lib = plib.lock().unwrap();
+                    // Queue state is not persisted in the MCP server — report current engine state
+                    let eng = engine.lock().unwrap();
+                    let path_info = eng.current_path()
+                        .and_then(|p| lib.library.find_by_path(p))
+                        .map(|item| {
+                            let artist = item.artist.as_deref().unwrap_or("Unknown");
+                            format!("Now playing: {} - {}", artist, item.title)
+                        })
+                        .unwrap_or_else(|| "Queue is empty".to_string());
+                    json!({ "content": [{ "type": "text", "text": path_info }] })
                 }
                 "enqueue" => {
                     let item_id = args["item_id"].as_str().unwrap_or("");
@@ -565,7 +581,9 @@ fn handle_tool_call(
                     }
                 }
                 "clear" => {
-                    json!({ "content": [{ "type": "text", "text": "Queue cleared" }] })
+                    let mut eng = engine.lock().unwrap();
+                    eng.stop();
+                    json!({ "content": [{ "type": "text", "text": "Queue cleared and playback stopped" }] })
                 }
                 "shuffle" => {
                     json!({ "content": [{ "type": "text", "text": "Queue shuffled" }] })
@@ -769,6 +787,12 @@ mod tests {
         (path, plib)
     }
 
+    fn test_engine() -> Arc<Mutex<jalwa_playback::PlaybackEngine>> {
+        Arc::new(Mutex::new(
+            jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default()),
+        ))
+    }
+
     fn tmp_dir_with_wav() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("jalwa_cmd_wav_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -869,7 +893,8 @@ mod tests {
     fn tool_call_pause() {
         let (path, plib) = tmp_db();
         let plib = Arc::new(Mutex::new(plib));
-        let result = handle_tool_call("jalwa_pause", &json!({}), &plib);
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_pause", &json!({}), &plib, &eng);
         assert!(
             result["content"][0]["text"]
                 .as_str()
@@ -883,7 +908,8 @@ mod tests {
     fn tool_call_status() {
         let (path, plib) = tmp_db();
         let plib = Arc::new(Mutex::new(plib));
-        let result = handle_tool_call("jalwa_status", &json!({}), &plib);
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_status", &json!({}), &plib, &eng);
         let text = result["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("Stopped"));
         let _ = std::fs::remove_file(&path);
@@ -893,7 +919,8 @@ mod tests {
     fn tool_call_search_empty() {
         let (path, plib) = tmp_db();
         let plib = Arc::new(Mutex::new(plib));
-        let result = handle_tool_call("jalwa_search", &json!({"query": "test"}), &plib);
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_search", &json!({"query": "test"}), &plib, &eng);
         let text = result["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("No results"));
         let _ = std::fs::remove_file(&path);
@@ -903,7 +930,8 @@ mod tests {
     fn tool_call_recommend_invalid_uuid() {
         let (path, plib) = tmp_db();
         let plib = Arc::new(Mutex::new(plib));
-        let result = handle_tool_call("jalwa_recommend", &json!({"item_id": "not-a-uuid"}), &plib);
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_recommend", &json!({"item_id": "not-a-uuid"}), &plib, &eng);
         assert!(result["isError"].as_bool().unwrap_or(false));
         let _ = std::fs::remove_file(&path);
     }
@@ -912,10 +940,12 @@ mod tests {
     fn tool_call_recommend_empty_library() {
         let (path, plib) = tmp_db();
         let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
         let result = handle_tool_call(
             "jalwa_recommend",
             &json!({"item_id": uuid::Uuid::new_v4().to_string()}),
             &plib,
+            &eng,
         );
         let text = result["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("No recommendations"));
@@ -926,7 +956,8 @@ mod tests {
     fn tool_call_unknown() {
         let (path, plib) = tmp_db();
         let plib = Arc::new(Mutex::new(plib));
-        let result = handle_tool_call("nonexistent_tool", &json!({}), &plib);
+        let eng = test_engine();
+        let result = handle_tool_call("nonexistent_tool", &json!({}), &plib, &eng);
         assert!(result["isError"].as_bool().unwrap_or(false));
         let _ = std::fs::remove_file(&path);
     }
@@ -935,7 +966,8 @@ mod tests {
     fn tool_call_play_nonexistent() {
         let (path, plib) = tmp_db();
         let plib = Arc::new(Mutex::new(plib));
-        let result = handle_tool_call("jalwa_play", &json!({"path": "/nonexistent.wav"}), &plib);
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_play", &json!({"path": "/nonexistent.wav"}), &plib, &eng);
         assert!(result["isError"].as_bool().unwrap_or(false));
         let _ = std::fs::remove_file(&path);
     }

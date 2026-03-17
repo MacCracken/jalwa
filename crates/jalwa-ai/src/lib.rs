@@ -4,11 +4,13 @@
 //! and media analysis powered by tarang-ai.
 
 pub mod daimon;
+pub mod fingerprint;
 
 pub use daimon::{
     DaimonClient, DaimonConfig, HooshConfig as HooshLlmConfig, HooshLlmClient, LlmRecommendation,
     LlmSuggestion, RagResult, SimilarMedia, TranscriptionResult,
 };
+pub use fingerprint::{FingerprintMatch, find_similar_local};
 
 use jalwa_core::{Library, MediaType, Playlist};
 use serde::{Deserialize, Serialize};

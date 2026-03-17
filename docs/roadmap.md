@@ -5,16 +5,24 @@
 Current: 55.9% (1038/1858 lines). Target: 80%.
 
 ### Tier 1 — Pure rendering (est. +198 lines)
-- [ ] `widgets.rs`: ratatui TestBackend tests for all views (Library, NowPlaying, Queue, Equalizer)
+- [x] `widgets.rs`: ratatui TestBackend tests for all views (Library, NowPlaying, Queue, Equalizer) *(2026-03-16)*
 
 ### Tier 2 — TUI input handlers (est. +100 lines)
-- [ ] `tui.rs`: unit test `handle_normal_input`, `handle_search_input`, `handle_mpris_command`
+- [x] `tui.rs`: unit test `handle_normal_input`, `handle_search_input`, `handle_mpris_command` *(2026-03-16)*
 
 ### Tier 3 — Decode thread + MPRIS (est. +80 lines)
-- [ ] `decode_thread.rs`: integration test with NullOutput + minimal WAV
-- [ ] `mpris.rs`: test MPRIS command dispatch
+- [x] `decode_thread.rs`: integration test with NullOutput + minimal WAV *(2026-03-16)*
+- [x] `mpris.rs`: test MPRIS command dispatch *(already covered in tui.rs mpris handler tests)*
 
-## Phase 6 — Video Playback (v2)
+## Completed — Tarang upgrade + MCP + AI fingerprinting (2026-03-16)
+- [x] Bumped tarang from `2026.3.16` to `2026.3.16-1` (26 security fixes, lock-free PipeWire, 110+ new tests)
+- [x] Fixed MCP tool stubs — `jalwa_pause`, `jalwa_status`, `jalwa_queue` now use shared `PlaybackEngine` state
+- [x] Wired `tarang-ai` fingerprinting directly into `jalwa-ai` for local similarity search (`find_similar_local`)
+
+## Phase 6 — Video Playback (v2) — *planned, not started*
+> **Prerequisites met**: tarang-video now has full decode/encode for AV1, H.264, VP8/VP9.
+> Blocked on aethersafha Wayland surface integration.
+
 - [ ] tarang-video decode integration (dav1d, openh264, libvpx)
 - [ ] Wayland surface for video output (via aethersafha)
 - [ ] Subtitle rendering (SRT, VTT, ASS)
@@ -29,10 +37,10 @@ Current: 55.9% (1038/1858 lines). Target: 80%.
 - [ ] System tray / notification integration
 
 ## Phase 8 — AI Features
+- [x] Audio fingerprinting (local similarity via tarang-ai `compute_fingerprint`/`fingerprint_match`) *(2026-03-16)*
 - [ ] Content-based recommendations via hoosh
-- [ ] Audio fingerprinting (identify unknown tracks)
 - [ ] Transcription overlay for video/podcasts
-- [ ] "Play something like this" via semantic search
+- [ ] "Play something like this" via semantic search (fingerprint + daimon RAG)
 - [ ] Mood-based playlists
 
 ## Phase 9 — AGNOS Integration

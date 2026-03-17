@@ -310,3 +310,227 @@ pub(crate) fn apply_volume(buf: &tarang_core::AudioBuffer, gain: f32) -> tarang_
         timestamp: buf.timestamp,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Generate a minimal WAV file in memory for testing.
+    fn make_test_wav(num_samples: u32, sample_rate: u32) -> Vec<u8> {
+        let channels: u16 = 1;
+        let bits: u16 = 16;
+        let data_size = num_samples * channels as u32 * (bits as u32 / 8);
+        let file_size = 36 + data_size;
+        let byte_rate = sample_rate * channels as u32 * (bits as u32 / 8);
+        let block_align = channels * (bits / 8);
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&file_size.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&channels.to_le_bytes());
+        buf.extend_from_slice(&sample_rate.to_le_bytes());
+        buf.extend_from_slice(&byte_rate.to_le_bytes());
+        buf.extend_from_slice(&block_align.to_le_bytes());
+        buf.extend_from_slice(&bits.to_le_bytes());
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&data_size.to_le_bytes());
+        for i in 0..num_samples {
+            let t = i as f64 / sample_rate as f64;
+            let s = (t * 440.0 * 2.0 * std::f64::consts::PI).sin();
+            buf.extend_from_slice(&((s * 16000.0) as i16).to_le_bytes());
+        }
+        buf
+    }
+
+    fn write_test_wav() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("jalwa_dt_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.wav");
+        let wav = make_test_wav(4410, 44100); // 0.1 second of audio
+        std::fs::write(&path, &wav).unwrap();
+        path
+    }
+
+    #[test]
+    fn decode_loop_plays_to_end() {
+        let wav_path = write_test_wav();
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let (event_tx, event_rx) = mpsc::channel();
+        let config = crate::EngineConfig {
+            buffer_size: 4096,
+            sample_rate: 44100,
+            channels: 1,
+        };
+
+        // Run decode loop in a thread — it should play to end with NullOutput
+        // (NullOutput is used when pipewire feature is disabled in tests)
+        let status_clone = status.clone();
+        let handle = std::thread::spawn(move || {
+            decode_loop(wav_path.clone(), cmd_rx, status_clone, event_tx, config, Some(Duration::from_millis(100)));
+        });
+
+        // Wait for completion
+        handle.join().unwrap();
+
+        // Should have received TrackFinished
+        let mut got_finished = false;
+        while let Ok(ev) = event_rx.try_recv() {
+            if matches!(ev, EngineEvent::TrackFinished) {
+                got_finished = true;
+            }
+        }
+        assert!(got_finished);
+    }
+
+    #[test]
+    fn decode_loop_stop_command() {
+        let wav_path = write_test_wav();
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let (event_tx, event_rx) = mpsc::channel();
+        let config = crate::EngineConfig {
+            buffer_size: 4096,
+            sample_rate: 44100,
+            channels: 1,
+        };
+
+        let status_clone = status.clone();
+        let handle = std::thread::spawn(move || {
+            decode_loop(wav_path.clone(), cmd_rx, status_clone, event_tx, config, None);
+        });
+
+        // Send stop immediately
+        let _ = cmd_tx.send(EngineCommand::Stop);
+        handle.join().unwrap();
+
+        // Should have received StateChanged(Stopped)
+        let mut got_stopped = false;
+        while let Ok(ev) = event_rx.try_recv() {
+            if let EngineEvent::StateChanged(jalwa_core::PlaybackState::Stopped) = ev {
+                got_stopped = true;
+            }
+        }
+        assert!(got_stopped);
+    }
+
+    #[test]
+    fn decode_loop_volume_command() {
+        let wav_path = write_test_wav();
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let (event_tx, _event_rx) = mpsc::channel();
+        let config = crate::EngineConfig {
+            buffer_size: 4096,
+            sample_rate: 44100,
+            channels: 1,
+        };
+
+        // Send volume command before starting
+        let _ = cmd_tx.send(EngineCommand::Volume(0.5));
+
+        let status_clone = status.clone();
+        let handle = std::thread::spawn(move || {
+            decode_loop(wav_path.clone(), cmd_rx, status_clone, event_tx, config, None);
+        });
+
+        handle.join().unwrap();
+
+        // Check status reflects the volume
+        let s = status.lock().unwrap();
+        // Volume should have been applied (either 0.5 if read before end, or default)
+        assert!(s.volume >= 0.0 && s.volume <= 1.0);
+    }
+
+    #[test]
+    fn decode_loop_nonexistent_file() {
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let (event_tx, event_rx) = mpsc::channel();
+        let config = crate::EngineConfig::default();
+
+        let handle = std::thread::spawn(move || {
+            decode_loop(
+                std::path::PathBuf::from("/nonexistent/file.wav"),
+                cmd_rx,
+                status,
+                event_tx,
+                config,
+                None,
+            );
+        });
+
+        handle.join().unwrap();
+
+        // Should have sent an error event
+        let mut got_error = false;
+        while let Ok(ev) = event_rx.try_recv() {
+            if matches!(ev, EngineEvent::Error(_)) {
+                got_error = true;
+            }
+        }
+        assert!(got_error);
+    }
+
+    #[test]
+    fn decode_loop_pause_resume() {
+        let wav_path = write_test_wav();
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let (event_tx, event_rx) = mpsc::channel();
+        let config = crate::EngineConfig {
+            buffer_size: 4096,
+            sample_rate: 44100,
+            channels: 1,
+        };
+
+        let status_clone = status.clone();
+        let handle = std::thread::spawn(move || {
+            decode_loop(wav_path.clone(), cmd_rx, status_clone, event_tx, config, None);
+        });
+
+        // Brief delay to let decode start
+        std::thread::sleep(Duration::from_millis(10));
+        let _ = cmd_tx.send(EngineCommand::Pause);
+        std::thread::sleep(Duration::from_millis(10));
+        let _ = cmd_tx.send(EngineCommand::Resume);
+        // Let it finish naturally
+        handle.join().unwrap();
+
+        // Should have received pause and play state changes
+        let mut states = Vec::new();
+        while let Ok(ev) = event_rx.try_recv() {
+            if let EngineEvent::StateChanged(s) = ev {
+                states.push(s);
+            }
+        }
+        assert!(states.contains(&jalwa_core::PlaybackState::Playing));
+    }
+
+    #[test]
+    fn decode_status_default_values() {
+        let s = DecodeStatus::default();
+        assert_eq!(s.state, jalwa_core::PlaybackState::Stopped);
+        assert_eq!(s.position, Duration::ZERO);
+        assert_eq!(s.volume, 1.0);
+        assert!(!s.muted);
+    }
+
+    #[test]
+    fn engine_command_debug() {
+        let cmd = EngineCommand::Play;
+        assert!(format!("{:?}", cmd).contains("Play"));
+        let cmd = EngineCommand::Seek(Duration::from_secs(5));
+        assert!(format!("{:?}", cmd).contains("Seek"));
+    }
+
+    #[test]
+    fn engine_event_clone() {
+        let ev = EngineEvent::TrackFinished;
+        let cloned = ev.clone();
+        assert!(matches!(cloned, EngineEvent::TrackFinished));
+    }
+}

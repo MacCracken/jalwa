@@ -8,7 +8,9 @@ license = "GPL-3.0"
 [dependencies]
 jalwa-core = { path = "../jalwa-core" }
 tarang-core = { workspace = true }
+tarang-audio = { workspace = true }
 tarang-ai = { workspace = true }
+bytes = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
