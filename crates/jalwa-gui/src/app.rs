@@ -1,8 +1,8 @@
 //! GuiApp — eframe::App implementation for the jalwa desktop GUI.
 
+use jalwa_core::PlayQueue;
 use jalwa_core::db::PersistentLibrary;
 use jalwa_core::watcher::LibraryWatcher;
-use jalwa_core::PlayQueue;
 use jalwa_playback::mpris::{MprisCommand, spawn_mpris_server};
 use jalwa_playback::{EngineEvent, PlaybackEngine};
 use std::sync::mpsc::Receiver;

@@ -46,8 +46,7 @@ impl Default for HooshConfig {
             endpoint: std::env::var("HOOSH_URL")
                 .unwrap_or_else(|_| "http://localhost:8088".to_string()),
             api_key: std::env::var("HOOSH_API_KEY").ok(),
-            model: std::env::var("HOOSH_MODEL")
-                .unwrap_or_else(|_| "llama3".to_string()),
+            model: std::env::var("HOOSH_MODEL").unwrap_or_else(|_| "llama3".to_string()),
         }
     }
 }
@@ -97,7 +96,9 @@ impl DaimonClient {
             req = req.header("Authorization", auth);
         }
 
-        let resp = req.send().await
+        let resp = req
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("agent registration failed: {e}"))?;
 
         if resp.status().is_success() {
@@ -130,7 +131,9 @@ impl DaimonClient {
             req = req.header("Authorization", auth);
         }
 
-        let resp = req.send().await
+        let resp = req
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("RAG ingest failed: {e}"))?;
 
         if !resp.status().is_success() {
@@ -148,7 +151,11 @@ impl DaimonClient {
                 count += 1;
             }
         }
-        info!(count, total = library.items.len(), "Ingested library into RAG");
+        info!(
+            count,
+            total = library.items.len(),
+            "Ingested library into RAG"
+        );
         Ok(count)
     }
 
@@ -166,14 +173,18 @@ impl DaimonClient {
             req = req.header("Authorization", auth);
         }
 
-        let resp = req.send().await
+        let resp = req
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("RAG query failed: {e}"))?;
 
         if !resp.status().is_success() {
             return Ok(Vec::new());
         }
 
-        let result: RagQueryResponse = resp.json().await
+        let result: RagQueryResponse = resp
+            .json()
+            .await
             .map_err(|e| anyhow::anyhow!("parse RAG response: {e}"))?;
 
         Ok(result.results)
@@ -196,7 +207,9 @@ impl DaimonClient {
             req = req.header("Authorization", auth);
         }
 
-        let resp = req.send().await
+        let resp = req
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("fingerprint index failed: {e}"))?;
 
         if resp.status().is_success() {
@@ -219,7 +232,9 @@ impl DaimonClient {
             req = req.header("Authorization", auth);
         }
 
-        let resp = req.send().await
+        let resp = req
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("similarity search failed: {e}"))?;
 
         if !resp.status().is_success() {
@@ -227,7 +242,9 @@ impl DaimonClient {
         }
 
         // Parse the MCP tool response which wraps results in content blocks
-        let result: serde_json::Value = resp.json().await
+        let result: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| anyhow::anyhow!("parse search response: {e}"))?;
 
         // Try to extract results from the MCP response text
@@ -237,7 +254,11 @@ impl DaimonClient {
     }
 
     /// Route audio for transcription via tarang's MCP tool through daimon.
-    pub async fn transcribe(&self, path: &str, language: Option<&str>) -> Result<TranscriptionResult> {
+    pub async fn transcribe(
+        &self,
+        path: &str,
+        language: Option<&str>,
+    ) -> Result<TranscriptionResult> {
         let mut args = serde_json::json!({ "path": path });
         if let Some(lang) = language {
             args["language"] = serde_json::Value::String(lang.to_string());
@@ -254,14 +275,18 @@ impl DaimonClient {
             req = req.header("Authorization", auth);
         }
 
-        let resp = req.send().await
+        let resp = req
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("transcription request failed: {e}"))?;
 
         if !resp.status().is_success() {
             bail!("transcription returned {}", resp.status());
         }
 
-        let result: serde_json::Value = resp.json().await
+        let result: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| anyhow::anyhow!("parse transcription response: {e}"))?;
 
         let text = result["content"][0]["text"].as_str().unwrap_or("");
@@ -329,14 +354,18 @@ impl HooshLlmClient {
             req = req.header("Authorization", format!("Bearer {key}"));
         }
 
-        let resp = req.send().await
+        let resp = req
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("hoosh request failed: {e}"))?;
 
         if !resp.status().is_success() {
             bail!("hoosh returned {}", resp.status());
         }
 
-        let result: serde_json::Value = resp.json().await
+        let result: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| anyhow::anyhow!("parse LLM response: {e}"))?;
 
         let content = result["choices"][0]["message"]["content"]
@@ -346,7 +375,6 @@ impl HooshLlmClient {
 
         parse_llm_recommendation(&content)
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -446,14 +474,21 @@ fn format_item_for_rag(item: &MediaItem) -> String {
 
 /// Build a compact library context for LLM prompts.
 fn build_library_context(library: &Library) -> String {
-    library.items.iter()
+    library
+        .items
+        .iter()
         .take(100) // Cap at 100 items to stay within token limits
         .map(|item| {
             let artist = item.artist.as_deref().unwrap_or("Unknown");
-            let dur = item.duration
+            let dur = item
+                .duration
                 .map(|d| format!("{}:{:02}", d.as_secs() / 60, d.as_secs() % 60))
                 .unwrap_or_else(|| "?".to_string());
-            let tags = if item.tags.is_empty() { String::new() } else { format!(" [{}]", item.tags.join(", ")) };
+            let tags = if item.tags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", item.tags.join(", "))
+            };
             format!("- {} — {} ({}){}", item.title, artist, dur, tags)
         })
         .collect::<Vec<_>>()
@@ -472,10 +507,10 @@ fn parse_llm_recommendation(response: &str) -> Result<LlmRecommendation> {
         .find('{')
         .and_then(|start| response.rfind('}').map(|end| &response[start..=end]));
 
-    if let Some(json) = json_str {
-        if let Ok(rec) = serde_json::from_str::<LlmRecommendation>(json) {
-            return Ok(rec);
-        }
+    if let Some(json) = json_str
+        && let Ok(rec) = serde_json::from_str::<LlmRecommendation>(json)
+    {
+        return Ok(rec);
     }
 
     // Fallback: wrap raw text as a single suggestion
@@ -492,10 +527,10 @@ fn parse_llm_recommendation(response: &str) -> Result<LlmRecommendation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jalwa_core::test_fixtures::make_media_item as make_item;
     use jalwa_core::*;
     use std::path::PathBuf;
     use std::time::Duration;
-    use jalwa_core::test_fixtures::make_media_item as make_item;
 
     #[test]
     fn daimon_config_defaults() {

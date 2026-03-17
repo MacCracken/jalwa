@@ -258,8 +258,8 @@ pub fn analyze_library(library: &Library) -> LibraryInsights {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jalwa_core::*;
     use jalwa_core::test_fixtures::make_media_item as make_item;
+    use jalwa_core::*;
 
     #[test]
     fn recommend_same_artist() {

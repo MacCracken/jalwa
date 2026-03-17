@@ -30,18 +30,16 @@ fn decode_samples_to_f32(buf: &tarang_core::AudioBuffer) -> Vec<f32> {
                 }
             }
         }
-        tarang_core::SampleFormat::I16 => {
-            buf.data
-                .chunks_exact(2)
-                .map(|c| i16::from_ne_bytes([c[0], c[1]]) as f32 / 32768.0)
-                .collect()
-        }
-        tarang_core::SampleFormat::I32 => {
-            buf.data
-                .chunks_exact(4)
-                .map(|c| i32::from_ne_bytes([c[0], c[1], c[2], c[3]]) as f32 / 2_147_483_648.0)
-                .collect()
-        }
+        tarang_core::SampleFormat::I16 => buf
+            .data
+            .chunks_exact(2)
+            .map(|c| i16::from_ne_bytes([c[0], c[1]]) as f32 / 32768.0)
+            .collect(),
+        tarang_core::SampleFormat::I32 => buf
+            .data
+            .chunks_exact(4)
+            .map(|c| i32::from_ne_bytes([c[0], c[1], c[2], c[3]]) as f32 / 2_147_483_648.0)
+            .collect(),
         _ => {
             // Best effort: try as F32
             buf.data
@@ -68,8 +66,7 @@ pub fn fingerprint_file(path: &Path) -> Result<AudioFingerprint> {
                 // Downmix to mono if stereo
                 if buf.channels > 1 {
                     for chunk in samples.chunks(buf.channels as usize) {
-                        let mono: f32 =
-                            chunk.iter().sum::<f32>() / buf.channels as f32;
+                        let mono: f32 = chunk.iter().sum::<f32>() / buf.channels as f32;
                         all_samples.push(mono);
                     }
                 } else {

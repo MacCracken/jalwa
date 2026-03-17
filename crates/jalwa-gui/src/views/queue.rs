@@ -9,8 +9,7 @@ pub fn queue_view(ui: &mut egui::Ui, app: &mut GuiApp) {
     ui.horizontal(|ui| {
         ui.heading("Queue");
         ui.label(
-            egui::RichText::new(format!("{} items", app.queue.len()))
-                .color(theme::TEXT_MUTED),
+            egui::RichText::new(format!("{} items", app.queue.len())).color(theme::TEXT_MUTED),
         );
         ui.separator();
 
@@ -80,10 +79,8 @@ pub fn queue_view(ui: &mut egui::Ui, app: &mut GuiApp) {
                 theme::TEXT_SECONDARY
             };
 
-            let response = ui.selectable_label(
-                is_selected,
-                egui::RichText::new(&text).color(color),
-            );
+            let response =
+                ui.selectable_label(is_selected, egui::RichText::new(&text).color(color));
 
             if response.clicked() {
                 app.selected_index = i;

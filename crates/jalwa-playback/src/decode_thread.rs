@@ -375,7 +375,14 @@ mod tests {
         // (NullOutput is used when pipewire feature is disabled in tests)
         let status_clone = status.clone();
         let handle = std::thread::spawn(move || {
-            decode_loop(wav_path.clone(), cmd_rx, status_clone, event_tx, config, Some(Duration::from_millis(100)));
+            decode_loop(
+                wav_path.clone(),
+                cmd_rx,
+                status_clone,
+                event_tx,
+                config,
+                Some(Duration::from_millis(100)),
+            );
         });
 
         // Wait for completion
@@ -405,7 +412,14 @@ mod tests {
 
         let status_clone = status.clone();
         let handle = std::thread::spawn(move || {
-            decode_loop(wav_path.clone(), cmd_rx, status_clone, event_tx, config, None);
+            decode_loop(
+                wav_path.clone(),
+                cmd_rx,
+                status_clone,
+                event_tx,
+                config,
+                None,
+            );
         });
 
         // Send stop immediately
@@ -439,7 +453,14 @@ mod tests {
 
         let status_clone = status.clone();
         let handle = std::thread::spawn(move || {
-            decode_loop(wav_path.clone(), cmd_rx, status_clone, event_tx, config, None);
+            decode_loop(
+                wav_path.clone(),
+                cmd_rx,
+                status_clone,
+                event_tx,
+                config,
+                None,
+            );
         });
 
         handle.join().unwrap();
@@ -494,7 +515,14 @@ mod tests {
 
         let status_clone = status.clone();
         let handle = std::thread::spawn(move || {
-            decode_loop(wav_path.clone(), cmd_rx, status_clone, event_tx, config, None);
+            decode_loop(
+                wav_path.clone(),
+                cmd_rx,
+                status_clone,
+                event_tx,
+                config,
+                None,
+            );
         });
 
         // Brief delay to let decode start

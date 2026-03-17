@@ -52,10 +52,7 @@ pub fn library_view(ui: &mut egui::Ui, app: &mut GuiApp) {
                         .color(theme::TEXT_MUTED),
                 );
             } else {
-                ui.label(
-                    egui::RichText::new("No matches")
-                        .color(theme::TEXT_MUTED),
-                );
+                ui.label(egui::RichText::new("No matches").color(theme::TEXT_MUTED));
             }
         });
         return;

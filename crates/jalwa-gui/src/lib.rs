@@ -22,8 +22,12 @@ pub fn run(library: PersistentLibrary, engine: PlaybackEngine) -> eframe::Result
         ..Default::default()
     };
 
-    eframe::run_native("jalwa", options, Box::new(|cc| {
-        theme::apply(&cc.egui_ctx);
-        Ok(Box::new(GuiApp::new(library, engine, cc)))
-    }))
+    eframe::run_native(
+        "jalwa",
+        options,
+        Box::new(|cc| {
+            theme::apply(&cc.egui_ctx);
+            Ok(Box::new(GuiApp::new(library, engine, cc)))
+        }),
+    )
 }

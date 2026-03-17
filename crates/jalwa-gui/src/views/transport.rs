@@ -12,15 +12,14 @@ pub fn top_bar(ctx: &egui::Context, app: &mut GuiApp) {
             ui.spacing_mut().item_spacing.x = 6.0;
 
             // Previous
-            if ui.button("\u{23EE}").clicked() {
-                if let Some(prev_id) = app.queue.go_back()
-                    && let Some(item) = app.library.library.find_by_id(prev_id)
-                {
-                    let path = item.path.clone();
-                    app.current_playing_id = Some(prev_id);
-                    let _ = app.engine.open(&path);
-                    let _ = app.engine.play();
-                }
+            if ui.button("\u{23EE}").clicked()
+                && let Some(prev_id) = app.queue.go_back()
+                && let Some(item) = app.library.library.find_by_id(prev_id)
+            {
+                let path = item.path.clone();
+                app.current_playing_id = Some(prev_id);
+                let _ = app.engine.open(&path);
+                let _ = app.engine.play();
             }
 
             // Play/Pause
@@ -38,15 +37,14 @@ pub fn top_bar(ctx: &egui::Context, app: &mut GuiApp) {
             }
 
             // Next
-            if ui.button("\u{23ED}").clicked() {
-                if let Some(next_id) = app.queue.advance()
-                    && let Some(item) = app.library.library.find_by_id(next_id)
-                {
-                    let path = item.path.clone();
-                    app.current_playing_id = Some(next_id);
-                    let _ = app.engine.open(&path);
-                    let _ = app.engine.play();
-                }
+            if ui.button("\u{23ED}").clicked()
+                && let Some(next_id) = app.queue.advance()
+                && let Some(item) = app.library.library.find_by_id(next_id)
+            {
+                let path = item.path.clone();
+                app.current_playing_id = Some(next_id);
+                let _ = app.engine.open(&path);
+                let _ = app.engine.play();
             }
 
             ui.separator();
@@ -79,9 +77,7 @@ pub fn top_bar(ctx: &egui::Context, app: &mut GuiApp) {
                 // Volume
                 let mut vol = app.engine.volume();
                 let vol_pct = format!("{}%", (vol * 100.0) as u8);
-                ui.label(
-                    egui::RichText::new(vol_pct).color(theme::TEXT_SECONDARY),
-                );
+                ui.label(egui::RichText::new(vol_pct).color(theme::TEXT_SECONDARY));
 
                 let vol_slider = ui.add(
                     egui::Slider::new(&mut vol, 0.0..=1.0)

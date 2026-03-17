@@ -14,8 +14,10 @@ pub fn now_playing_view(ui: &mut egui::Ui, ctx: &egui::Context, app: &mut GuiApp
     let Some(item) = now_playing else {
         ui.centered_and_justified(|ui| {
             ui.label(
-                egui::RichText::new("Nothing playing\nSelect a track from the Library and press Enter")
-                    .color(theme::TEXT_MUTED),
+                egui::RichText::new(
+                    "Nothing playing\nSelect a track from the Library and press Enter",
+                )
+                .color(theme::TEXT_MUTED),
             );
         });
         return;
@@ -34,10 +36,7 @@ pub fn now_playing_view(ui: &mut egui::Ui, ctx: &egui::Context, app: &mut GuiApp
             ui.image(egui::load::SizedTexture::new(tex.id(), display_size));
         } else {
             // Placeholder
-            let (rect, _) = ui.allocate_exact_size(
-                egui::vec2(200.0, 200.0),
-                egui::Sense::hover(),
-            );
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(200.0, 200.0), egui::Sense::hover());
             ui.painter().rect_filled(rect, 8.0, theme::BG_WIDGET);
             ui.painter().text(
                 rect.center(),

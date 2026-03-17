@@ -140,8 +140,8 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jalwa_core::db::PersistentLibrary;
     use jalwa_core::MediaItem;
+    use jalwa_core::db::PersistentLibrary;
     use jalwa_playback::EngineConfig;
     use uuid::Uuid;
 

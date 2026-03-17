@@ -23,10 +23,7 @@ pub fn sidebar(ui: &mut egui::Ui, app: &mut GuiApp) {
             theme::TEXT_SECONDARY
         };
 
-        let response = ui.selectable_label(
-            is_active,
-            egui::RichText::new(text).color(color),
-        );
+        let response = ui.selectable_label(is_active, egui::RichText::new(text).color(color));
         if response.clicked() {
             app.view = view;
             app.selected_index = 0;

@@ -356,8 +356,8 @@ mod tests {
     use jalwa_core::db::PersistentLibrary;
     use jalwa_core::{MediaItem, RepeatMode};
     use jalwa_playback::EngineConfig;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
     use uuid::Uuid;
 
     fn make_item(title: &str, artist: &str, duration_secs: u64) -> MediaItem {
@@ -402,8 +402,12 @@ mod tests {
     #[test]
     fn render_library_view_with_items() {
         let mut app = make_test_app();
-        app.library.library.add_item(make_item("Bohemian Rhapsody", "Queen", 354));
-        app.library.library.add_item(make_item("Time", "Pink Floyd", 413));
+        app.library
+            .library
+            .add_item(make_item("Bohemian Rhapsody", "Queen", 354));
+        app.library
+            .library
+            .add_item(make_item("Time", "Pink Floyd", 413));
         let output = render_to_string(&app, 80, 10);
         assert!(output.contains("Library (2 items)"));
         assert!(output.contains("Queen"));
@@ -414,8 +418,12 @@ mod tests {
     #[test]
     fn render_library_view_search() {
         let mut app = make_test_app();
-        app.library.library.add_item(make_item("Bohemian Rhapsody", "Queen", 354));
-        app.library.library.add_item(make_item("Time", "Pink Floyd", 413));
+        app.library
+            .library
+            .add_item(make_item("Bohemian Rhapsody", "Queen", 354));
+        app.library
+            .library
+            .add_item(make_item("Time", "Pink Floyd", 413));
         app.search_query = "queen".to_string();
         app.update_search();
         let output = render_to_string(&app, 80, 10);

@@ -91,7 +91,9 @@ impl ArtCache {
 fn load_art(ctx: &egui::Context, file_path: &Path, item_id: Uuid) -> Option<TextureHandle> {
     use lofty::prelude::*;
     let tagged_file = lofty::read_from_path(file_path).ok()?;
-    let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag())?;
+    let tag = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag())?;
     let pictures = tag.pictures();
     if pictures.is_empty() {
         return None;

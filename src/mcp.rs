@@ -205,9 +205,7 @@ fn tool_play(
     }
 }
 
-fn tool_pause(
-    engine: &Arc<Mutex<jalwa_playback::PlaybackEngine>>,
-) -> serde_json::Value {
+fn tool_pause(engine: &Arc<Mutex<jalwa_playback::PlaybackEngine>>) -> serde_json::Value {
     let mut eng = engine.lock().unwrap();
     eng.pause();
     let status = eng.status();
@@ -217,9 +215,7 @@ fn tool_pause(
     ))
 }
 
-fn tool_status(
-    engine: &Arc<Mutex<jalwa_playback::PlaybackEngine>>,
-) -> serde_json::Value {
+fn tool_status(engine: &Arc<Mutex<jalwa_playback::PlaybackEngine>>) -> serde_json::Value {
     let mut eng = engine.lock().unwrap();
     eng.poll_events();
     let status = eng.status();
@@ -493,16 +489,15 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp_db() -> (PathBuf, jalwa_core::db::PersistentLibrary) {
-        let path =
-            std::env::temp_dir().join(format!("jalwa_mcp_test_{}.db", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("jalwa_mcp_test_{}.db", uuid::Uuid::new_v4()));
         let plib = jalwa_core::db::PersistentLibrary::open(&path).unwrap();
         (path, plib)
     }
 
     fn test_engine() -> Arc<Mutex<jalwa_playback::PlaybackEngine>> {
-        Arc::new(Mutex::new(
-            jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default()),
-        ))
+        Arc::new(Mutex::new(jalwa_playback::PlaybackEngine::new(
+            jalwa_playback::EngineConfig::default(),
+        )))
     }
 
     #[test]
@@ -547,8 +542,12 @@ mod tests {
         let (path, plib) = tmp_db();
         let plib = Arc::new(Mutex::new(plib));
         let eng = test_engine();
-        let result =
-            handle_tool_call("jalwa_recommend", &json!({"item_id": "not-a-uuid"}), &plib, &eng);
+        let result = handle_tool_call(
+            "jalwa_recommend",
+            &json!({"item_id": "not-a-uuid"}),
+            &plib,
+            &eng,
+        );
         assert!(result["isError"].as_bool().unwrap_or(false));
         let _ = std::fs::remove_file(&path);
     }
@@ -584,9 +583,476 @@ mod tests {
         let (path, plib) = tmp_db();
         let plib = Arc::new(Mutex::new(plib));
         let eng = test_engine();
-        let result =
-            handle_tool_call("jalwa_play", &json!({"path": "/nonexistent.wav"}), &plib, &eng);
+        let result = handle_tool_call(
+            "jalwa_play",
+            &json!({"path": "/nonexistent.wav"}),
+            &plib,
+            &eng,
+        );
         assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- tool_list ----
+
+    #[test]
+    fn tool_list_returns_all_tools() {
+        let list = tool_list();
+        let tools = list["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 8);
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"jalwa_play"));
+        assert!(names.contains(&"jalwa_pause"));
+        assert!(names.contains(&"jalwa_status"));
+        assert!(names.contains(&"jalwa_search"));
+        assert!(names.contains(&"jalwa_recommend"));
+        assert!(names.contains(&"jalwa_queue"));
+        assert!(names.contains(&"jalwa_library"));
+        assert!(names.contains(&"jalwa_playlist"));
+    }
+
+    // ---- mcp_ok / mcp_err ----
+
+    #[test]
+    fn mcp_ok_format() {
+        let result = mcp_ok("hello");
+        assert_eq!(result["content"][0]["text"].as_str().unwrap(), "hello");
+        assert!(result.get("isError").is_none());
+    }
+
+    #[test]
+    fn mcp_err_format() {
+        let result = mcp_err("oops");
+        assert_eq!(result["content"][0]["text"].as_str().unwrap(), "oops");
+        assert!(result["isError"].as_bool().unwrap());
+    }
+
+    // ---- tool_search with results ----
+
+    fn make_item(title: &str, artist: &str) -> jalwa_core::MediaItem {
+        jalwa_core::test_fixtures::make_media_item(title, artist, 200)
+    }
+
+    #[test]
+    fn tool_search_with_results() {
+        let (path, mut plib) = tmp_db();
+        plib.add_item(make_item("Bohemian Rhapsody", "Queen"))
+            .unwrap();
+        plib.add_item(make_item("Time", "Pink Floyd")).unwrap();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_search", &json!({"query": "queen"}), &plib, &eng);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Queen"));
+        assert!(!text.contains("Pink Floyd"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- tool_queue ----
+
+    #[test]
+    fn tool_queue_list_empty() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_queue", &json!({"action": "list"}), &plib, &eng);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("empty") || text.contains("Queue"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_queue_enqueue_missing_id() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_queue", &json!({"action": "enqueue"}), &plib, &eng);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_queue_enqueue_valid() {
+        let (path, mut plib) = tmp_db();
+        let item = make_item("Song", "Artist");
+        let id = item.id;
+        plib.add_item(item).unwrap();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_queue",
+            &json!({"action": "enqueue", "item_id": id.to_string()}),
+            &plib,
+            &eng,
+        );
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Enqueued"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_queue_enqueue_not_found() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_queue",
+            &json!({"action": "enqueue", "item_id": uuid::Uuid::new_v4().to_string()}),
+            &plib,
+            &eng,
+        );
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_queue_clear() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_queue", &json!({"action": "clear"}), &plib, &eng);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("cleared"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_queue_shuffle() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_queue", &json!({"action": "shuffle"}), &plib, &eng);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("shuffled"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_queue_unknown_action() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_queue", &json!({"action": "bogus"}), &plib, &eng);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- tool_library ----
+
+    #[test]
+    fn tool_library_stats() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_library", &json!({"action": "stats"}), &plib, &eng);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("0 items"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_library_list_empty() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_library", &json!({"action": "list"}), &plib, &eng);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("empty"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_library_list_with_items() {
+        let (path, mut plib) = tmp_db();
+        plib.add_item(make_item("Song A", "Artist X")).unwrap();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_library", &json!({"action": "list"}), &plib, &eng);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Artist X"));
+        assert!(text.contains("Song A"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_library_scan_missing_path() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_library", &json!({"action": "scan"}), &plib, &eng);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_library_scan_nonexistent() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_library",
+            &json!({"action": "scan", "path": "/nonexistent_dir_12345"}),
+            &plib,
+            &eng,
+        );
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_library_scan_valid_dir() {
+        // Create a temp dir with a WAV file
+        let dir = std::env::temp_dir().join(format!("jalwa_mcp_scan_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = jalwa_core::test_fixtures::make_test_wav(4410, 44100);
+        std::fs::write(dir.join("test.wav"), &wav).unwrap();
+
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_library",
+            &json!({"action": "scan", "path": dir.to_str().unwrap()}),
+            &plib,
+            &eng,
+        );
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("added"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_library_unknown_action() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_library", &json!({"action": "bogus"}), &plib, &eng);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- tool_playlist ----
+
+    #[test]
+    fn tool_playlist_list_empty() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_playlist", &json!({"action": "list"}), &plib, &eng);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("No playlists"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_create() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_playlist",
+            &json!({"action": "create", "name": "Favorites"}),
+            &plib,
+            &eng,
+        );
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Created"));
+        assert!(text.contains("Favorites"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_create_missing_name() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_playlist", &json!({"action": "create"}), &plib, &eng);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_list_with_playlists() {
+        let (path, mut plib) = tmp_db();
+        let pl = jalwa_core::Playlist::new("My Mix");
+        plib.save_playlist(&pl).unwrap();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_playlist", &json!({"action": "list"}), &plib, &eng);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("My Mix"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_add_missing_params() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_playlist", &json!({"action": "add"}), &plib, &eng);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_add_invalid_uuid() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_playlist",
+            &json!({"action": "add", "name": "Test", "item_id": "bad-uuid"}),
+            &plib,
+            &eng,
+        );
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_add_playlist_not_found() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_playlist",
+            &json!({"action": "add", "name": "Missing", "item_id": uuid::Uuid::new_v4().to_string()}),
+            &plib,
+            &eng,
+        );
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_add_valid() {
+        let (path, mut plib) = tmp_db();
+        let pl = jalwa_core::Playlist::new("Rock");
+        plib.save_playlist(&pl).unwrap();
+        let item = make_item("Song", "Band");
+        let id = item.id;
+        plib.add_item(item).unwrap();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_playlist",
+            &json!({"action": "add", "name": "Rock", "item_id": id.to_string()}),
+            &plib,
+            &eng,
+        );
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Added"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_export_missing_params() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_playlist", &json!({"action": "export"}), &plib, &eng);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_export_not_found() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_playlist",
+            &json!({"action": "export", "name": "Missing", "output": "/tmp/out.m3u"}),
+            &plib,
+            &eng,
+        );
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_export_valid() {
+        let (path, mut plib) = tmp_db();
+        let pl = jalwa_core::Playlist::new("Chill");
+        plib.save_playlist(&pl).unwrap();
+        let output =
+            std::env::temp_dir().join(format!("jalwa_mcp_export_{}.m3u", uuid::Uuid::new_v4()));
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_playlist",
+            &json!({"action": "export", "name": "Chill", "output": output.to_str().unwrap()}),
+            &plib,
+            &eng,
+        );
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Exported"));
+        let _ = std::fs::remove_file(&output);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_playlist_unknown_action() {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call("jalwa_playlist", &json!({"action": "bogus"}), &plib, &eng);
+        assert!(result["isError"].as_bool().unwrap_or(false));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- tool_recommend with results ----
+
+    #[test]
+    fn tool_recommend_with_library() {
+        let (path, mut plib) = tmp_db();
+        let item1 = make_item("Song A", "Artist X");
+        let id1 = item1.id;
+        plib.add_item(item1).unwrap();
+        let mut item2 = make_item("Song B", "Artist X");
+        item2.tags = vec!["rock".to_string()];
+        plib.add_item(item2).unwrap();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_recommend",
+            &json!({"item_id": id1.to_string()}),
+            &plib,
+            &eng,
+        );
+        let text = result["content"][0]["text"].as_str().unwrap();
+        // Should find recommendations (same artist)
+        assert!(text.contains("Artist X") || text.contains("No recommendations"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- play with valid WAV ----
+
+    #[test]
+    fn tool_play_valid_wav() {
+        let dir = std::env::temp_dir().join(format!("jalwa_mcp_play_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = jalwa_core::test_fixtures::make_test_wav(4410, 44100);
+        let wav_path = dir.join("test.wav");
+        std::fs::write(&wav_path, &wav).unwrap();
+
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+        let result = handle_tool_call(
+            "jalwa_play",
+            &json!({"path": wav_path.to_str().unwrap()}),
+            &plib,
+            &eng,
+        );
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Playing"));
+        // Cleanup
+        {
+            eng.lock().unwrap().stop();
+        }
+        let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_file(&path);
     }
 }

@@ -405,8 +405,8 @@ fn handle_search_input(app: &mut App, key: KeyCode) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jalwa_core::db::PersistentLibrary;
     use jalwa_core::MediaItem;
+    use jalwa_core::db::PersistentLibrary;
     use jalwa_playback::EngineConfig;
     use jalwa_playback::mpris::MprisCommand;
     use uuid::Uuid;

@@ -343,9 +343,9 @@ fn cmd_tui() -> Result<()> {
 
 async fn cmd_mcp() -> Result<()> {
     let plib = Arc::new(Mutex::new(open_library()?));
-    let engine = Arc::new(Mutex::new(
-        jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default()),
-    ));
+    let engine = Arc::new(Mutex::new(jalwa_playback::PlaybackEngine::new(
+        jalwa_playback::EngineConfig::default(),
+    )));
     mcp::run(plib, engine).await
 }
 
@@ -484,5 +484,152 @@ mod tests {
         let result = open_library_at(&db);
         assert!(result.is_ok());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn search_with_results() {
+        let (path, mut plib) = tmp_db();
+        plib.library
+            .add_item(jalwa_core::test_fixtures::make_media_item(
+                "Bohemian Rhapsody",
+                "Queen",
+                354,
+            ));
+        let results = plib.library.search("queen");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].artist.as_deref(), Some("Queen"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn scan_skips_duplicates() {
+        let dir = tmp_dir_with_wav();
+        let (db_path, mut plib) = tmp_db();
+
+        let scanned = jalwa_core::scanner::scan_directory(&dir).unwrap();
+        for file in scanned {
+            let item = jalwa_core::scanner::scanned_to_media_item(file);
+            plib.add_item(item).unwrap();
+        }
+        assert_eq!(plib.library.items.len(), 1);
+
+        // Second scan — should skip duplicates
+        let scanned2 = jalwa_core::scanner::scan_directory(&dir).unwrap();
+        let mut added = 0;
+        for file in scanned2 {
+            let p = file.path.clone();
+            if plib.library.find_by_path(&p).is_some() {
+                continue;
+            }
+            let item = jalwa_core::scanner::scanned_to_media_item(file);
+            plib.add_item(item).unwrap();
+            added += 1;
+        }
+        assert_eq!(added, 0);
+        assert_eq!(plib.library.items.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn export_import_roundtrip() {
+        let dir = tmp_dir_with_wav();
+        let (db_path, mut plib) = tmp_db();
+
+        let scanned = jalwa_core::scanner::scan_directory(&dir).unwrap();
+        for file in scanned {
+            let item = jalwa_core::scanner::scanned_to_media_item(file);
+            plib.add_item(item).unwrap();
+        }
+
+        let item_id = plib.library.items[0].id;
+        let mut playlist = jalwa_core::Playlist::new("Test PL");
+        playlist.add(item_id);
+        plib.save_playlist(&playlist).unwrap();
+
+        let m3u_path =
+            std::env::temp_dir().join(format!("jalwa_export_{}.m3u", uuid::Uuid::new_v4()));
+        let export_result = jalwa_core::playlist_io::save_m3u(&playlist, &plib.library, &m3u_path);
+        assert!(export_result.is_ok());
+        assert!(m3u_path.exists());
+
+        let paths = jalwa_core::playlist_io::load_m3u(&m3u_path).unwrap();
+        assert_eq!(paths.len(), 1);
+
+        let _ = std::fs::remove_file(&m3u_path);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn info_shows_streams() {
+        let dir = tmp_dir_with_wav();
+        let wav_path = dir.join("test.wav");
+        let result = cmd_info(wav_path.to_str().unwrap());
+        assert!(result.is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stats_with_items() {
+        let (path, mut plib) = tmp_db();
+        plib.library
+            .add_item(jalwa_core::test_fixtures::make_media_item("A", "X", 100));
+        plib.library
+            .add_item(jalwa_core::test_fixtures::make_media_item("B", "Y", 200));
+        let stats = jalwa_ui::render_library_stats(&plib.library);
+        assert!(stats.contains("2 items"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn library_with_items() {
+        let (path, mut plib) = tmp_db();
+        plib.library
+            .add_item(jalwa_core::test_fixtures::make_media_item(
+                "Song", "Band", 180,
+            ));
+        assert_eq!(plib.library.items.len(), 1);
+        let rendered = jalwa_ui::render_library_item(&plib.library.items[0], 0);
+        assert!(rendered.contains("Band"));
+        assert!(rendered.contains("Song"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn scan_adds_path() {
+        let dir = tmp_dir_with_wav();
+        let (db_path, mut plib) = tmp_db();
+        plib.add_scan_path(dir.to_path_buf()).unwrap();
+        assert_eq!(plib.library.scan_paths.len(), 1);
+        assert_eq!(plib.library.scan_paths[0], dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn db_path_is_valid() {
+        let p = db_path();
+        assert!(p.to_str().unwrap().contains("jalwa"));
+    }
+
+    #[test]
+    fn import_finds_existing_items() {
+        let dir = tmp_dir_with_wav();
+        let (db_path, mut plib) = tmp_db();
+
+        let scanned = jalwa_core::scanner::scan_directory(&dir).unwrap();
+        for file in scanned {
+            let item = jalwa_core::scanner::scanned_to_media_item(file);
+            plib.add_item(item).unwrap();
+        }
+        assert_eq!(plib.library.items.len(), 1);
+
+        let wav_path = dir.join("test.wav");
+        assert!(plib.library.find_by_path(&wav_path).is_some());
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&db_path);
     }
 }

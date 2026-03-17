@@ -19,7 +19,11 @@ pub fn equalizer_view(ui: &mut egui::Ui, app: &mut GuiApp) {
 
         // Normalize toggle
         let norm = app.engine.normalize_enabled();
-        let norm_label = if norm { "Normalize: ON" } else { "Normalize: OFF" };
+        let norm_label = if norm {
+            "Normalize: ON"
+        } else {
+            "Normalize: OFF"
+        };
         if ui.button(norm_label).clicked() {
             app.engine.toggle_normalize();
         }
@@ -60,9 +64,7 @@ pub fn equalizer_view(ui: &mut egui::Ui, app: &mut GuiApp) {
             })
             .copied()
             .unwrap_or("custom");
-        ui.label(
-            egui::RichText::new(preset_name).color(theme::TEXT_MUTED),
-        );
+        ui.label(egui::RichText::new(preset_name).color(theme::TEXT_MUTED));
     });
 
     ui.separator();
@@ -90,11 +92,7 @@ pub fn equalizer_view(ui: &mut egui::Ui, app: &mut GuiApp) {
                     app.engine.set_eq_band(band, gain);
                 }
 
-                ui.label(
-                    egui::RichText::new(name)
-                        .color(theme::TEXT_MUTED)
-                        .small(),
-                );
+                ui.label(egui::RichText::new(name).color(theme::TEXT_MUTED).small());
             });
         }
     });
