@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026.3.18
+
+Polish release: MCP stdio integration tests, GUI headless tests, library grid view, lru advisory tracking.
+
+### MCP stdio integration tests
+- Refactored `mcp::run()` to delegate to generic `run_on<R, W>()` accepting any `AsyncBufRead` + `AsyncWrite` — enables testing the full JSON-RPC loop without a real terminal
+- 6 new async integration tests: `run_initialize`, `run_tools_list`, `run_tool_call_status`, `run_unknown_method`, `run_malformed_json_skipped`, `run_multiple_requests`
+- Covers protocol handshake, tool listing, tool dispatch, error handling, malformed input resilience, and multi-request sequencing
+
+### GUI headless integration tests
+- Added `GuiApp::new_headless()` constructor (test-only) that bypasses MPRIS D-Bus and filesystem watcher — no display server or D-Bus daemon required
+- 10 new tests using `egui::Context::default()` + `ctx.run()` for headless frame simulation
+- Tests: `headless_library_view_empty`, `headless_now_playing_view`, `headless_queue_view`, `headless_equalizer_view`, `update_search_empty_query`, `update_search_filters`, `list_len_library`, `play_item_valid_index`, `play_item_invalid_index`, `view_switching`
+
+### Library grid view
+- New `LibraryViewMode` enum (`List` / `Grid`) with toggle buttons in library search bar
+- Grid view renders 120x120 album art thumbnails with title/artist text in a responsive wrapping grid
+- Album art loaded via existing `ArtCache` (LRU texture cache); placeholder music note for items without art
+- 4-directional arrow key navigation in grid mode (left/right within row, up/down between rows)
+- Click to select, double-click to play, Enter to play, A to enqueue — same bindings as list view
+
+### ratatui lru advisory tracking (RUSTSEC-2026-0002)
+- Added `deny.toml` with `cargo-deny` configuration
+- `RUSTSEC-2026-0002` (lru 0.12.5 Stacked Borrows unsoundness in `IterMut`) documented and ignored pending upstream ratatui fix
+- License allowlist, ban policy, and source policy configured for CI integration
+
+### Version bump
+- All crates bumped to 2026.3.18 (calendar versioning)
+
 ## 2026.3.16-1
 
 Audio pipeline security audit, tarang upgrade, MCP fixes, fingerprint integration, test coverage push.

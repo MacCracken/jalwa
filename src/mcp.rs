@@ -69,7 +69,9 @@ where
             "id": id,
             "result": result
         });
-        writer.write_all(serde_json::to_string(&response)?.as_bytes()).await?;
+        writer
+            .write_all(serde_json::to_string(&response)?.as_bytes())
+            .await?;
         writer.write_all(b"\n").await?;
         writer.flush().await?;
     }
@@ -1140,8 +1142,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_unknown_method() {
-        let input =
-            r#"{"jsonrpc":"2.0","id":4,"method":"bogus/method"}"#.to_string() + "\n";
+        let input = r#"{"jsonrpc":"2.0","id":4,"method":"bogus/method"}"#.to_string() + "\n";
         let responses = run_on_input(&input).await;
         assert_eq!(responses.len(), 1);
         let err = responses[0]["result"]["error"].as_str().unwrap();
@@ -1175,6 +1176,11 @@ mod tests {
         // Verify each response type
         assert!(responses[0]["result"]["protocolVersion"].as_str().is_some());
         assert_eq!(responses[1]["result"]["tools"].as_array().unwrap().len(), 8);
-        assert!(responses[2]["result"]["error"].as_str().unwrap().contains("unknown method"));
+        assert!(
+            responses[2]["result"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("unknown method")
+        );
     }
 }

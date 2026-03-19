@@ -2047,7 +2047,7 @@ checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
 name = "jalwa"
-version = "2026.3.16-1"
+version = "2026.3.18"
 dependencies = [
  "anyhow",
  "clap",
@@ -2069,7 +2069,7 @@ dependencies = [
 
 [[package]]
 name = "jalwa-ai"
-version = "2026.3.16-1"
+version = "2026.3.18"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2089,7 +2089,7 @@ dependencies = [
 
 [[package]]
 name = "jalwa-core"
-version = "2026.3.16-1"
+version = "2026.3.18"
 dependencies = [
  "chrono",
  "lofty",
@@ -2107,7 +2107,7 @@ dependencies = [
 
 [[package]]
 name = "jalwa-gui"
-version = "2026.3.16-1"
+version = "2026.3.18"
 dependencies = [
  "eframe",
  "egui",
@@ -2121,7 +2121,7 @@ dependencies = [
 
 [[package]]
 name = "jalwa-playback"
-version = "2026.3.16-1"
+version = "2026.3.18"
 dependencies = [
  "bytemuck",
  "bytes",
@@ -2139,7 +2139,7 @@ dependencies = [
 
 [[package]]
 name = "jalwa-ui"
-version = "2026.3.16-1"
+version = "2026.3.18"
 dependencies = [
  "chrono",
  "crossterm",

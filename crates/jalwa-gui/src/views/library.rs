@@ -1,11 +1,16 @@
-//! Library view — scrollable track list with search.
+//! Library view — scrollable track list or grid with search.
 
-use crate::app::GuiApp;
+use crate::app::{GuiApp, LibraryViewMode};
 use crate::theme;
 use jalwa_playback::format_duration;
+use std::path::PathBuf;
+
+const CELL_WIDTH: f32 = 130.0;
+const ART_SIZE: f32 = 120.0;
+const CELL_HEIGHT: f32 = 170.0;
 
 pub fn library_view(ui: &mut egui::Ui, app: &mut GuiApp) {
-    // Search bar
+    // Search bar + view mode toggle
     ui.horizontal(|ui| {
         ui.label("\u{1F50D}");
         let response = ui.add(
@@ -33,11 +38,31 @@ pub fn library_view(ui: &mut egui::Ui, app: &mut GuiApp) {
                     .color(theme::TEXT_MUTED),
             );
         }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let grid_selected = app.library_view_mode == LibraryViewMode::Grid;
+            let list_selected = app.library_view_mode == LibraryViewMode::List;
+
+            if ui
+                .selectable_label(grid_selected, "\u{229e}")
+                .on_hover_text("Grid view")
+                .clicked()
+            {
+                app.library_view_mode = LibraryViewMode::Grid;
+            }
+            if ui
+                .selectable_label(list_selected, "\u{2261}")
+                .on_hover_text("List view")
+                .clicked()
+            {
+                app.library_view_mode = LibraryViewMode::List;
+            }
+        });
     });
 
     ui.separator();
 
-    // Track list
+    // Collect visible item indices
     let items: Vec<usize> = if !app.search_query.is_empty() {
         app.search_results.clone()
     } else {
@@ -58,6 +83,14 @@ pub fn library_view(ui: &mut egui::Ui, app: &mut GuiApp) {
         return;
     }
 
+    match app.library_view_mode {
+        LibraryViewMode::List => list_view(ui, app, &items),
+        LibraryViewMode::Grid => grid_view(ui, app, &items),
+    }
+}
+
+/// List view — the original scrollable track list.
+fn list_view(ui: &mut egui::Ui, app: &mut GuiApp, items: &[usize]) {
     // Pre-collect display data to avoid borrow conflicts
     let rows: Vec<(usize, usize, String, egui::Color32, uuid::Uuid)> = items
         .iter()
@@ -108,7 +141,7 @@ pub fn library_view(ui: &mut egui::Ui, app: &mut GuiApp) {
         }
     });
 
-    // Arrow key navigation
+    // Arrow key navigation (list: up/down)
     ui.input(|i| {
         if i.key_pressed(egui::Key::ArrowDown) && app.selected_index + 1 < items.len() {
             app.selected_index += 1;
@@ -117,4 +150,156 @@ pub fn library_view(ui: &mut egui::Ui, app: &mut GuiApp) {
             app.selected_index -= 1;
         }
     });
+}
+
+/// Grid view — album art thumbnails in a wrapping grid.
+fn grid_view(ui: &mut egui::Ui, app: &mut GuiApp, items: &[usize]) {
+    let available_width = ui.available_width();
+    let columns = ((available_width / CELL_WIDTH) as usize).max(1);
+
+    // Pre-collect display data to avoid borrow conflicts
+    let cells: Vec<(usize, usize, String, String, egui::Color32, uuid::Uuid, PathBuf)> = items
+        .iter()
+        .enumerate()
+        .filter_map(|(display_idx, &lib_idx)| {
+            let item = app.library.library.items.get(lib_idx)?;
+            let is_playing = app.current_playing_id == Some(item.id);
+            let is_selected = display_idx == app.selected_index;
+            let title = truncate_str(&item.title, 16);
+            let artist = truncate_str(item.artist.as_deref().unwrap_or("Unknown"), 16);
+            let color = if is_playing {
+                theme::ACCENT
+            } else if is_selected {
+                theme::TEXT_PRIMARY
+            } else {
+                theme::TEXT_SECONDARY
+            };
+            Some((
+                display_idx,
+                lib_idx,
+                title,
+                artist,
+                color,
+                item.id,
+                item.path.clone(),
+            ))
+        })
+        .collect();
+
+    let ctx = ui.ctx().clone();
+
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for chunk in cells.chunks(columns) {
+            ui.horizontal(|ui| {
+                for (display_idx, lib_idx, title, artist, color, item_id, path) in chunk {
+                    let is_selected = *display_idx == app.selected_index;
+
+                    let (rect, response) =
+                        ui.allocate_exact_size(egui::vec2(CELL_WIDTH, CELL_HEIGHT), egui::Sense::click());
+
+                    // Background highlight for selected cell
+                    if is_selected {
+                        ui.painter().rect_filled(
+                            rect,
+                            4.0,
+                            egui::Color32::from_rgba_premultiplied(255, 255, 255, 15),
+                        );
+                    }
+
+                    let art_rect = egui::Rect::from_min_size(
+                        rect.min + egui::vec2((CELL_WIDTH - ART_SIZE) / 2.0, 4.0),
+                        egui::vec2(ART_SIZE, ART_SIZE),
+                    );
+
+                    // Try to render album art
+                    if let Some(tex) = app.art_cache.get(&ctx, *item_id, path) {
+                        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                        ui.painter().image(tex.id(), art_rect, uv, egui::Color32::WHITE);
+                    } else {
+                        // Placeholder: dark rectangle with music note
+                        ui.painter().rect_filled(
+                            art_rect,
+                            4.0,
+                            egui::Color32::from_rgb(40, 40, 50),
+                        );
+                        ui.painter().text(
+                            art_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "\u{266b}",
+                            egui::FontId::proportional(32.0),
+                            theme::TEXT_MUTED,
+                        );
+                    }
+
+                    // Title text
+                    let title_pos = egui::pos2(
+                        rect.min.x + (CELL_WIDTH - ART_SIZE) / 2.0,
+                        art_rect.max.y + 4.0,
+                    );
+                    ui.painter().text(
+                        title_pos,
+                        egui::Align2::LEFT_TOP,
+                        title,
+                        egui::FontId::proportional(11.0),
+                        *color,
+                    );
+
+                    // Artist text
+                    let artist_pos = egui::pos2(title_pos.x, title_pos.y + 14.0);
+                    ui.painter().text(
+                        artist_pos,
+                        egui::Align2::LEFT_TOP,
+                        artist,
+                        egui::FontId::proportional(10.0),
+                        theme::TEXT_MUTED,
+                    );
+
+                    if response.clicked() {
+                        app.selected_index = *display_idx;
+                    }
+                    if response.double_clicked() {
+                        app.play_item(*lib_idx);
+                    }
+                    if is_selected && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        app.play_item(*lib_idx);
+                    }
+                    if is_selected && ui.input(|i| i.key_pressed(egui::Key::A)) {
+                        app.queue.enqueue(*item_id);
+                    }
+                }
+            });
+        }
+    });
+
+    // Arrow key navigation (grid: all four directions)
+    let item_count = items.len();
+    ui.input(|i| {
+        if i.key_pressed(egui::Key::ArrowRight) && app.selected_index + 1 < item_count {
+            app.selected_index += 1;
+        }
+        if i.key_pressed(egui::Key::ArrowLeft) && app.selected_index > 0 {
+            app.selected_index -= 1;
+        }
+        if i.key_pressed(egui::Key::ArrowDown) {
+            let next = app.selected_index + columns;
+            if next < item_count {
+                app.selected_index = next;
+            }
+        }
+        if i.key_pressed(egui::Key::ArrowUp) {
+            if app.selected_index >= columns {
+                app.selected_index -= columns;
+            }
+        }
+    });
+}
+
+/// Truncate a string to `max_len` characters, appending "..." if truncated.
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.chars().count() <= max_len {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_len.saturating_sub(1)).collect();
+        format!("{truncated}\u{2026}")
+    }
 }

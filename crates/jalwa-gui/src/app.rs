@@ -20,6 +20,13 @@ pub enum View {
     Equalizer,
 }
 
+/// Library view layout mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryViewMode {
+    List,
+    Grid,
+}
+
 /// GuiApp owns all state; eframe::App::update() runs on the main thread.
 pub struct GuiApp {
     pub library: PersistentLibrary,
@@ -29,6 +36,7 @@ pub struct GuiApp {
     pub selected_index: usize,
     pub search_query: String,
     pub search_results: Vec<usize>,
+    pub library_view_mode: LibraryViewMode,
     pub art_cache: ArtCache,
     pub current_playing_id: Option<Uuid>,
 
@@ -53,6 +61,7 @@ impl GuiApp {
             selected_index: 0,
             search_query: String::new(),
             search_results: Vec::new(),
+            library_view_mode: LibraryViewMode::List,
             art_cache: ArtCache::new(),
             current_playing_id: None,
             mpris_rx,
@@ -202,6 +211,7 @@ impl GuiApp {
             selected_index: 0,
             search_query: String::new(),
             search_results: Vec::new(),
+            library_view_mode: LibraryViewMode::List,
             art_cache: ArtCache::new(),
             current_playing_id: None,
             mpris_rx,
