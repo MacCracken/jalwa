@@ -281,8 +281,7 @@ mod tests {
     use jalwa_core::test_fixtures;
 
     fn test_db() -> (std::path::PathBuf, PersistentLibrary) {
-        let path =
-            std::env::temp_dir().join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4()));
         let plib = PersistentLibrary::open(&path).unwrap();
         (path, plib)
     }
@@ -420,7 +419,8 @@ mod tests {
     fn play_item_valid_index() {
         let (path, mut app) = test_app();
         let wav_data = test_fixtures::make_test_wav(44100, 44100);
-        let wav_path = std::env::temp_dir().join(format!("jalwa_test_{}.wav", uuid::Uuid::new_v4()));
+        let wav_path =
+            std::env::temp_dir().join(format!("jalwa_test_{}.wav", uuid::Uuid::new_v4()));
         std::fs::write(&wav_path, &wav_data).unwrap();
 
         let mut item = test_fixtures::make_media_item("Test WAV", "Test", 1);
@@ -452,7 +452,12 @@ mod tests {
         app.library.library.items.push(item);
         app.selected_index = 0;
 
-        for view in [View::Queue, View::NowPlaying, View::Equalizer, View::Library] {
+        for view in [
+            View::Queue,
+            View::NowPlaying,
+            View::Equalizer,
+            View::Library,
+        ] {
             app.view = view;
             app.selected_index = 0;
             assert_eq!(app.view, view);

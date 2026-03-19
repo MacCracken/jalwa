@@ -158,7 +158,15 @@ fn grid_view(ui: &mut egui::Ui, app: &mut GuiApp, items: &[usize]) {
     let columns = ((available_width / CELL_WIDTH) as usize).max(1);
 
     // Pre-collect display data to avoid borrow conflicts
-    let cells: Vec<(usize, usize, String, String, egui::Color32, uuid::Uuid, PathBuf)> = items
+    let cells: Vec<(
+        usize,
+        usize,
+        String,
+        String,
+        egui::Color32,
+        uuid::Uuid,
+        PathBuf,
+    )> = items
         .iter()
         .enumerate()
         .filter_map(|(display_idx, &lib_idx)| {
@@ -194,8 +202,10 @@ fn grid_view(ui: &mut egui::Ui, app: &mut GuiApp, items: &[usize]) {
                 for (display_idx, lib_idx, title, artist, color, item_id, path) in chunk {
                     let is_selected = *display_idx == app.selected_index;
 
-                    let (rect, response) =
-                        ui.allocate_exact_size(egui::vec2(CELL_WIDTH, CELL_HEIGHT), egui::Sense::click());
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(CELL_WIDTH, CELL_HEIGHT),
+                        egui::Sense::click(),
+                    );
 
                     // Background highlight for selected cell
                     if is_selected {
@@ -213,8 +223,10 @@ fn grid_view(ui: &mut egui::Ui, app: &mut GuiApp, items: &[usize]) {
 
                     // Try to render album art
                     if let Some(tex) = app.art_cache.get(&ctx, *item_id, path) {
-                        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                        ui.painter().image(tex.id(), art_rect, uv, egui::Color32::WHITE);
+                        let uv =
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                        ui.painter()
+                            .image(tex.id(), art_rect, uv, egui::Color32::WHITE);
                     } else {
                         // Placeholder: dark rectangle with music note
                         ui.painter().rect_filled(
@@ -286,10 +298,8 @@ fn grid_view(ui: &mut egui::Ui, app: &mut GuiApp, items: &[usize]) {
                 app.selected_index = next;
             }
         }
-        if i.key_pressed(egui::Key::ArrowUp) {
-            if app.selected_index >= columns {
-                app.selected_index -= columns;
-            }
+        if i.key_pressed(egui::Key::ArrowUp) && app.selected_index >= columns {
+            app.selected_index -= columns;
         }
     });
 }
