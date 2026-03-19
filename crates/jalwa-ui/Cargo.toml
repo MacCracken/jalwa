@@ -1,6 +1,6 @@
 [package]
 name = "jalwa-ui"
-version = "2026.3.16-1"
+version = "2026.3.18"
 edition = "2024"
 description = "UI layer for Jalwa media player — terminal and desktop interfaces"
 license = "GPL-3.0"

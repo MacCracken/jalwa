@@ -1,6 +1,6 @@
 [package]
 name = "jalwa-playback"
-version = "2026.3.16-1"
+version = "2026.3.18"
 edition = "2024"
 description = "Playback engine for Jalwa — tarang decode pipeline + PipeWire audio output"
 license = "GPL-3.0"

@@ -17,11 +17,28 @@ pub async fn run(
     plib: Arc<Mutex<jalwa_core::db::PersistentLibrary>>,
     engine: Arc<Mutex<jalwa_playback::PlaybackEngine>>,
 ) -> Result<()> {
-    use serde_json::Value;
-    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::io::BufReader;
 
-    let stdin = BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
+    let reader = BufReader::new(tokio::io::stdin());
+    let mut writer = tokio::io::stdout();
+    run_on(reader, &mut writer, plib, engine).await
+}
+
+/// Internal JSON-RPC loop over generic reader/writer. Used by [`run`] and tests.
+async fn run_on<R, W>(
+    reader: R,
+    writer: &mut W,
+    plib: Arc<Mutex<jalwa_core::db::PersistentLibrary>>,
+    engine: Arc<Mutex<jalwa_playback::PlaybackEngine>>,
+) -> Result<()>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use serde_json::Value;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    let mut lines = reader.lines();
 
     while let Ok(Some(line)) = lines.next_line().await {
         let request: Value = match serde_json::from_str(&line) {
@@ -52,7 +69,9 @@ pub async fn run(
             "id": id,
             "result": result
         });
-        println!("{}", serde_json::to_string(&response)?);
+        writer.write_all(serde_json::to_string(&response)?.as_bytes()).await?;
+        writer.write_all(b"\n").await?;
+        writer.flush().await?;
     }
 
     Ok(())
@@ -1054,5 +1073,108 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ---- MCP stdio integration tests (run_on) ----
+
+    /// Helper: run the JSON-RPC loop with the given input lines and return parsed responses.
+    async fn run_on_input(input: &str) -> Vec<serde_json::Value> {
+        let (path, plib) = tmp_db();
+        let plib = Arc::new(Mutex::new(plib));
+        let eng = test_engine();
+
+        let reader = tokio::io::BufReader::new(input.as_bytes());
+        let mut output = Vec::new();
+
+        run_on(reader, &mut output, plib, eng).await.unwrap();
+
+        let _ = std::fs::remove_file(&path);
+
+        // Each response is a single JSON line
+        String::from_utf8(output)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn run_initialize() {
+        let input = r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#.to_string() + "\n";
+        let responses = run_on_input(&input).await;
+        assert_eq!(responses.len(), 1);
+        let r = &responses[0];
+        assert_eq!(r["jsonrpc"], "2.0");
+        assert_eq!(r["id"], 1);
+        assert!(r["result"]["protocolVersion"].as_str().is_some());
+        assert_eq!(r["result"]["serverInfo"]["name"], "jalwa");
+    }
+
+    #[tokio::test]
+    async fn run_tools_list() {
+        let input = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#.to_string() + "\n";
+        let responses = run_on_input(&input).await;
+        assert_eq!(responses.len(), 1);
+        let tools = responses[0]["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn run_tool_call_status() {
+        let input = serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": { "name": "jalwa_status", "arguments": {} }
+        }))
+        .unwrap()
+            + "\n";
+        let responses = run_on_input(&input).await;
+        assert_eq!(responses.len(), 1);
+        let text = responses[0]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(text.contains("Stopped"));
+    }
+
+    #[tokio::test]
+    async fn run_unknown_method() {
+        let input =
+            r#"{"jsonrpc":"2.0","id":4,"method":"bogus/method"}"#.to_string() + "\n";
+        let responses = run_on_input(&input).await;
+        assert_eq!(responses.len(), 1);
+        let err = responses[0]["result"]["error"].as_str().unwrap();
+        assert!(err.contains("unknown method"));
+    }
+
+    #[tokio::test]
+    async fn run_malformed_json_skipped() {
+        let input = "this is not json\n".to_string()
+            + r#"{"jsonrpc":"2.0","id":5,"method":"initialize"}"#
+            + "\n";
+        let responses = run_on_input(&input).await;
+        // Malformed line is skipped; only the valid request produces a response.
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0]["id"], 5);
+    }
+
+    #[tokio::test]
+    async fn run_multiple_requests() {
+        let input = format!(
+            "{}\n{}\n{}\n",
+            r#"{"jsonrpc":"2.0","id":10,"method":"initialize"}"#,
+            r#"{"jsonrpc":"2.0","id":11,"method":"tools/list"}"#,
+            r#"{"jsonrpc":"2.0","id":12,"method":"unknown"}"#,
+        );
+        let responses = run_on_input(&input).await;
+        assert_eq!(responses.len(), 3);
+        assert_eq!(responses[0]["id"], 10);
+        assert_eq!(responses[1]["id"], 11);
+        assert_eq!(responses[2]["id"], 12);
+        // Verify each response type
+        assert!(responses[0]["result"]["protocolVersion"].as_str().is_some());
+        assert_eq!(responses[1]["result"]["tools"].as_array().unwrap().len(), 8);
+        assert!(responses[2]["result"]["error"].as_str().unwrap().contains("unknown method"));
     }
 }

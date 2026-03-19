@@ -190,6 +190,25 @@ impl GuiApp {
         }
     }
 
+    /// Create a headless GuiApp for testing (no MPRIS, no watcher).
+    #[cfg(test)]
+    pub fn new_headless(library: PersistentLibrary, engine: PlaybackEngine) -> Self {
+        let (_, mpris_rx) = std::sync::mpsc::channel();
+        Self {
+            library,
+            engine,
+            queue: PlayQueue::new(),
+            view: View::Library,
+            selected_index: 0,
+            search_query: String::new(),
+            search_results: Vec::new(),
+            art_cache: ArtCache::new(),
+            current_playing_id: None,
+            mpris_rx,
+            _watcher: None,
+        }
+    }
+
     /// Play a specific library item by index.
     pub fn play_item(&mut self, lib_index: usize) {
         if let Some(item) = self.library.library.items.get(lib_index) {
@@ -249,10 +268,187 @@ impl eframe::App for GuiApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jalwa_core::test_fixtures;
+
+    fn test_db() -> (std::path::PathBuf, PersistentLibrary) {
+        let path =
+            std::env::temp_dir().join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4()));
+        let plib = PersistentLibrary::open(&path).unwrap();
+        (path, plib)
+    }
+
+    fn test_app() -> (std::path::PathBuf, GuiApp) {
+        let (path, plib) = test_db();
+        let engine = PlaybackEngine::new(jalwa_playback::EngineConfig::default());
+        let app = GuiApp::new_headless(plib, engine);
+        (path, app)
+    }
 
     #[test]
     fn view_variants() {
         assert_ne!(View::Library, View::Queue);
         assert_ne!(View::NowPlaying, View::Equalizer);
+    }
+
+    #[test]
+    fn headless_library_view_empty() {
+        let (path, mut app) = test_app();
+        let ctx = egui::Context::default();
+        ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                views::library::library_view(ui, &mut app);
+            });
+        });
+        assert_eq!(app.list_len(), 0);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn headless_now_playing_view() {
+        let (path, mut app) = test_app();
+        app.view = View::NowPlaying;
+        let ctx = egui::Context::default();
+        ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                views::now_playing::now_playing_view(ui, ctx, &mut app);
+            });
+        });
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn headless_queue_view() {
+        let (path, mut app) = test_app();
+        app.view = View::Queue;
+        let ctx = egui::Context::default();
+        ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                views::queue::queue_view(ui, &mut app);
+            });
+        });
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn headless_equalizer_view() {
+        let (path, mut app) = test_app();
+        app.view = View::Equalizer;
+        let ctx = egui::Context::default();
+        ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                views::equalizer::equalizer_view(ui, &mut app);
+            });
+        });
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_search_empty_query() {
+        let (path, mut app) = test_app();
+        app.search_query = String::new();
+        app.update_search();
+        assert!(app.search_results.is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_search_filters() {
+        let (path, mut app) = test_app();
+        let item1 = test_fixtures::make_media_item("Moonlight Sonata", "Beethoven", 300);
+        let item2 = test_fixtures::make_media_item("Clair de Lune", "Debussy", 280);
+        let item3 = test_fixtures::make_media_item("Moonriver", "Mancini", 180);
+        app.library.library.items.push(item1);
+        app.library.library.items.push(item2);
+        app.library.library.items.push(item3);
+
+        app.search_query = "moon".to_string();
+        app.update_search();
+        assert_eq!(app.search_results.len(), 2);
+        assert!(app.search_results.contains(&0));
+        assert!(app.search_results.contains(&2));
+
+        app.search_query = "debussy".to_string();
+        app.update_search();
+        assert_eq!(app.search_results.len(), 1);
+        assert!(app.search_results.contains(&1));
+
+        app.search_query = "nonexistent".to_string();
+        app.update_search();
+        assert!(app.search_results.is_empty());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn list_len_library() {
+        let (path, mut app) = test_app();
+        assert_eq!(app.list_len(), 0);
+
+        let item1 = test_fixtures::make_media_item("Track A", "Artist", 120);
+        let item2 = test_fixtures::make_media_item("Track B", "Artist", 150);
+        app.library.library.items.push(item1);
+        app.library.library.items.push(item2);
+        assert_eq!(app.list_len(), 2);
+
+        app.search_query = "Track A".to_string();
+        app.update_search();
+        assert_eq!(app.list_len(), 1);
+
+        app.view = View::Queue;
+        assert_eq!(app.list_len(), 0);
+
+        app.view = View::NowPlaying;
+        assert_eq!(app.list_len(), 0);
+
+        app.view = View::Equalizer;
+        assert_eq!(app.list_len(), 10);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn play_item_valid_index() {
+        let (path, mut app) = test_app();
+        let wav_data = test_fixtures::make_test_wav(44100, 44100);
+        let wav_path = std::env::temp_dir().join(format!("jalwa_test_{}.wav", uuid::Uuid::new_v4()));
+        std::fs::write(&wav_path, &wav_data).unwrap();
+
+        let mut item = test_fixtures::make_media_item("Test WAV", "Test", 1);
+        item.path = wav_path.clone();
+        let id = item.id;
+        app.library.library.items.push(item);
+
+        app.play_item(0);
+        assert_eq!(app.current_playing_id, Some(id));
+        assert!(!app.queue.is_empty());
+
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn play_item_invalid_index() {
+        let (path, mut app) = test_app();
+        app.play_item(999);
+        assert!(app.current_playing_id.is_none());
+        assert!(app.queue.is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn view_switching() {
+        let (path, mut app) = test_app();
+        let item = test_fixtures::make_media_item("Track", "Artist", 120);
+        app.library.library.items.push(item);
+        app.selected_index = 0;
+
+        for view in [View::Queue, View::NowPlaying, View::Equalizer, View::Library] {
+            app.view = view;
+            app.selected_index = 0;
+            assert_eq!(app.view, view);
+            assert_eq!(app.selected_index, 0);
+        }
+
+        let _ = std::fs::remove_file(&path);
     }
 }
