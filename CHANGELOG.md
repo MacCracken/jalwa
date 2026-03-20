@@ -2,14 +2,37 @@
 
 ## 2026.3.19
 
-Switched tarang dependency from git subcrates to the published crates.io umbrella crate.
+Tarang crates.io migration, aarch64 build fix, and full security/performance audit.
 
 ### Tarang crates.io migration
 - Replaced 5 git-pinned subcrate dependencies (`tarang-core`, `tarang-demux`, `tarang-audio`, `tarang-video`, `tarang-ai` from `github.com/MacCracken/tarang` tag `2026.3.16-1`) with a single `tarang = "0.19.3"` from crates.io
 - Tarang is now an optional feature (`tarang`) included in `default` — build with `--no-default-features` to compile without it
-- Feature propagates through workspace: `jalwa/tarang` enables `jalwa-core/tarang`, `jalwa-playback/tarang`, `jalwa-ai/tarang`
+- Feature propagates through workspace: `jalwa/tarang` enables `jalwa-core/tarang`, `jalwa-playback/tarang`, `jalwa-ai/tarang`, `jalwa-ui/tarang`
 - Updated all import paths from subcrate style (`tarang_core::`, `tarang_audio::`, `tarang_ai::`) to umbrella module style (`tarang::core::`, `tarang::audio::`, `tarang::ai::`)
 - Adapted to published API: `MediaInfo::audio_streams()` returns an iterator (`.next()`) instead of a slice (`.first()`)
+
+### aarch64 build fix
+- Gated tarang usage behind `cfg(feature = "tarang")` across all crates — aarch64 release builds with `--no-default-features` now compile cleanly
+- Defined fallback `ContainerFormat`, `AudioCodec`, `VideoCodec` enums (with `Display`) when tarang feature is disabled
+- Gated `scanner`, `fingerprint`, `decode_loop`, DSP functions, and `MediaItem::from_probe` behind feature flag
+- Added stub `open`/`play`/`scan`/`info` implementations that return helpful errors when tarang is unavailable
+
+### Security hardening
+- **MCP mutex safety**: Replaced all `.lock().unwrap()` in MCP tool functions with error-returning match — prevents server crash on poisoned mutex
+- **MCP path validation**: Added `validate_path()` with `canonicalize()` for all file/directory inputs from MCP clients — prevents path traversal
+- **API key redaction**: Manual `Debug` impls on `DaimonConfig` and `HooshConfig` redact `api_key` as `[REDACTED]` — prevents credential leakage in logs
+- **Safe JSON access**: Replaced unsafe `result["content"][0]["text"]` array indexing in daimon.rs with `.get()` chains — prevents panic on malformed API responses
+- **Album art size limits**: Scanner rejects embedded art >5MB; GUI rejects art images >2048×2048 before RGBA conversion — prevents memory exhaustion from malformed media
+
+### Performance
+- **O(1) library lookups**: Added `HashMap<Uuid, usize>` and `HashMap<PathBuf, usize>` indexes to `Library` — `find_by_id` and `find_by_path` are now O(1) instead of O(n)
+- **Audio buffer reuse**: Added reusable scratch buffer to `Equalizer`; new `apply_volume_in_place` avoids allocating a new `AudioBuffer` per decode loop iteration
+- **Parallel fingerprinting**: `find_similar_local` now uses `rayon::par_iter()` for concurrent fingerprint computation across library items
+- **MCP response pagination**: Library list capped at 200 items, search results at 100 — prevents multi-MB JSON responses
+
+### Data integrity
+- **SQLite transactions**: `save_playlist` and `delete_item` now wrapped in BEGIN/COMMIT/ROLLBACK — prevents inconsistent state on crash
+- **Corruption logging**: UUID parse failures and datetime parse failures in database loading now emit `tracing::warn!` with raw values instead of silently falling back
 
 ### Version bump
 - All crates bumped to 2026.3.19
