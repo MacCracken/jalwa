@@ -73,6 +73,18 @@ impl ArtCache {
         self.no_art.remove(&item_id);
     }
 
+    /// Number of items known to have no art (for testing).
+    #[cfg(test)]
+    pub fn no_art_count(&self) -> usize {
+        self.no_art.len()
+    }
+
+    /// Number of cached textures (for testing).
+    #[cfg(test)]
+    pub fn texture_count(&self) -> usize {
+        self.textures.len()
+    }
+
     fn evict_if_full(&mut self) {
         while self.textures.len() >= MAX_TEXTURES {
             if let Some((&oldest_id, _)) = self
@@ -145,5 +157,65 @@ mod tests {
     fn invalidate_unknown_id() {
         let mut cache = ArtCache::new();
         cache.invalidate(Uuid::new_v4()); // should not panic
+    }
+
+    #[test]
+    fn cache_no_art_tracking() {
+        let mut cache = ArtCache::new();
+        let ctx = egui::Context::default();
+        let fake_id = Uuid::new_v4();
+        let fake_path = std::path::PathBuf::from("/nonexistent/track.mp3");
+
+        // First call: file doesn't exist, should return None and record in no_art
+        let result = cache.get(&ctx, fake_id, &fake_path);
+        assert!(result.is_none());
+        assert_eq!(cache.no_art_count(), 1);
+
+        // Second call: same id, should short-circuit via no_art set
+        let result2 = cache.get(&ctx, fake_id, &fake_path);
+        assert!(result2.is_none());
+        assert_eq!(cache.no_art_count(), 1); // still 1, not 2
+
+        // Different id also gets tracked
+        let fake_id2 = Uuid::new_v4();
+        let result3 = cache.get(&ctx, fake_id2, &fake_path);
+        assert!(result3.is_none());
+        assert_eq!(cache.no_art_count(), 2);
+    }
+
+    #[test]
+    fn invalidate_clears_no_art() {
+        let mut cache = ArtCache::new();
+        let ctx = egui::Context::default();
+        let fake_id = Uuid::new_v4();
+        let fake_path = std::path::PathBuf::from("/nonexistent/track.mp3");
+
+        // Mark as no-art
+        let _ = cache.get(&ctx, fake_id, &fake_path);
+        assert_eq!(cache.no_art_count(), 1);
+
+        // Invalidate should clear from no_art set
+        cache.invalidate(fake_id);
+        assert_eq!(cache.no_art_count(), 0);
+        assert_eq!(cache.texture_count(), 0);
+    }
+
+    #[test]
+    fn cache_max_textures_constant() {
+        assert!(MAX_TEXTURES > 0);
+        assert!(MAX_TEXTURES <= 1000); // reasonable upper bound
+    }
+
+    #[test]
+    fn cache_access_counter_increments() {
+        let mut cache = ArtCache::new();
+        let ctx = egui::Context::default();
+        assert_eq!(cache.access_counter, 0);
+
+        let _ = cache.get(&ctx, Uuid::new_v4(), std::path::Path::new("/a.mp3"));
+        assert_eq!(cache.access_counter, 1);
+
+        let _ = cache.get(&ctx, Uuid::new_v4(), std::path::Path::new("/b.mp3"));
+        assert_eq!(cache.access_counter, 2);
     }
 }

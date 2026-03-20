@@ -105,3 +105,129 @@ pub fn now_playing_view(ui: &mut egui::Ui, ctx: &egui::Context, app: &mut GuiApp
         );
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jalwa_core::test_fixtures::{make_media_item, make_test_wav};
+
+    fn test_app() -> crate::app::GuiApp {
+        let plib = jalwa_core::db::PersistentLibrary::open(
+            &std::env::temp_dir()
+                .join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let engine =
+            jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
+        crate::app::GuiApp::new_headless(plib, engine)
+    }
+
+    #[test]
+    fn now_playing_no_track() {
+        let mut app = test_app();
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                now_playing_view(ui, ctx, &mut app);
+            });
+        });
+        // Should render "Nothing playing" without panic
+    }
+
+    #[test]
+    fn now_playing_with_track() {
+        let mut app = test_app();
+
+        // Create a real wav on disk so the engine can open it
+        let wav_data = make_test_wav(44100, 44100);
+        let wav_path = std::env::temp_dir()
+            .join(format!("jalwa_np_test_{}.wav", uuid::Uuid::new_v4()));
+        std::fs::write(&wav_path, &wav_data).unwrap();
+
+        let mut item = make_media_item("Now Playing Track", "Test Artist", 1);
+        item.path = wav_path.clone();
+        let id = item.id;
+        app.library.library.items.push(item);
+
+        // Open and play so engine has a current path
+        let _ = app.engine.open(&wav_path);
+        let _ = app.engine.play();
+        app.current_playing_id = Some(id);
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                now_playing_view(ui, ctx, &mut app);
+            });
+        });
+
+        let _ = std::fs::remove_file(&wav_path);
+    }
+
+    #[test]
+    fn now_playing_with_metadata() {
+        let mut app = test_app();
+
+        let wav_data = make_test_wav(44100, 44100);
+        let wav_path = std::env::temp_dir()
+            .join(format!("jalwa_np_meta_{}.wav", uuid::Uuid::new_v4()));
+        std::fs::write(&wav_path, &wav_data).unwrap();
+
+        let mut item = make_media_item("Rich Track", "Best Artist", 245);
+        item.path = wav_path.clone();
+        item.album = Some("Great Album".to_string());
+        item.rating = Some(4);
+        item.play_count = 7;
+        let id = item.id;
+        app.library.library.items.push(item);
+
+        let _ = app.engine.open(&wav_path);
+        let _ = app.engine.play();
+        app.current_playing_id = Some(id);
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                now_playing_view(ui, ctx, &mut app);
+            });
+        });
+
+        let _ = std::fs::remove_file(&wav_path);
+    }
+
+    #[test]
+    fn now_playing_progress_display() {
+        let mut app = test_app();
+
+        let wav_data = make_test_wav(88200, 44100); // 2 seconds
+        let wav_path = std::env::temp_dir()
+            .join(format!("jalwa_np_prog_{}.wav", uuid::Uuid::new_v4()));
+        std::fs::write(&wav_path, &wav_data).unwrap();
+
+        let mut item = make_media_item("Progress Track", "Prog Artist", 120);
+        item.path = wav_path.clone();
+        item.duration = Some(std::time::Duration::from_secs(120));
+        item.audio_codec = Some(jalwa_core::AudioCodec::Flac);
+        item.artist = None; // exercises "Unknown Artist" branch
+        item.album = None;  // exercises "Unknown Album" branch
+        item.rating = None;  // exercises "-" rating branch
+        let id = item.id;
+        app.library.library.items.push(item);
+
+        let _ = app.engine.open(&wav_path);
+        let _ = app.engine.play();
+        app.current_playing_id = Some(id);
+
+        let ctx = egui::Context::default();
+        // Render twice to exercise with some state
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    now_playing_view(ui, ctx, &mut app);
+                });
+            });
+        }
+
+        let _ = std::fs::remove_file(&wav_path);
+    }
+}

@@ -43,3 +43,39 @@ pub fn apply(ctx: &egui::Context) {
     style.visuals = visuals;
     ctx.set_style(style);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn theme_apply() {
+        let ctx = egui::Context::default();
+        apply(&ctx);
+        // Verify the theme was applied by checking panel fill
+        let style = ctx.style();
+        assert_eq!(style.visuals.panel_fill, BG_PANEL);
+        assert_eq!(style.visuals.window_fill, BG_DARK);
+    }
+
+    #[test]
+    fn theme_constants() {
+        // Verify color constants have expected non-zero RGB values
+        assert_ne!(BG_DARK, Color32::TRANSPARENT);
+        assert_ne!(BG_PANEL, Color32::TRANSPARENT);
+        assert_ne!(BG_WIDGET, Color32::TRANSPARENT);
+        assert_ne!(ACCENT, Color32::TRANSPARENT);
+        assert_ne!(ACCENT_DIM, Color32::TRANSPARENT);
+        assert_ne!(TEXT_PRIMARY, Color32::TRANSPARENT);
+        assert_ne!(TEXT_SECONDARY, Color32::TRANSPARENT);
+        assert_ne!(TEXT_MUTED, Color32::TRANSPARENT);
+        assert_ne!(HIGHLIGHT, Color32::TRANSPARENT);
+        assert_ne!(ERROR, Color32::TRANSPARENT);
+
+        // All colors should be fully opaque (alpha = 255)
+        assert_eq!(BG_DARK.a(), 255);
+        assert_eq!(ACCENT.a(), 255);
+        assert_eq!(TEXT_PRIMARY.a(), 255);
+        assert_eq!(ERROR.a(), 255);
+    }
+}

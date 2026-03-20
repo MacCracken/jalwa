@@ -30,3 +30,58 @@ pub fn sidebar(ui: &mut egui::Ui, app: &mut GuiApp) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_app() -> crate::app::GuiApp {
+        let plib = jalwa_core::db::PersistentLibrary::open(
+            &std::env::temp_dir()
+                .join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let engine =
+            jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
+        crate::app::GuiApp::new_headless(plib, engine)
+    }
+
+    #[test]
+    fn sidebar_renders() {
+        let mut app = test_app();
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                sidebar(ui, &mut app);
+            });
+        });
+    }
+
+    #[test]
+    fn sidebar_highlights_current() {
+        let mut app = test_app();
+
+        // Default view is Library
+        assert_eq!(app.view, View::Library);
+
+        // Switch to Queue and render
+        app.view = View::Queue;
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                sidebar(ui, &mut app);
+            });
+        });
+        assert_eq!(app.view, View::Queue);
+
+        // Switch to NowPlaying and render
+        app.view = View::NowPlaying;
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                sidebar(ui, &mut app);
+            });
+        });
+        assert_eq!(app.view, View::NowPlaying);
+    }
+}

@@ -173,4 +173,24 @@ mod tests {
         let results = find_similar_local(&lib, Path::new("/some/seed.flac"), 5, 0.5);
         assert!(results.is_empty());
     }
+
+    #[test]
+    fn fingerprint_match_score_range() {
+        let id = Uuid::new_v4();
+        let m = FingerprintMatch {
+            item_id: id,
+            score: 0.95,
+            path: "/music/similar.flac".to_string(),
+        };
+        assert_eq!(m.item_id, id);
+        assert!((m.score - 0.95).abs() < f64::EPSILON);
+        assert_eq!(m.path, "/music/similar.flac");
+    }
+
+    #[test]
+    fn find_similar_max_results_zero() {
+        let lib = jalwa_core::Library::new();
+        let results = find_similar_local(&lib, Path::new("/some/seed.flac"), 0, 0.0);
+        assert!(results.is_empty());
+    }
 }

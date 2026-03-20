@@ -128,3 +128,83 @@ pub fn queue_view(ui: &mut egui::Ui, app: &mut GuiApp) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jalwa_core::test_fixtures::make_media_item;
+
+    fn test_app() -> crate::app::GuiApp {
+        let plib = jalwa_core::db::PersistentLibrary::open(
+            &std::env::temp_dir()
+                .join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let engine =
+            jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
+        crate::app::GuiApp::new_headless(plib, engine)
+    }
+
+    #[test]
+    fn queue_view_empty() {
+        let mut app = test_app();
+        app.view = crate::app::View::Queue;
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                queue_view(ui, &mut app);
+            });
+        });
+        assert!(app.queue.is_empty());
+    }
+
+    #[test]
+    fn queue_view_with_items() {
+        let mut app = test_app();
+        let item1 = make_media_item("Queue Track 1", "Artist A", 200);
+        let item2 = make_media_item("Queue Track 2", "Artist B", 180);
+        let id1 = item1.id;
+        let id2 = item2.id;
+        app.library.library.items.push(item1);
+        app.library.library.items.push(item2);
+        app.queue.enqueue(id1);
+        app.queue.enqueue(id2);
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                queue_view(ui, &mut app);
+            });
+        });
+        assert_eq!(app.queue.len(), 2);
+    }
+
+    #[test]
+    fn queue_view_repeat_modes() {
+        let mut app = test_app();
+
+        // Default is Off
+        assert_eq!(app.queue.repeat_mode, RepeatMode::Off);
+
+        // Cycle through all modes
+        app.queue.repeat_mode = app.queue.repeat_mode.cycle();
+        assert_eq!(app.queue.repeat_mode, RepeatMode::One);
+
+        app.queue.repeat_mode = app.queue.repeat_mode.cycle();
+        assert_eq!(app.queue.repeat_mode, RepeatMode::All);
+
+        app.queue.repeat_mode = app.queue.repeat_mode.cycle();
+        assert_eq!(app.queue.repeat_mode, RepeatMode::Off);
+
+        // Render with each mode
+        for mode in [RepeatMode::Off, RepeatMode::One, RepeatMode::All] {
+            app.queue.repeat_mode = mode;
+            let ctx = egui::Context::default();
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    queue_view(ui, &mut app);
+                });
+            });
+        }
+    }
+}

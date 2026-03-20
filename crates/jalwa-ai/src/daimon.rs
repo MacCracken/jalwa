@@ -692,4 +692,129 @@ mod tests {
         let parsed: TranscriptionResult = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.text, "hello world");
     }
+
+    #[test]
+    fn auth_header_with_key() {
+        let config = DaimonConfig {
+            endpoint: "http://localhost:8090".to_string(),
+            api_key: Some("secret-key-123".to_string()),
+        };
+        let client = DaimonClient::new(config).unwrap();
+        let header = client.auth_header();
+        assert_eq!(header, Some("Bearer secret-key-123".to_string()));
+    }
+
+    #[test]
+    fn auth_header_without_key() {
+        let config = DaimonConfig {
+            endpoint: "http://localhost:8090".to_string(),
+            api_key: None,
+        };
+        let client = DaimonClient::new(config).unwrap();
+        assert!(client.auth_header().is_none());
+    }
+
+    #[test]
+    fn format_item_rag_with_tags_and_rating() {
+        let mut item = make_item("Groovy Tune", "DJ Cool", 300);
+        item.tags = vec!["electronic".to_string(), "chill".to_string()];
+        item.rating = Some(5);
+        item.play_count = 42;
+        let text = format_item_for_rag(&item);
+        assert!(text.contains("Tags: electronic, chill"));
+        assert!(text.contains("Rating: 5/5"));
+        assert!(text.contains("Play count: 42"));
+        assert!(text.contains("5:00"));
+    }
+
+    #[test]
+    fn format_item_rag_video_type() {
+        let mut item = make_item("Music Video", "Director", 200);
+        item.media_type = MediaType::Video;
+        let text = format_item_for_rag(&item);
+        assert!(text.contains("Type: Video"));
+    }
+
+    #[test]
+    fn build_library_context_empty() {
+        let lib = Library::new();
+        let ctx = build_library_context(&lib);
+        assert!(ctx.is_empty());
+    }
+
+    #[test]
+    fn parse_llm_empty_json() {
+        let rec = parse_llm_recommendation("{}").unwrap();
+        // Empty JSON won't have suggestions field, falls through to fallback
+        // Either it parses with defaults or falls back to raw text
+        assert!(!rec.suggestions.is_empty());
+    }
+
+    #[test]
+    fn parse_llm_null_input() {
+        let rec = parse_llm_recommendation("").unwrap();
+        assert_eq!(rec.suggestions.len(), 1);
+        assert!(rec.mood.is_none());
+    }
+
+    #[test]
+    fn daimon_debug_redacts_key() {
+        let config = DaimonConfig {
+            endpoint: "http://localhost:8090".to_string(),
+            api_key: Some("super-secret-key".to_string()),
+        };
+        let debug_output = format!("{:?}", config);
+        assert!(debug_output.contains("[REDACTED]"));
+        assert!(!debug_output.contains("super-secret-key"));
+    }
+
+    #[test]
+    fn hoosh_debug_redacts_key() {
+        let config = HooshConfig {
+            endpoint: "http://localhost:8088".to_string(),
+            api_key: Some("hoosh-secret-key".to_string()),
+            model: "llama3".to_string(),
+        };
+        let debug_output = format!("{:?}", config);
+        assert!(debug_output.contains("[REDACTED]"));
+        assert!(!debug_output.contains("hoosh-secret-key"));
+        assert!(debug_output.contains("llama3"));
+    }
+
+    #[test]
+    fn similar_media_fields() {
+        let sm = SimilarMedia {
+            path: "/music/track.mp3".to_string(),
+            score: 0.75,
+            metadata: serde_json::json!({"genre": "rock", "bpm": 120}),
+        };
+        assert_eq!(sm.path, "/music/track.mp3");
+        assert!((sm.score - 0.75).abs() < f64::EPSILON);
+        assert_eq!(sm.metadata["genre"], "rock");
+        assert_eq!(sm.metadata["bpm"], 120);
+    }
+
+    #[test]
+    fn transcription_segments() {
+        let tr = TranscriptionResult {
+            text: "Hello world. How are you?".to_string(),
+            language: "en".to_string(),
+            segments: vec![
+                TranscriptionSegment {
+                    start: 0.0,
+                    end: 1.2,
+                    text: "Hello world.".to_string(),
+                },
+                TranscriptionSegment {
+                    start: 1.5,
+                    end: 2.8,
+                    text: "How are you?".to_string(),
+                },
+            ],
+        };
+        assert_eq!(tr.segments.len(), 2);
+        assert!(tr.segments[0].end < tr.segments[1].start);
+        assert_eq!(tr.segments[1].text, "How are you?");
+        assert_eq!(tr.language, "en");
+    }
 }

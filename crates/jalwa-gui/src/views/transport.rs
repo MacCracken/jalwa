@@ -146,3 +146,69 @@ pub fn progress_bar(ui: &mut egui::Ui, app: &mut GuiApp) {
         );
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jalwa_core::test_fixtures::{make_media_item, make_test_wav};
+
+    fn test_app() -> crate::app::GuiApp {
+        let plib = jalwa_core::db::PersistentLibrary::open(
+            &std::env::temp_dir()
+                .join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let engine =
+            jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
+        crate::app::GuiApp::new_headless(plib, engine)
+    }
+
+    #[test]
+    fn top_bar_renders() {
+        let mut app = test_app();
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            top_bar(ctx, &mut app);
+        });
+    }
+
+    #[test]
+    fn progress_bar_renders() {
+        let mut app = test_app();
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                progress_bar(ui, &mut app);
+            });
+        });
+    }
+
+    #[test]
+    fn top_bar_with_track() {
+        let mut app = test_app();
+
+        let wav_data = make_test_wav(44100, 44100);
+        let wav_path = std::env::temp_dir()
+            .join(format!("jalwa_transport_test_{}.wav", uuid::Uuid::new_v4()));
+        std::fs::write(&wav_path, &wav_data).unwrap();
+
+        let mut item = make_media_item("Transport Track", "Transport Artist", 1);
+        item.path = wav_path.clone();
+        let id = item.id;
+        app.library.library.items.push(item);
+
+        let _ = app.engine.open(&wav_path);
+        let _ = app.engine.play();
+        app.current_playing_id = Some(id);
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            top_bar(ctx, &mut app);
+            egui::CentralPanel::default().show(ctx, |ui| {
+                progress_bar(ui, &mut app);
+            });
+        });
+
+        let _ = std::fs::remove_file(&wav_path);
+    }
+}

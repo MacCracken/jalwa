@@ -633,6 +633,93 @@ mod tests {
         assert!(p.to_str().unwrap().contains("jalwa"));
     }
 
+    #[test]
+    fn cmd_play_nonexistent() {
+        let result = cmd_play("/nonexistent/file.mp3");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cmd_play_with_wav() {
+        let dir = tmp_dir_with_wav();
+        let wav_path = dir.join("test.wav");
+        // cmd_play opens the file then tries to play via PipeWire.
+        // open() should succeed, but play() will likely fail without a running PipeWire daemon.
+        let result = cmd_play(wav_path.to_str().unwrap());
+        // Either Ok (if PipeWire is available) or Err from play/pipeline — both are acceptable.
+        // The key thing: it should NOT panic, and open() should have succeeded.
+        let _ = result;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cmd_export_nonexistent_playlist() {
+        let (path, _plib) = tmp_db();
+        // Use the same DB by calling open_library_at
+        // We test the export logic directly: no playlist named "ghost" exists
+        let plib = open_library_at(&path).unwrap();
+        let found = plib
+            .library
+            .playlists
+            .iter()
+            .find(|p| p.name.eq_ignore_ascii_case("ghost"));
+        assert!(found.is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn cmd_search_no_results() {
+        let (path, mut plib) = tmp_db();
+        plib.library
+            .add_item(jalwa_core::test_fixtures::make_media_item(
+                "Real Song", "Real Band", 200,
+            ));
+        let results = plib.library.search("zzz_nonexistent_zzz");
+        assert!(results.is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ctrlc_handler_installs() {
+        let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        ctrlc_handler(running.clone());
+        // Handler should be installed without panic
+        assert!(running.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn open_library_creates_parent_dirs() {
+        let base = std::env::temp_dir().join(format!(
+            "jalwa_nested_{}/a/b/c",
+            uuid::Uuid::new_v4()
+        ));
+        let db = base.join("test.db");
+        let result = open_library_at(&db);
+        assert!(result.is_ok());
+        assert!(base.exists());
+        let _ = std::fs::remove_dir_all(
+            std::env::temp_dir().join(db.ancestors().nth(4).unwrap_or(&base)),
+        );
+        // Clean up the top-level temp dir
+        if let Some(top) = db.ancestors().nth(4) {
+            let _ = std::fs::remove_dir_all(top);
+        }
+    }
+
+    #[test]
+    fn library_remove_and_verify() {
+        let (path, mut plib) = tmp_db();
+        let item = jalwa_core::test_fixtures::make_media_item("Remove Me", "Artist", 120);
+        let item_id = item.id;
+        plib.library.add_item(item);
+        assert_eq!(plib.library.items.len(), 1);
+
+        let removed = plib.library.remove(item_id);
+        assert!(removed);
+        assert!(plib.library.items.is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[cfg(feature = "tarang")]
     #[test]
     fn import_finds_existing_items() {

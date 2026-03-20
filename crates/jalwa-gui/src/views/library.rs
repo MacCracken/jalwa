@@ -313,3 +313,156 @@ fn truncate_str(s: &str, max_len: usize) -> String {
         format!("{truncated}\u{2026}")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jalwa_core::test_fixtures::make_media_item;
+
+    fn test_app() -> crate::app::GuiApp {
+        let plib = jalwa_core::db::PersistentLibrary::open(
+            &std::env::temp_dir()
+                .join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let engine =
+            jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
+        crate::app::GuiApp::new_headless(plib, engine)
+    }
+
+    #[test]
+    fn library_view_empty() {
+        let mut app = test_app();
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                library_view(ui, &mut app);
+            });
+        });
+        assert_eq!(app.library.library.items.len(), 0);
+    }
+
+    #[test]
+    fn library_view_with_items() {
+        let mut app = test_app();
+        app.library
+            .library
+            .items
+            .push(make_media_item("Song A", "Artist A", 200));
+        app.library
+            .library
+            .items
+            .push(make_media_item("Song B", "Artist B", 180));
+        app.library
+            .library
+            .items
+            .push(make_media_item("Song C", "Artist C", 240));
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                library_view(ui, &mut app);
+            });
+        });
+        assert_eq!(app.library.library.items.len(), 3);
+    }
+
+    #[test]
+    fn library_view_grid_mode() {
+        let mut app = test_app();
+        app.library
+            .library
+            .items
+            .push(make_media_item("Track 1", "Art", 120));
+        app.library
+            .library
+            .items
+            .push(make_media_item("Track 2", "Art", 130));
+        app.library_view_mode = LibraryViewMode::Grid;
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                library_view(ui, &mut app);
+            });
+        });
+        assert_eq!(app.library_view_mode, LibraryViewMode::Grid);
+    }
+
+    #[test]
+    fn library_view_search_filters() {
+        let mut app = test_app();
+        app.library
+            .library
+            .items
+            .push(make_media_item("Alpha Song", "Beatles", 200));
+        app.library
+            .library
+            .items
+            .push(make_media_item("Beta Track", "Stones", 180));
+        app.library
+            .library
+            .items
+            .push(make_media_item("Alpha Beat", "Zeppelin", 240));
+
+        app.search_query = "alpha".to_string();
+        app.update_search();
+        assert_eq!(app.search_results.len(), 2);
+        assert!(app.search_results.contains(&0));
+        assert!(app.search_results.contains(&2));
+
+        // Render with search active
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                library_view(ui, &mut app);
+            });
+        });
+    }
+
+    #[test]
+    fn truncate_str_tests() {
+        // Normal string within limit
+        assert_eq!(truncate_str("hello", 10), "hello");
+
+        // Empty string
+        assert_eq!(truncate_str("", 5), "");
+
+        // Exact length
+        assert_eq!(truncate_str("abcde", 5), "abcde");
+
+        // Long string gets truncated
+        let result = truncate_str("abcdefghijklmnop", 5);
+        assert_eq!(result, "abcd\u{2026}");
+
+        // Unicode string
+        let result = truncate_str("\u{00e9}\u{00e0}\u{00fc}\u{00f6}\u{00e4}\u{00df}", 4);
+        assert_eq!(result, "\u{00e9}\u{00e0}\u{00fc}\u{2026}");
+    }
+
+    #[test]
+    fn library_view_selection() {
+        let mut app = test_app();
+        app.library
+            .library
+            .items
+            .push(make_media_item("Track A", "Art", 100));
+        app.library
+            .library
+            .items
+            .push(make_media_item("Track B", "Art", 200));
+        app.library
+            .library
+            .items
+            .push(make_media_item("Track C", "Art", 300));
+        app.selected_index = 1;
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                library_view(ui, &mut app);
+            });
+        });
+        assert_eq!(app.selected_index, 1);
+    }
+}

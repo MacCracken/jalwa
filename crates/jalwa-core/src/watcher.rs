@@ -177,4 +177,100 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    #[test]
+    fn watcher_detects_file_creation() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_watch_create_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let watcher = LibraryWatcher::new(&[tmp.clone()]).unwrap();
+
+        std::fs::write(tmp.join("new_song.mp3"), b"fake mp3 data").unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+
+        let events = watcher.poll();
+        let has_created = events.iter().any(|ev| {
+            matches!(ev, LibraryEvent::FileCreated(p) if p.ends_with("new_song.mp3"))
+        });
+        // inotify should fire a Create event for the new file
+        assert!(has_created, "expected FileCreated event for new_song.mp3");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn watcher_detects_file_removal() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_watch_remove_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let mp3_path = tmp.join("to_delete.mp3");
+        std::fs::write(&mp3_path, b"fake mp3").unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+
+        let watcher = LibraryWatcher::new(&[tmp.clone()]).unwrap();
+
+        // Drain any creation events from before watch started
+        std::thread::sleep(Duration::from_millis(100));
+        let _ = watcher.poll();
+
+        std::fs::remove_file(&mp3_path).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+
+        let events = watcher.poll();
+        let has_removed = events.iter().any(|ev| {
+            matches!(ev, LibraryEvent::FileRemoved(p) if p.ends_with("to_delete.mp3"))
+        });
+        assert!(has_removed, "expected FileRemoved event for to_delete.mp3");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn recv_timeout_no_events() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_watch_timeout_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let watcher = LibraryWatcher::new(&[tmp.clone()]).unwrap();
+        let result = watcher.recv_timeout(Duration::from_millis(50));
+        assert!(result.is_none(), "expected None when no events within timeout");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn watcher_multiple_paths() {
+        let tmp1 = std::env::temp_dir().join(format!("jalwa_watch_multi1_{}", uuid::Uuid::new_v4()));
+        let tmp2 = std::env::temp_dir().join(format!("jalwa_watch_multi2_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp1).unwrap();
+        std::fs::create_dir_all(&tmp2).unwrap();
+
+        let watcher = LibraryWatcher::new(&[tmp1.clone(), tmp2.clone()]).unwrap();
+
+        std::fs::write(tmp1.join("song1.flac"), b"fake flac 1").unwrap();
+        std::fs::write(tmp2.join("song2.ogg"), b"fake ogg 2").unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+
+        let events = watcher.poll();
+        let paths: Vec<String> = events
+            .iter()
+            .filter_map(|ev| match ev {
+                LibraryEvent::FileCreated(p) | LibraryEvent::FileModified(p) => {
+                    p.file_name().map(|f| f.to_string_lossy().to_string())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            paths.iter().any(|p| p == "song1.flac"),
+            "expected event for song1.flac in dir 1"
+        );
+        assert!(
+            paths.iter().any(|p| p == "song2.ogg"),
+            "expected event for song2.ogg in dir 2"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp1);
+        let _ = std::fs::remove_dir_all(&tmp2);
+    }
 }
