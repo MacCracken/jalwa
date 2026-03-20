@@ -255,6 +255,7 @@ impl LibraryDb {
             library.scan_paths.push(p);
         }
 
+        library.reindex();
         Ok(library)
     }
 

@@ -111,6 +111,16 @@ fn load_art(ctx: &egui::Context, file_path: &Path, item_id: Uuid) -> Option<Text
     }
 
     let img = image::load_from_memory(data).ok()?;
+    // Reject oversized images to prevent excessive memory allocation
+    if img.width() > 2048 || img.height() > 2048 {
+        tracing::warn!(
+            id = %item_id,
+            width = img.width(),
+            height = img.height(),
+            "Skipping oversized album art"
+        );
+        return None;
+    }
     let rgba = img.to_rgba8();
     let size = [rgba.width() as usize, rgba.height() as usize];
     let pixels = rgba.into_raw();

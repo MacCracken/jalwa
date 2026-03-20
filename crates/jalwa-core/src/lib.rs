@@ -10,6 +10,7 @@ pub mod watcher;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use uuid::Uuid;
@@ -390,6 +391,12 @@ pub struct Library {
     pub items: Vec<MediaItem>,
     pub playlists: Vec<Playlist>,
     pub scan_paths: Vec<PathBuf>,
+    /// Index: UUID -> position in items vec
+    #[serde(skip)]
+    id_index: HashMap<Uuid, usize>,
+    /// Index: PathBuf -> position in items vec
+    #[serde(skip)]
+    path_index: HashMap<PathBuf, usize>,
 }
 
 impl Library {
@@ -398,35 +405,45 @@ impl Library {
             items: Vec::new(),
             playlists: Vec::new(),
             scan_paths: Vec::new(),
+            id_index: HashMap::new(),
+            path_index: HashMap::new(),
         }
     }
 
     pub fn add_item(&mut self, item: MediaItem) -> Uuid {
         let id = item.id;
+        let path = item.path.clone();
+        let idx = self.items.len();
         self.items.push(item);
+        self.id_index.insert(id, idx);
+        self.path_index.insert(path, idx);
         id
     }
 
     pub fn find_by_id(&self, id: Uuid) -> Option<&MediaItem> {
-        self.items.iter().find(|i| i.id == id)
+        self.id_index.get(&id).map(|&idx| &self.items[idx])
     }
 
     pub fn find_by_id_mut(&mut self, id: Uuid) -> Option<&mut MediaItem> {
-        self.items.iter_mut().find(|i| i.id == id)
+        self.id_index.get(&id).copied().map(move |idx| &mut self.items[idx])
     }
 
     pub fn find_by_path(&self, path: &Path) -> Option<&MediaItem> {
-        self.items.iter().find(|i| i.path == path)
+        self.path_index.get(path).map(|&idx| &self.items[idx])
     }
 
     pub fn remove(&mut self, id: Uuid) -> bool {
         let before = self.items.len();
         self.items.retain(|i| i.id != id);
-        // Also remove from all playlists
-        for playlist in &mut self.playlists {
-            playlist.remove(id);
+        if self.items.len() != before {
+            self.rebuild_indexes();
+            for playlist in &mut self.playlists {
+                playlist.remove(id);
+            }
+            true
+        } else {
+            false
         }
-        self.items.len() != before
     }
 
     pub fn search(&self, query: &str) -> Vec<&MediaItem> {
@@ -475,6 +492,20 @@ impl Library {
 
     pub fn find_playlist_mut(&mut self, id: Uuid) -> Option<&mut Playlist> {
         self.playlists.iter_mut().find(|p| p.id == id)
+    }
+
+    /// Rebuild internal indexes. Call after deserializing or bulk-loading items.
+    pub fn reindex(&mut self) {
+        self.rebuild_indexes();
+    }
+
+    fn rebuild_indexes(&mut self) {
+        self.id_index.clear();
+        self.path_index.clear();
+        for (idx, item) in self.items.iter().enumerate() {
+            self.id_index.insert(item.id, idx);
+            self.path_index.insert(item.path.clone(), idx);
+        }
     }
 }
 

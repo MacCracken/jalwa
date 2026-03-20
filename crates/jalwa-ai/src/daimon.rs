@@ -248,7 +248,12 @@ impl DaimonClient {
             .map_err(|e| anyhow::anyhow!("parse search response: {e}"))?;
 
         // Try to extract results from the MCP response text
-        let text = result["content"][0]["text"].as_str().unwrap_or("[]");
+        let text = result
+            .get("content")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("text"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("[]");
         let results: Vec<SimilarMedia> = serde_json::from_str(text).unwrap_or_default();
         Ok(results)
     }
@@ -289,7 +294,12 @@ impl DaimonClient {
             .await
             .map_err(|e| anyhow::anyhow!("parse transcription response: {e}"))?;
 
-        let text = result["content"][0]["text"].as_str().unwrap_or("");
+        let text = result
+            .get("content")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("text"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("");
 
         if let Ok(tr) = serde_json::from_str::<TranscriptionResult>(text) {
             Ok(tr)
@@ -368,8 +378,12 @@ impl HooshLlmClient {
             .await
             .map_err(|e| anyhow::anyhow!("parse LLM response: {e}"))?;
 
-        let content = result["choices"][0]["message"]["content"]
-            .as_str()
+        let content = result
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|t| t.as_str())
             .unwrap_or("")
             .to_string();
 
