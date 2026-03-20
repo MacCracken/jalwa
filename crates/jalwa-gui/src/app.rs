@@ -6,6 +6,7 @@ use jalwa_core::watcher::LibraryWatcher;
 use jalwa_playback::mpris::{MprisCommand, spawn_mpris_server};
 use jalwa_playback::{EngineEvent, PlaybackEngine};
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use crate::art_cache::ArtCache;
@@ -50,7 +51,8 @@ impl GuiApp {
         engine: PlaybackEngine,
         _cc: &eframe::CreationContext<'_>,
     ) -> Self {
-        let mpris_rx = spawn_mpris_server();
+        let mpris_state = Arc::new(Mutex::new(jalwa_core::PlaybackState::Stopped));
+        let mpris_rx = spawn_mpris_server(mpris_state);
         let watcher = LibraryWatcher::new(&library.library.scan_paths).ok();
 
         Self {

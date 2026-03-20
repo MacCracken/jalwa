@@ -465,12 +465,12 @@ impl Library {
             .collect()
     }
 
-    pub fn audio_items(&self) -> Vec<&MediaItem> {
-        self.items.iter().filter(|i| i.is_audio()).collect()
+    pub fn audio_items(&self) -> impl Iterator<Item = &MediaItem> {
+        self.items.iter().filter(|i| i.is_audio())
     }
 
-    pub fn video_items(&self) -> Vec<&MediaItem> {
-        self.items.iter().filter(|i| i.is_video()).collect()
+    pub fn video_items(&self) -> impl Iterator<Item = &MediaItem> {
+        self.items.iter().filter(|i| i.is_video())
     }
 
     pub fn add_scan_path(&mut self, path: PathBuf) {
@@ -948,8 +948,8 @@ mod tests {
             &video_info,
         ));
 
-        assert_eq!(lib.audio_items().len(), 1);
-        assert_eq!(lib.video_items().len(), 1);
+        assert_eq!(lib.audio_items().count(), 1);
+        assert_eq!(lib.video_items().count(), 1);
     }
 
     #[test]

@@ -28,7 +28,8 @@ pub fn run(mut app: App) -> io::Result<()> {
     let tick_rate = Duration::from_millis(50);
 
     // Start MPRIS D-Bus server for media key support
-    let mpris_rx = spawn_mpris_server();
+    let mpris_state = std::sync::Arc::new(std::sync::Mutex::new(jalwa_core::PlaybackState::Stopped));
+    let mpris_rx = spawn_mpris_server(mpris_state);
 
     // Start file watcher for library directories
     let watcher = LibraryWatcher::new(&app.library.library.scan_paths).ok();

@@ -207,6 +207,15 @@ pub fn handle_tool_call(
 // Tool implementations
 // ---------------------------------------------------------------------------
 
+macro_rules! lock_or_err {
+    ($mutex:expr, $name:expr) => {
+        match $mutex.lock() {
+            Ok(guard) => guard,
+            Err(_) => return mcp_err(concat!($name, " is unavailable")),
+        }
+    };
+}
+
 /// Validate and canonicalize a user-provided path.
 fn validate_path(raw: &str) -> std::result::Result<std::path::PathBuf, String> {
     if raw.is_empty() {
@@ -228,10 +237,7 @@ fn tool_play(
         Ok(p) => p,
         Err(e) => return mcp_err(e),
     };
-    let mut eng = match engine.lock() {
-        Ok(guard) => guard,
-        Err(_) => return mcp_err("engine is unavailable"),
-    };
+    let mut eng = lock_or_err!(engine, "engine");
     match eng.open(&path) {
         Ok(()) => {
             let _ = eng.play();
@@ -247,10 +253,7 @@ fn tool_play(
 }
 
 fn tool_pause(engine: &Arc<Mutex<jalwa_playback::PlaybackEngine>>) -> serde_json::Value {
-    let mut eng = match engine.lock() {
-        Ok(guard) => guard,
-        Err(_) => return mcp_err("engine is unavailable"),
-    };
+    let mut eng = lock_or_err!(engine, "engine");
     eng.pause();
     let status = eng.status();
     mcp_ok(format!(
@@ -260,10 +263,7 @@ fn tool_pause(engine: &Arc<Mutex<jalwa_playback::PlaybackEngine>>) -> serde_json
 }
 
 fn tool_status(engine: &Arc<Mutex<jalwa_playback::PlaybackEngine>>) -> serde_json::Value {
-    let mut eng = match engine.lock() {
-        Ok(guard) => guard,
-        Err(_) => return mcp_err("engine is unavailable"),
-    };
+    let mut eng = lock_or_err!(engine, "engine");
     eng.poll_events();
     let status = eng.status();
     mcp_ok(serde_json::to_string_pretty(&status).unwrap_or_default())
@@ -274,10 +274,7 @@ fn tool_search(
     plib: &Arc<Mutex<jalwa_core::db::PersistentLibrary>>,
 ) -> serde_json::Value {
     let query = args["query"].as_str().unwrap_or("");
-    let lib = match plib.lock() {
-        Ok(guard) => guard,
-        Err(_) => return mcp_err("library is unavailable"),
-    };
+    let lib = lock_or_err!(plib, "library");
     let results = lib.library.search(query);
     if results.is_empty() {
         mcp_ok(format!("No results for '{query}'"))
@@ -304,10 +301,7 @@ fn tool_recommend(
 ) -> serde_json::Value {
     let item_id_str = args["item_id"].as_str().unwrap_or("");
     let max = args["max"].as_u64().unwrap_or(5) as usize;
-    let lib = match plib.lock() {
-        Ok(guard) => guard,
-        Err(_) => return mcp_err("library is unavailable"),
-    };
+    let lib = lock_or_err!(plib, "library");
 
     let seed_id = match uuid::Uuid::parse_str(item_id_str) {
         Ok(id) => id,
@@ -345,14 +339,8 @@ fn tool_queue(
     let action = args["action"].as_str().unwrap_or("");
     match action {
         "list" => {
-            let lib = match plib.lock() {
-                Ok(guard) => guard,
-                Err(_) => return mcp_err("library is unavailable"),
-            };
-            let eng = match engine.lock() {
-                Ok(guard) => guard,
-                Err(_) => return mcp_err("engine is unavailable"),
-            };
+            let lib = lock_or_err!(plib, "library");
+            let eng = lock_or_err!(engine, "engine");
             let text = eng
                 .current_path()
                 .and_then(|p| lib.library.find_by_path(p))
@@ -368,10 +356,7 @@ fn tool_queue(
             if item_id.is_empty() {
                 return mcp_err("item_id required for enqueue");
             }
-            let lib = match plib.lock() {
-                Ok(guard) => guard,
-                Err(_) => return mcp_err("library is unavailable"),
-            };
+            let lib = lock_or_err!(plib, "library");
             match uuid::Uuid::parse_str(item_id)
                 .ok()
                 .and_then(|id| lib.library.find_by_id(id))
@@ -385,10 +370,7 @@ fn tool_queue(
             }
         }
         "clear" => {
-            let mut eng = match engine.lock() {
-                Ok(guard) => guard,
-                Err(_) => return mcp_err("engine is unavailable"),
-            };
+            let mut eng = lock_or_err!(engine, "engine");
             eng.stop();
             mcp_ok("Queue cleared and playback stopped")
         }
@@ -404,10 +386,7 @@ fn tool_library(
     let action = args["action"].as_str().unwrap_or("");
     match action {
         "stats" => {
-            let lib = match plib.lock() {
-                Ok(guard) => guard,
-                Err(_) => return mcp_err("library is unavailable"),
-            };
+            let lib = lock_or_err!(plib, "library");
             mcp_ok(jalwa_ui::render_library_stats(&lib.library))
         }
         "scan" => {
@@ -424,10 +403,7 @@ fn tool_library(
             #[cfg(feature = "tarang")]
             match jalwa_core::scanner::scan_directory(&path) {
                 Ok(scanned) => {
-                    let mut lib = match plib.lock() {
-                        Ok(guard) => guard,
-                        Err(_) => return mcp_err("library is unavailable"),
-                    };
+                    let mut lib = lock_or_err!(plib, "library");
                     let mut added = 0;
                     for file in scanned {
                         let p = file.path.clone();
@@ -450,10 +426,7 @@ fn tool_library(
             }
         }
         "list" => {
-            let lib = match plib.lock() {
-                Ok(guard) => guard,
-                Err(_) => return mcp_err("library is unavailable"),
-            };
+            let lib = lock_or_err!(plib, "library");
             if lib.library.items.is_empty() {
                 mcp_ok("Library is empty")
             } else {
@@ -485,10 +458,7 @@ fn tool_playlist(
     let action = args["action"].as_str().unwrap_or("");
     match action {
         "list" => {
-            let lib = match plib.lock() {
-                Ok(guard) => guard,
-                Err(_) => return mcp_err("library is unavailable"),
-            };
+            let lib = lock_or_err!(plib, "library");
             if lib.library.playlists.is_empty() {
                 mcp_ok("No playlists")
             } else {
@@ -513,10 +483,7 @@ fn tool_playlist(
             if name.is_empty() {
                 return mcp_err("name required for create");
             }
-            let mut lib = match plib.lock() {
-                Ok(guard) => guard,
-                Err(_) => return mcp_err("library is unavailable"),
-            };
+            let mut lib = lock_or_err!(plib, "library");
             let playlist = jalwa_core::Playlist::new(name);
             match lib.save_playlist(&playlist) {
                 Ok(_) => mcp_ok(format!("Created playlist: {name}")),
@@ -529,10 +496,7 @@ fn tool_playlist(
             if name.is_empty() || item_id.is_empty() {
                 return mcp_err("name and item_id required");
             }
-            let mut lib = match plib.lock() {
-                Ok(guard) => guard,
-                Err(_) => return mcp_err("library is unavailable"),
-            };
+            let mut lib = lock_or_err!(plib, "library");
             match uuid::Uuid::parse_str(item_id) {
                 Ok(id) => {
                     if let Some(pl) = lib
@@ -556,10 +520,7 @@ fn tool_playlist(
             if name.is_empty() || output.is_empty() {
                 return mcp_err("name and output required");
             }
-            let lib = match plib.lock() {
-                Ok(guard) => guard,
-                Err(_) => return mcp_err("library is unavailable"),
-            };
+            let lib = lock_or_err!(plib, "library");
             match lib
                 .library
                 .playlists

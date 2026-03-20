@@ -90,8 +90,8 @@ pub fn render_library_item(item: &MediaItem, index: usize) -> String {
 /// Render library stats
 pub fn render_library_stats(library: &Library) -> String {
     let total = library.items.len();
-    let audio = library.audio_items().len();
-    let video = library.video_items().len();
+    let audio = library.audio_items().count();
+    let video = library.video_items().count();
     let playlists = library.playlists.len();
 
     let total_duration: Duration = library.items.iter().filter_map(|i| i.duration).sum();

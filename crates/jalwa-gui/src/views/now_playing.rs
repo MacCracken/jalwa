@@ -8,8 +8,7 @@ pub fn now_playing_view(ui: &mut egui::Ui, ctx: &egui::Context, app: &mut GuiApp
     let now_playing = app
         .engine
         .current_path()
-        .and_then(|p| app.library.library.find_by_path(p))
-        .cloned();
+        .and_then(|p| app.library.library.find_by_path(p));
 
     let Some(item) = now_playing else {
         ui.centered_and_justified(|ui| {

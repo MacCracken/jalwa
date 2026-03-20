@@ -326,9 +326,8 @@ pub(crate) fn apply_volume_in_place(buf: &mut tarang::core::AudioBuffer, gain: f
 }
 
 /// Apply volume gain to an AudioBuffer, returning a new buffer.
-/// Kept for backward compatibility (tests use it); the decode loop uses `apply_volume_in_place`.
-#[cfg(feature = "tarang")]
-#[allow(dead_code)]
+/// Only used by tests; the decode loop uses `apply_volume_in_place`.
+#[cfg(all(test, feature = "tarang"))]
 pub(crate) fn apply_volume(
     buf: &tarang::core::AudioBuffer,
     gain: f32,
@@ -350,35 +349,7 @@ pub(crate) fn apply_volume(
 mod tests {
     use super::*;
 
-    /// Generate a minimal WAV file in memory for testing.
-    fn make_test_wav(num_samples: u32, sample_rate: u32) -> Vec<u8> {
-        let channels: u16 = 1;
-        let bits: u16 = 16;
-        let data_size = num_samples * channels as u32 * (bits as u32 / 8);
-        let file_size = 36 + data_size;
-        let byte_rate = sample_rate * channels as u32 * (bits as u32 / 8);
-        let block_align = channels * (bits / 8);
-        let mut buf = Vec::new();
-        buf.extend_from_slice(b"RIFF");
-        buf.extend_from_slice(&file_size.to_le_bytes());
-        buf.extend_from_slice(b"WAVE");
-        buf.extend_from_slice(b"fmt ");
-        buf.extend_from_slice(&16u32.to_le_bytes());
-        buf.extend_from_slice(&1u16.to_le_bytes());
-        buf.extend_from_slice(&channels.to_le_bytes());
-        buf.extend_from_slice(&sample_rate.to_le_bytes());
-        buf.extend_from_slice(&byte_rate.to_le_bytes());
-        buf.extend_from_slice(&block_align.to_le_bytes());
-        buf.extend_from_slice(&bits.to_le_bytes());
-        buf.extend_from_slice(b"data");
-        buf.extend_from_slice(&data_size.to_le_bytes());
-        for i in 0..num_samples {
-            let t = i as f64 / sample_rate as f64;
-            let s = (t * 440.0 * 2.0 * std::f64::consts::PI).sin();
-            buf.extend_from_slice(&((s * 16000.0) as i16).to_le_bytes());
-        }
-        buf
-    }
+    use jalwa_core::test_fixtures::make_test_wav;
 
     fn write_test_wav() -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("jalwa_dt_{}", uuid::Uuid::new_v4()));

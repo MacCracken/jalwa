@@ -3,7 +3,9 @@
 //! Exposes jalwa as an MPRIS2 media player on the session bus, enabling
 //! hardware media keys (play/pause/next/prev/stop) and desktop integration.
 
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
+
+use jalwa_core::PlaybackState;
 
 /// MPRIS commands received from D-Bus (media keys, desktop controls).
 #[derive(Debug, Clone)]
@@ -22,13 +24,15 @@ pub enum MprisCommand {
 ///
 /// Returns a receiver for commands from media keys / desktop integration.
 /// The server runs until the receiver is dropped.
-pub fn spawn_mpris_server() -> mpsc::Receiver<MprisCommand> {
+pub fn spawn_mpris_server(
+    state: Arc<Mutex<PlaybackState>>,
+) -> mpsc::Receiver<MprisCommand> {
     let (tx, rx) = mpsc::channel();
 
     std::thread::Builder::new()
         .name("jalwa-mpris".into())
         .spawn(move || {
-            if let Err(e) = run_mpris_server(tx) {
+            if let Err(e) = run_mpris_server(tx, state) {
                 tracing::warn!("MPRIS server failed: {e}");
             }
         })
@@ -37,7 +41,10 @@ pub fn spawn_mpris_server() -> mpsc::Receiver<MprisCommand> {
     rx
 }
 
-fn run_mpris_server(tx: mpsc::Sender<MprisCommand>) -> Result<(), Box<dyn std::error::Error>> {
+fn run_mpris_server(
+    tx: mpsc::Sender<MprisCommand>,
+    state: Arc<Mutex<PlaybackState>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -45,7 +52,7 @@ fn run_mpris_server(tx: mpsc::Sender<MprisCommand>) -> Result<(), Box<dyn std::e
     rt.block_on(async move {
         let conn = zbus::Connection::session().await?;
 
-        let player = MprisPlayer { cmd_tx: tx };
+        let player = MprisPlayer { cmd_tx: tx, state };
         let root = MprisRoot;
 
         conn.object_server()
@@ -121,6 +128,7 @@ impl MprisRoot {
 /// org.mpris.MediaPlayer2.Player interface
 struct MprisPlayer {
     cmd_tx: mpsc::Sender<MprisCommand>,
+    state: Arc<Mutex<PlaybackState>>,
 }
 
 #[zbus::interface(name = "org.mpris.MediaPlayer2.Player")]
@@ -180,8 +188,17 @@ impl MprisPlayer {
     }
 
     #[zbus(property)]
-    fn playback_status(&self) -> &str {
-        "Stopped"
+    fn playback_status(&self) -> String {
+        if let Ok(s) = self.state.lock() {
+            match *s {
+                PlaybackState::Playing => "Playing",
+                PlaybackState::Paused => "Paused",
+                _ => "Stopped",
+            }
+        } else {
+            "Stopped"
+        }
+        .to_string()
     }
 }
 
@@ -238,7 +255,8 @@ mod tests {
     #[test]
     fn mpris_player_properties() {
         let (tx, _rx) = mpsc::channel();
-        let player = MprisPlayer { cmd_tx: tx };
+        let state = Arc::new(Mutex::new(PlaybackState::Stopped));
+        let player = MprisPlayer { cmd_tx: tx, state };
         assert!(player.can_play());
         assert!(player.can_pause());
         assert!(player.can_go_next());
@@ -251,7 +269,8 @@ mod tests {
     #[test]
     fn mpris_player_sends_commands() {
         let (tx, rx) = mpsc::channel();
-        let player = MprisPlayer { cmd_tx: tx };
+        let state = Arc::new(Mutex::new(PlaybackState::Stopped));
+        let player = MprisPlayer { cmd_tx: tx, state };
         player.play_pause();
         player.play();
         player.pause();
@@ -275,7 +294,8 @@ mod tests {
     #[test]
     fn spawn_mpris_returns_receiver() {
         // Just verify it doesn't panic — actual D-Bus connection may fail without session bus
-        let rx = spawn_mpris_server();
+        let state = Arc::new(Mutex::new(PlaybackState::Stopped));
+        let rx = spawn_mpris_server(state);
         // Should be empty (no commands sent)
         assert!(rx.try_recv().is_err());
     }

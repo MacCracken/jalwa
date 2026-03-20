@@ -286,43 +286,13 @@ mod tests {
         assert!(item.art_data.is_none());
     }
 
-    /// Create a minimal valid WAV file for testing.
-    fn make_wav(num_samples: u32, sample_rate: u32) -> Vec<u8> {
-        let channels: u16 = 1;
-        let bits: u16 = 16;
-        let data_size = num_samples * channels as u32 * (bits as u32 / 8);
-        let file_size = 36 + data_size;
-        let byte_rate = sample_rate * channels as u32 * (bits as u32 / 8);
-        let block_align = channels * (bits / 8);
-
-        let mut buf = Vec::new();
-        buf.extend_from_slice(b"RIFF");
-        buf.extend_from_slice(&file_size.to_le_bytes());
-        buf.extend_from_slice(b"WAVE");
-        buf.extend_from_slice(b"fmt ");
-        buf.extend_from_slice(&16u32.to_le_bytes());
-        buf.extend_from_slice(&1u16.to_le_bytes()); // PCM
-        buf.extend_from_slice(&channels.to_le_bytes());
-        buf.extend_from_slice(&sample_rate.to_le_bytes());
-        buf.extend_from_slice(&byte_rate.to_le_bytes());
-        buf.extend_from_slice(&block_align.to_le_bytes());
-        buf.extend_from_slice(&bits.to_le_bytes());
-        buf.extend_from_slice(b"data");
-        buf.extend_from_slice(&data_size.to_le_bytes());
-        for i in 0..num_samples {
-            let t = i as f64 / sample_rate as f64;
-            let s = (t * 440.0 * 2.0 * std::f64::consts::PI).sin();
-            let s16 = (s * 16000.0) as i16;
-            buf.extend_from_slice(&s16.to_le_bytes());
-        }
-        buf
-    }
+    use crate::test_fixtures::make_test_wav;
 
     #[test]
     fn scan_directory_with_wav() {
         let tmp = std::env::temp_dir().join(format!("jalwa_scan_wav_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
-        let wav = make_wav(4410, 44100);
+        let wav = make_test_wav(4410, 44100);
         std::fs::write(tmp.join("test.wav"), &wav).unwrap();
         // Also write a non-media file that should be skipped
         std::fs::write(tmp.join("notes.txt"), "skip me").unwrap();
@@ -339,7 +309,7 @@ mod tests {
     fn scan_file_and_convert() {
         let tmp = std::env::temp_dir().join(format!("jalwa_scan_convert_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
-        let wav = make_wav(44100, 44100); // 1 second
+        let wav = make_test_wav(44100, 44100); // 1 second
         let wav_path = tmp.join("song.wav");
         std::fs::write(&wav_path, &wav).unwrap();
 

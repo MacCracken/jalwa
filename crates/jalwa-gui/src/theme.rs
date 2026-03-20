@@ -11,10 +11,6 @@ pub const ACCENT_DIM: Color32 = Color32::from_rgb(0, 131, 148);
 pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(230, 230, 235);
 pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(160, 160, 170);
 pub const TEXT_MUTED: Color32 = Color32::from_rgb(100, 100, 110);
-#[allow(dead_code)]
-pub const HIGHLIGHT: Color32 = Color32::from_rgb(0, 188, 212);
-#[allow(dead_code)]
-pub const ERROR: Color32 = Color32::from_rgb(220, 60, 60);
 
 pub fn apply(ctx: &egui::Context) {
     let mut style = Style::default();
@@ -69,13 +65,10 @@ mod tests {
         assert_ne!(TEXT_PRIMARY, Color32::TRANSPARENT);
         assert_ne!(TEXT_SECONDARY, Color32::TRANSPARENT);
         assert_ne!(TEXT_MUTED, Color32::TRANSPARENT);
-        assert_ne!(HIGHLIGHT, Color32::TRANSPARENT);
-        assert_ne!(ERROR, Color32::TRANSPARENT);
 
         // All colors should be fully opaque (alpha = 255)
         assert_eq!(BG_DARK.a(), 255);
         assert_eq!(ACCENT.a(), 255);
         assert_eq!(TEXT_PRIMARY.a(), 255);
-        assert_eq!(ERROR.a(), 255);
     }
 }

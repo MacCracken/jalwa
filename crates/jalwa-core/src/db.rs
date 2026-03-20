@@ -161,21 +161,8 @@ impl LibraryDb {
                 } else {
                     MediaType::Audio
                 },
-                added_at: DateTime::parse_from_rfc3339(&added_at)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(|e| {
-                        tracing::warn!(raw = %added_at, error = %e, "corrupt datetime in database, using now");
-                        Utc::now()
-                    }),
-                last_played: last_played.and_then(|s| {
-                    DateTime::parse_from_rfc3339(&s)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .map_err(|e| {
-                            tracing::warn!(raw = %s, error = %e, "corrupt datetime in database, using now");
-                            e
-                        })
-                        .ok()
-                }),
+                added_at: parse_datetime(&added_at, "added_at"),
+                last_played: parse_datetime_opt(&last_played, "last_played"),
                 play_count,
                 rating,
                 tags: tags_json
@@ -218,18 +205,8 @@ impl LibraryDb {
             });
             playlist.description = description;
             playlist.is_smart = is_smart;
-            playlist.created_at = DateTime::parse_from_rfc3339(&created_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|e| {
-                    tracing::warn!(raw = %created_at, error = %e, "corrupt datetime in database, using now");
-                    Utc::now()
-                });
-            playlist.modified_at = DateTime::parse_from_rfc3339(&modified_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|e| {
-                    tracing::warn!(raw = %modified_at, error = %e, "corrupt datetime in database, using now");
-                    Utc::now()
-                });
+            playlist.created_at = parse_datetime(&created_at, "created_at");
+            playlist.modified_at = parse_datetime(&modified_at, "modified_at");
 
             // Load playlist items
             let mut item_stmt = self
@@ -246,13 +223,11 @@ impl LibraryDb {
                 })
                 .map_err(|e| JalwaError::Database(format!("query playlist items: {e}")))?;
 
-            for item_id in item_ids {
-                if let Ok(id_str) = item_id
-                    && let Ok(uuid) = Uuid::parse_str(&id_str)
-                {
-                    playlist.items.push(uuid);
-                }
-            }
+            playlist.items.extend(
+                item_ids.filter_map(|r| {
+                    r.ok().and_then(|s| Uuid::parse_str(&s).ok())
+                })
+            );
 
             library.playlists.push(playlist);
         }
@@ -270,9 +245,7 @@ impl LibraryDb {
             })
             .map_err(|e| JalwaError::Database(format!("query scan_paths: {e}")))?;
 
-        for p in paths.flatten() {
-            library.scan_paths.push(p);
-        }
+        library.scan_paths.extend(paths.flatten());
 
         library.reindex();
         Ok(library)
@@ -457,11 +430,7 @@ impl LibraryDb {
             })
             .map_err(|e| JalwaError::Database(format!("query: {e}")))?;
 
-        let mut result = Vec::new();
-        for path in paths.flatten() {
-            result.push(path);
-        }
-        Ok(result)
+        Ok(paths.flatten().collect())
     }
 }
 
@@ -546,6 +515,29 @@ impl PersistentLibrary {
     pub fn db(&self) -> &LibraryDb {
         &self.db
     }
+}
+
+// ---- DateTime parsing helpers ----
+
+fn parse_datetime(raw: &str, field: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(raw)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|e| {
+            tracing::warn!(raw = %raw, field = field, error = %e, "corrupt datetime in database, using now");
+            Utc::now()
+        })
+}
+
+fn parse_datetime_opt(raw: &Option<String>, field: &str) -> Option<DateTime<Utc>> {
+    raw.as_ref().and_then(|s| {
+        DateTime::parse_from_rfc3339(s)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(|e| {
+                tracing::warn!(raw = %s, field = field, error = %e, "corrupt datetime in database");
+                e
+            })
+            .ok()
+    })
 }
 
 // ---- Format parsing helpers ----
