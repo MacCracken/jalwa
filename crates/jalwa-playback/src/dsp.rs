@@ -247,6 +247,9 @@ pub struct Equalizer {
     state: [[BiquadState; MAX_EQ_CHANNELS]; 10],
     sample_rate: u32,
     pub settings: EqSettings,
+    /// Reusable scratch buffer to avoid per-call allocations in `process()`.
+    #[cfg_attr(not(feature = "tarang"), allow(dead_code))]
+    scratch: Vec<f32>,
 }
 
 impl Equalizer {
@@ -262,6 +265,7 @@ impl Equalizer {
             state: [[BiquadState::default(); MAX_EQ_CHANNELS]; 10],
             sample_rate,
             settings: EqSettings::default(),
+            scratch: Vec::new(),
         };
         eq.update_coefficients();
         eq
@@ -296,7 +300,11 @@ impl Equalizer {
         let samples = buf_to_f32(buf);
         let channels = buf.channels as usize;
         let active_channels = channels.min(MAX_EQ_CHANNELS);
-        let mut output = samples.to_vec();
+
+        // Reuse scratch buffer to avoid per-call Vec allocation
+        self.scratch.clear();
+        self.scratch.extend_from_slice(&samples);
+        let output = &mut self.scratch;
 
         // Apply each band's biquad filter in series
         for band in 0..10 {
@@ -312,7 +320,7 @@ impl Equalizer {
             }
         }
 
-        f32_to_buf(&output, buf)
+        f32_to_buf(output, buf)
     }
 }
 

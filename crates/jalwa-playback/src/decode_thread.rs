@@ -101,6 +101,7 @@ pub fn decode_loop(
     let mut equalizer = Equalizer::new(config.sample_rate);
     let mut normalize_enabled = false;
     let mut smooth_gain: f32 = 1.0; // Smoothed normalization gain to prevent pumping
+    let mut _scratch: Vec<f32> = Vec::with_capacity(config.buffer_size * config.channels as usize);
 
     // Open decoder
     let mut decoder = match FileDecoder::open_path(&path) {
@@ -277,12 +278,11 @@ pub fn decode_loop(
         };
 
         // Apply volume (tolerance accounts for f32 drift from repeated UI adjustments)
-        let buf = if muted || (volume - 1.0).abs() > 1e-4 {
+        let mut buf = buf;
+        if muted || (volume - 1.0).abs() > 1e-4 {
             let gain = if muted { 0.0 } else { volume };
-            apply_volume(&buf, gain)
-        } else {
-            buf
-        };
+            apply_volume_in_place(&mut buf, gain);
+        }
 
         // Update status
         if let Ok(mut s) = status.lock() {
@@ -310,8 +310,25 @@ pub fn decode_loop(
     }
 }
 
-/// Apply volume gain to an AudioBuffer, returning a new buffer.
+/// Apply volume gain in-place, avoiding a new buffer allocation.
 #[cfg(feature = "tarang")]
+pub(crate) fn apply_volume_in_place(buf: &mut tarang::core::AudioBuffer, gain: f32) {
+    if (gain - 1.0).abs() < 1e-6 {
+        return;
+    }
+    // Get mutable f32 slice from the buffer data
+    let mut data = buf.data.to_vec();
+    let samples: &mut [f32] = bytemuck::cast_slice_mut(&mut data);
+    for s in samples.iter_mut() {
+        *s *= gain;
+    }
+    buf.data = bytes::Bytes::from(data);
+}
+
+/// Apply volume gain to an AudioBuffer, returning a new buffer.
+/// Kept for backward compatibility (tests use it); the decode loop uses `apply_volume_in_place`.
+#[cfg(feature = "tarang")]
+#[allow(dead_code)]
 pub(crate) fn apply_volume(
     buf: &tarang::core::AudioBuffer,
     gain: f32,

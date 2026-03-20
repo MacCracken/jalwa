@@ -106,6 +106,9 @@ fn scan_file(path: &Path) -> Result<ScannedFile> {
     })
 }
 
+/// Maximum embedded album art size (5 MB).
+const MAX_ART_SIZE: usize = 5 * 1024 * 1024;
+
 /// Extract the best album art picture from a list of tag pictures.
 fn extract_art(pictures: &[lofty::picture::Picture]) -> (Option<String>, Option<Vec<u8>>) {
     if pictures.is_empty() {
@@ -122,7 +125,7 @@ fn extract_art(pictures: &[lofty::picture::Picture]) -> (Option<String>, Option<
         Some(p) => {
             let mime = p.mime_type().map(|m| m.as_str().to_string());
             let data = p.data().to_vec();
-            if data.is_empty() {
+            if data.is_empty() || data.len() > MAX_ART_SIZE {
                 (None, None)
             } else {
                 (mime, Some(data))

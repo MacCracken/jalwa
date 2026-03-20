@@ -2,6 +2,7 @@
 //! fingerprint computation and matching without a daimon roundtrip.
 
 use anyhow::Result;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tarang::ai::{AudioFingerprint, FingerprintConfig, compute_fingerprint, fingerprint_match};
@@ -121,7 +122,7 @@ pub fn find_similar_local(
 
     let mut matches: Vec<FingerprintMatch> = library
         .items
-        .iter()
+        .par_iter()
         .filter(|item| item.path != seed_path)
         .filter_map(|item| {
             let fp = fingerprint_file(&item.path).ok()?;

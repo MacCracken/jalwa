@@ -16,10 +16,19 @@ use tracing::{info, warn};
 // ---------------------------------------------------------------------------
 
 /// Configuration for the daimon (agent-runtime) connection.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DaimonConfig {
     pub endpoint: String,
     pub api_key: Option<String>,
+}
+
+impl std::fmt::Debug for DaimonConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DaimonConfig")
+            .field("endpoint", &self.endpoint)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 impl Default for DaimonConfig {
@@ -33,11 +42,21 @@ impl Default for DaimonConfig {
 }
 
 /// Configuration for hoosh LLM-powered features.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HooshConfig {
     pub endpoint: String,
     pub api_key: Option<String>,
     pub model: String,
+}
+
+impl std::fmt::Debug for HooshConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HooshConfig")
+            .field("endpoint", &self.endpoint)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .field("model", &self.model)
+            .finish()
+    }
 }
 
 impl Default for HooshConfig {

@@ -144,7 +144,10 @@ impl LibraryDb {
             ) = row.map_err(|e| JalwaError::Database(format!("row: {e}")))?;
 
             let item = MediaItem {
-                id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
+                id: Uuid::parse_str(&id).unwrap_or_else(|e| {
+                    tracing::warn!(raw = %id, error = %e, "corrupt UUID in database, generating replacement");
+                    Uuid::new_v4()
+                }),
                 path: PathBuf::from(path),
                 title,
                 artist,
@@ -160,11 +163,18 @@ impl LibraryDb {
                 },
                 added_at: DateTime::parse_from_rfc3339(&added_at)
                     .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(|_| Utc::now()),
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(raw = %added_at, error = %e, "corrupt datetime in database, using now");
+                        Utc::now()
+                    }),
                 last_played: last_played.and_then(|s| {
                     DateTime::parse_from_rfc3339(&s)
-                        .ok()
                         .map(|dt| dt.with_timezone(&Utc))
+                        .map_err(|e| {
+                            tracing::warn!(raw = %s, error = %e, "corrupt datetime in database, using now");
+                            e
+                        })
+                        .ok()
                 }),
                 play_count,
                 rating,
@@ -202,15 +212,24 @@ impl LibraryDb {
                 row.map_err(|e| JalwaError::Database(format!("row: {e}")))?;
 
             let mut playlist = Playlist::new(&name);
-            playlist.id = Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4());
+            playlist.id = Uuid::parse_str(&id).unwrap_or_else(|e| {
+                tracing::warn!(raw = %id, error = %e, "corrupt UUID in database, generating replacement");
+                Uuid::new_v4()
+            });
             playlist.description = description;
             playlist.is_smart = is_smart;
             playlist.created_at = DateTime::parse_from_rfc3339(&created_at)
                 .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
+                .unwrap_or_else(|e| {
+                    tracing::warn!(raw = %created_at, error = %e, "corrupt datetime in database, using now");
+                    Utc::now()
+                });
             playlist.modified_at = DateTime::parse_from_rfc3339(&modified_at)
                 .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
+                .unwrap_or_else(|e| {
+                    tracing::warn!(raw = %modified_at, error = %e, "corrupt datetime in database, using now");
+                    Utc::now()
+                });
 
             // Load playlist items
             let mut item_stmt = self
@@ -290,8 +309,25 @@ impl LibraryDb {
         Ok(())
     }
 
-    /// Delete a media item by UUID.
+    /// Delete a media item by UUID. Wrapped in a transaction for atomicity.
     pub fn delete_item(&self, id: Uuid) -> Result<()> {
+        self.conn
+            .execute_batch("BEGIN")
+            .map_err(|e| JalwaError::Database(format!("begin transaction: {e}")))?;
+
+        let result = self.delete_item_inner(id);
+
+        if result.is_ok() {
+            self.conn
+                .execute_batch("COMMIT")
+                .map_err(|e| JalwaError::Database(format!("commit: {e}")))?;
+        } else {
+            let _ = self.conn.execute_batch("ROLLBACK");
+        }
+        result
+    }
+
+    fn delete_item_inner(&self, id: Uuid) -> Result<()> {
         self.conn
             .execute(
                 "DELETE FROM media_items WHERE id = ?",
@@ -330,8 +366,25 @@ impl LibraryDb {
         Ok(())
     }
 
-    /// Save a playlist (upsert).
+    /// Save a playlist (upsert). Wrapped in a transaction for atomicity.
     pub fn save_playlist(&self, playlist: &Playlist) -> Result<()> {
+        self.conn
+            .execute_batch("BEGIN")
+            .map_err(|e| JalwaError::Database(format!("begin transaction: {e}")))?;
+
+        let result = self.save_playlist_inner(playlist);
+
+        if result.is_ok() {
+            self.conn
+                .execute_batch("COMMIT")
+                .map_err(|e| JalwaError::Database(format!("commit: {e}")))?;
+        } else {
+            let _ = self.conn.execute_batch("ROLLBACK");
+        }
+        result
+    }
+
+    fn save_playlist_inner(&self, playlist: &Playlist) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO playlists (id, name, description, is_smart, created_at, modified_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
