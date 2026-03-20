@@ -466,8 +466,10 @@ mod tarang_tests {
 
     #[test]
     fn eq_settings_set_band() {
-        let mut eq = EqSettings::default();
-        eq.enabled = true;
+        let mut eq = EqSettings {
+            enabled: true,
+            ..Default::default()
+        };
         eq.set_band(0, 6.0);
         assert_eq!(eq.bands[0], 6.0);
         assert!(!eq.is_flat());
@@ -626,7 +628,7 @@ mod tarang_tests {
             let eq = EqSettings::preset(name);
             for &b in &eq.bands {
                 assert!(
-                    b >= -12.0 && b <= 12.0,
+                    (-12.0..=12.0).contains(&b),
                     "preset '{name}' band out of range: {b}"
                 );
             }

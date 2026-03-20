@@ -9,18 +9,13 @@ fn bench_persistent_library_add(c: &mut Criterion) {
     c.bench_function("persistent_add_100_items", |b| {
         b.iter_with_setup(
             || {
-                let path =
-                    std::env::temp_dir().join(format!("jalwa_bench_{}.db", Uuid::new_v4()));
+                let path = std::env::temp_dir().join(format!("jalwa_bench_{}.db", Uuid::new_v4()));
                 let plib = PersistentLibrary::open(&path).unwrap();
                 (plib, path)
             },
             |(mut plib, path)| {
                 for i in 0..100 {
-                    let item = make_media_item(
-                        &format!("Song {i}"),
-                        &format!("Artist {i}"),
-                        200,
-                    );
+                    let item = make_media_item(&format!("Song {i}"), &format!("Artist {i}"), 200);
                     plib.add_item(item).unwrap();
                 }
                 let _ = std::fs::remove_file(&path);

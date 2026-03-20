@@ -64,20 +64,12 @@ mod tarang_benches {
         let mut group = c.benchmark_group("normalize");
         for &samples in &[1024, 4096] {
             let buf = make_buf(samples, 2, 48000);
-            group.bench_with_input(
-                BenchmarkId::new("analyze", samples),
-                &buf,
-                |b, buf| {
-                    b.iter(|| jalwa_playback::dsp::analyze_loudness(black_box(buf)));
-                },
-            );
-            group.bench_with_input(
-                BenchmarkId::new("apply", samples),
-                &buf,
-                |b, buf| {
-                    b.iter(|| jalwa_playback::dsp::normalize(black_box(buf), 0.8));
-                },
-            );
+            group.bench_with_input(BenchmarkId::new("analyze", samples), &buf, |b, buf| {
+                b.iter(|| jalwa_playback::dsp::analyze_loudness(black_box(buf)));
+            });
+            group.bench_with_input(BenchmarkId::new("apply", samples), &buf, |b, buf| {
+                b.iter(|| jalwa_playback::dsp::normalize(black_box(buf), 0.8));
+            });
         }
         group.finish();
     }
@@ -88,10 +80,7 @@ mod tarang_benches {
             b.iter_with_setup(
                 || buf.clone(),
                 |mut buf| {
-                    jalwa_playback::decode_thread::apply_volume_in_place(
-                        black_box(&mut buf),
-                        0.7,
-                    );
+                    jalwa_playback::decode_thread::apply_volume_in_place(black_box(&mut buf), 0.7);
                 },
             );
         });

@@ -289,7 +289,10 @@ fn tool_search(
             .collect();
         let mut output = text.join("\n");
         if total > MAX_SEARCH_RESULTS {
-            output.push_str(&format!("\n\n[Showing {} of {} results]", MAX_SEARCH_RESULTS, total));
+            output.push_str(&format!(
+                "\n\n[Showing {} of {} results]",
+                MAX_SEARCH_RESULTS, total
+            ));
         }
         mcp_ok(output)
     }
@@ -442,7 +445,10 @@ fn tool_library(
                     .collect();
                 let mut output = text.join("\n");
                 if total > MAX_LIST_ITEMS {
-                    output.push_str(&format!("\n\n[Showing {} of {} items]", MAX_LIST_ITEMS, total));
+                    output.push_str(&format!(
+                        "\n\n[Showing {} of {} items]",
+                        MAX_LIST_ITEMS, total
+                    ));
                 }
                 mcp_ok(output)
             }

@@ -1,9 +1,8 @@
 //! Benchmarks for jalwa-core library operations.
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use jalwa_core::test_fixtures::make_media_item;
 use jalwa_core::Library;
-use std::path::Path;
+use jalwa_core::test_fixtures::make_media_item;
 use uuid::Uuid;
 
 fn make_library(n: usize) -> Library {
@@ -59,13 +58,10 @@ fn bench_search(c: &mut Criterion) {
 
 fn bench_add_item(c: &mut Criterion) {
     c.bench_function("add_item", |b| {
-        b.iter_with_setup(
-            || Library::new(),
-            |mut lib| {
-                let item = make_media_item("Bench Song", "Bench Artist", 200);
-                lib.add_item(black_box(item));
-            },
-        );
+        b.iter_with_setup(Library::new, |mut lib| {
+            let item = make_media_item("Bench Song", "Bench Artist", 200);
+            lib.add_item(black_box(item));
+        });
     });
 }
 
@@ -94,8 +90,7 @@ fn bench_db_roundtrip(c: &mut Criterion) {
     c.bench_function("db_save_load_100_items", |b| {
         b.iter_with_setup(
             || {
-                let path =
-                    std::env::temp_dir().join(format!("jalwa_bench_{}.db", Uuid::new_v4()));
+                let path = std::env::temp_dir().join(format!("jalwa_bench_{}.db", Uuid::new_v4()));
                 let db = LibraryDb::open(&path).unwrap();
                 let items: Vec<_> = (0..100)
                     .map(|i| make_media_item(&format!("Song {i}"), &format!("Artist {i}"), 200))

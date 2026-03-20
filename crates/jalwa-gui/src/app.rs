@@ -305,7 +305,7 @@ mod tests {
     fn headless_library_view_empty() {
         let (path, mut app) = test_app();
         let ctx = egui::Context::default();
-        ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 views::library::library_view(ui, &mut app);
             });
@@ -319,7 +319,7 @@ mod tests {
         let (path, mut app) = test_app();
         app.view = View::NowPlaying;
         let ctx = egui::Context::default();
-        ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 views::now_playing::now_playing_view(ui, ctx, &mut app);
             });
@@ -332,7 +332,7 @@ mod tests {
         let (path, mut app) = test_app();
         app.view = View::Queue;
         let ctx = egui::Context::default();
-        ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 views::queue::queue_view(ui, &mut app);
             });
@@ -345,7 +345,7 @@ mod tests {
         let (path, mut app) = test_app();
         app.view = View::Equalizer;
         let ctx = egui::Context::default();
-        ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 views::equalizer::equalizer_view(ui, &mut app);
             });

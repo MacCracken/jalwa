@@ -312,7 +312,7 @@ pub fn decode_loop(
 
 /// Apply volume gain in-place, avoiding a new buffer allocation.
 #[cfg(feature = "tarang")]
-pub(crate) fn apply_volume_in_place(buf: &mut tarang::core::AudioBuffer, gain: f32) {
+pub fn apply_volume_in_place(buf: &mut tarang::core::AudioBuffer, gain: f32) {
     if (gain - 1.0).abs() < 1e-6 {
         return;
     }
@@ -363,7 +363,7 @@ mod tests {
     #[test]
     fn decode_loop_plays_to_end() {
         let wav_path = write_test_wav();
-        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let (_cmd_tx, cmd_rx) = mpsc::channel();
         let status = Arc::new(Mutex::new(DecodeStatus::default()));
         let (event_tx, event_rx) = mpsc::channel();
         let config = crate::EngineConfig {
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn decode_loop_nonexistent_file() {
-        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let (_cmd_tx, cmd_rx) = mpsc::channel();
         let status = Arc::new(Mutex::new(DecodeStatus::default()));
         let (event_tx, event_rx) = mpsc::channel();
         let config = crate::EngineConfig::default();

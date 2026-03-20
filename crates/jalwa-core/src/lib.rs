@@ -425,7 +425,10 @@ impl Library {
     }
 
     pub fn find_by_id_mut(&mut self, id: Uuid) -> Option<&mut MediaItem> {
-        self.id_index.get(&id).copied().map(move |idx| &mut self.items[idx])
+        self.id_index
+            .get(&id)
+            .copied()
+            .map(move |idx| &mut self.items[idx])
     }
 
     pub fn find_by_path(&self, path: &Path) -> Option<&MediaItem> {

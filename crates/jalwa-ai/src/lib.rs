@@ -261,16 +261,15 @@ pub fn analyze_library(library: &Library) -> LibraryInsights {
 mod tests {
     use super::*;
     use jalwa_core::test_fixtures::make_media_item as make_item;
-    use jalwa_core::*;
 
     #[test]
     fn recommend_same_artist() {
         let mut lib = Library::new();
-        let mut seed = make_item("Song A", "Artist 1", 200);
+        let seed = make_item("Song A", "Artist 1", 200);
         let seed_id = seed.id;
         lib.add_item(seed);
 
-        let mut same_artist = make_item("Song B", "Artist 1", 180);
+        let same_artist = make_item("Song B", "Artist 1", 180);
         lib.add_item(same_artist);
 
         let diff_artist = make_item("Song C", "Artist 2", 200);
@@ -326,7 +325,7 @@ mod tests {
     #[test]
     fn recommend_max_results() {
         let mut lib = Library::new();
-        let mut seed = make_item("Seed", "Artist", 200);
+        let seed = make_item("Seed", "Artist", 200);
         let seed_id = seed.id;
         lib.add_item(seed);
 

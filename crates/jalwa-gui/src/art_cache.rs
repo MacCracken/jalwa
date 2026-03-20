@@ -202,8 +202,10 @@ mod tests {
 
     #[test]
     fn cache_max_textures_constant() {
-        assert!(MAX_TEXTURES > 0);
-        assert!(MAX_TEXTURES <= 1000); // reasonable upper bound
+        // Verify the constant is within a reasonable range
+        let max = MAX_TEXTURES;
+        assert!(max > 0, "MAX_TEXTURES must be positive");
+        assert!(max <= 1000, "MAX_TEXTURES too large: {max}");
     }
 
     #[test]

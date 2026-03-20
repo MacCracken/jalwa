@@ -562,8 +562,6 @@ mod tests {
     use super::*;
     use jalwa_core::test_fixtures::make_media_item as make_item;
     use jalwa_core::*;
-    use std::path::PathBuf;
-    use std::time::Duration;
 
     #[test]
     fn daimon_config_defaults() {

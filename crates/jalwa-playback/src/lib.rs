@@ -128,7 +128,9 @@ impl PlaybackEngine {
         }
 
         #[cfg(not(feature = "tarang"))]
-        return Err(JalwaError::Playback("playback requires the 'tarang' feature".to_string()));
+        return Err(JalwaError::Playback(
+            "playback requires the 'tarang' feature".to_string(),
+        ));
 
         #[cfg(feature = "tarang")]
         {
@@ -145,7 +147,14 @@ impl PlaybackEngine {
             let handle = std::thread::Builder::new()
                 .name("jalwa-decode".into())
                 .spawn(move || {
-                    decode_thread::decode_loop(path, cmd_rx, status_clone, event_tx, config, duration);
+                    decode_thread::decode_loop(
+                        path,
+                        cmd_rx,
+                        status_clone,
+                        event_tx,
+                        config,
+                        duration,
+                    );
                 })
                 .map_err(|e| JalwaError::Playback(format!("spawn decode thread: {e}")))?;
 
@@ -556,8 +565,10 @@ mod tests {
     #[test]
     fn set_eq_settings() {
         let mut engine = PlaybackEngine::new(EngineConfig::default());
-        let mut settings = EqSettings::default();
-        settings.enabled = true;
+        let mut settings = EqSettings {
+            enabled: true,
+            ..Default::default()
+        };
         settings.set_band(0, 3.0);
         engine.set_eq_settings(settings);
         assert!(engine.eq_settings().enabled);
@@ -572,7 +583,6 @@ mod tests {
         assert_eq!(status.volume, 1.0);
         assert!(!status.muted);
     }
-
 }
 
 #[cfg(all(test, feature = "tarang"))]

@@ -672,7 +672,9 @@ mod tests {
         let (path, mut plib) = tmp_db();
         plib.library
             .add_item(jalwa_core::test_fixtures::make_media_item(
-                "Real Song", "Real Band", 200,
+                "Real Song",
+                "Real Band",
+                200,
             ));
         let results = plib.library.search("zzz_nonexistent_zzz");
         assert!(results.is_empty());
@@ -689,10 +691,8 @@ mod tests {
 
     #[test]
     fn open_library_creates_parent_dirs() {
-        let base = std::env::temp_dir().join(format!(
-            "jalwa_nested_{}/a/b/c",
-            uuid::Uuid::new_v4()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("jalwa_nested_{}/a/b/c", uuid::Uuid::new_v4()));
         let db = base.join("test.db");
         let result = open_library_at(&db);
         assert!(result.is_ok());

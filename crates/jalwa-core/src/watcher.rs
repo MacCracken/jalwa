@@ -132,7 +132,7 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("jalwa_watch_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let watcher = LibraryWatcher::new(&[tmp.clone()]).unwrap();
+        let watcher = LibraryWatcher::new(std::slice::from_ref(&tmp)).unwrap();
 
         // Create a media file
         std::fs::write(tmp.join("test.mp3"), b"fake mp3").unwrap();
@@ -159,7 +159,7 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("jalwa_watch_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let watcher = LibraryWatcher::new(&[tmp.clone()]).unwrap();
+        let watcher = LibraryWatcher::new(std::slice::from_ref(&tmp)).unwrap();
         std::fs::write(tmp.join("notes.txt"), b"hello").unwrap();
 
         std::thread::sleep(Duration::from_millis(200));
@@ -183,15 +183,15 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("jalwa_watch_create_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let watcher = LibraryWatcher::new(&[tmp.clone()]).unwrap();
+        let watcher = LibraryWatcher::new(std::slice::from_ref(&tmp)).unwrap();
 
         std::fs::write(tmp.join("new_song.mp3"), b"fake mp3 data").unwrap();
         std::thread::sleep(Duration::from_millis(200));
 
         let events = watcher.poll();
-        let has_created = events.iter().any(|ev| {
-            matches!(ev, LibraryEvent::FileCreated(p) if p.ends_with("new_song.mp3"))
-        });
+        let has_created = events
+            .iter()
+            .any(|ev| matches!(ev, LibraryEvent::FileCreated(p) if p.ends_with("new_song.mp3")));
         // inotify should fire a Create event for the new file
         assert!(has_created, "expected FileCreated event for new_song.mp3");
 
@@ -207,7 +207,7 @@ mod tests {
         std::fs::write(&mp3_path, b"fake mp3").unwrap();
         std::thread::sleep(Duration::from_millis(100));
 
-        let watcher = LibraryWatcher::new(&[tmp.clone()]).unwrap();
+        let watcher = LibraryWatcher::new(std::slice::from_ref(&tmp)).unwrap();
 
         // Drain any creation events from before watch started
         std::thread::sleep(Duration::from_millis(100));
@@ -217,9 +217,9 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
 
         let events = watcher.poll();
-        let has_removed = events.iter().any(|ev| {
-            matches!(ev, LibraryEvent::FileRemoved(p) if p.ends_with("to_delete.mp3"))
-        });
+        let has_removed = events
+            .iter()
+            .any(|ev| matches!(ev, LibraryEvent::FileRemoved(p) if p.ends_with("to_delete.mp3")));
         assert!(has_removed, "expected FileRemoved event for to_delete.mp3");
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -227,20 +227,26 @@ mod tests {
 
     #[test]
     fn recv_timeout_no_events() {
-        let tmp = std::env::temp_dir().join(format!("jalwa_watch_timeout_{}", uuid::Uuid::new_v4()));
+        let tmp =
+            std::env::temp_dir().join(format!("jalwa_watch_timeout_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let watcher = LibraryWatcher::new(&[tmp.clone()]).unwrap();
+        let watcher = LibraryWatcher::new(std::slice::from_ref(&tmp)).unwrap();
         let result = watcher.recv_timeout(Duration::from_millis(50));
-        assert!(result.is_none(), "expected None when no events within timeout");
+        assert!(
+            result.is_none(),
+            "expected None when no events within timeout"
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn watcher_multiple_paths() {
-        let tmp1 = std::env::temp_dir().join(format!("jalwa_watch_multi1_{}", uuid::Uuid::new_v4()));
-        let tmp2 = std::env::temp_dir().join(format!("jalwa_watch_multi2_{}", uuid::Uuid::new_v4()));
+        let tmp1 =
+            std::env::temp_dir().join(format!("jalwa_watch_multi1_{}", uuid::Uuid::new_v4()));
+        let tmp2 =
+            std::env::temp_dir().join(format!("jalwa_watch_multi2_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp1).unwrap();
         std::fs::create_dir_all(&tmp2).unwrap();
 

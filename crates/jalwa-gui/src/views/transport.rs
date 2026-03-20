@@ -154,12 +154,10 @@ mod tests {
 
     fn test_app() -> crate::app::GuiApp {
         let plib = jalwa_core::db::PersistentLibrary::open(
-            &std::env::temp_dir()
-                .join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4())),
+            &std::env::temp_dir().join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4())),
         )
         .unwrap();
-        let engine =
-            jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
+        let engine = jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
         crate::app::GuiApp::new_headless(plib, engine)
     }
 
@@ -188,8 +186,8 @@ mod tests {
         let mut app = test_app();
 
         let wav_data = make_test_wav(44100, 44100);
-        let wav_path = std::env::temp_dir()
-            .join(format!("jalwa_transport_test_{}.wav", uuid::Uuid::new_v4()));
+        let wav_path =
+            std::env::temp_dir().join(format!("jalwa_transport_test_{}.wav", uuid::Uuid::new_v4()));
         std::fs::write(&wav_path, &wav_data).unwrap();
 
         let mut item = make_media_item("Transport Track", "Transport Artist", 1);

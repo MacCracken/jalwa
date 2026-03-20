@@ -321,12 +321,10 @@ mod tests {
 
     fn test_app() -> crate::app::GuiApp {
         let plib = jalwa_core::db::PersistentLibrary::open(
-            &std::env::temp_dir()
-                .join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4())),
+            &std::env::temp_dir().join(format!("jalwa_gui_test_{}.db", uuid::Uuid::new_v4())),
         )
         .unwrap();
-        let engine =
-            jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
+        let engine = jalwa_playback::PlaybackEngine::new(jalwa_playback::EngineConfig::default());
         crate::app::GuiApp::new_headless(plib, engine)
     }
 

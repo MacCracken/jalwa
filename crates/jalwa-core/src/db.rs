@@ -7,7 +7,10 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use uuid::Uuid;
 
-use crate::{AudioCodec, ContainerFormat, JalwaError, Library, MediaItem, MediaType, Playlist, Result, VideoCodec};
+use crate::{
+    AudioCodec, ContainerFormat, JalwaError, Library, MediaItem, MediaType, Playlist, Result,
+    VideoCodec,
+};
 
 /// Low-level database handle.
 pub struct LibraryDb {
@@ -223,11 +226,9 @@ impl LibraryDb {
                 })
                 .map_err(|e| JalwaError::Database(format!("query playlist items: {e}")))?;
 
-            playlist.items.extend(
-                item_ids.filter_map(|r| {
-                    r.ok().and_then(|s| Uuid::parse_str(&s).ok())
-                })
-            );
+            playlist
+                .items
+                .extend(item_ids.filter_map(|r| r.ok().and_then(|s| Uuid::parse_str(&s).ok())));
 
             library.playlists.push(playlist);
         }
@@ -532,9 +533,8 @@ fn parse_datetime_opt(raw: &Option<String>, field: &str) -> Option<DateTime<Utc>
     raw.as_ref().and_then(|s| {
         DateTime::parse_from_rfc3339(s)
             .map(|dt| dt.with_timezone(&Utc))
-            .map_err(|e| {
+            .inspect_err(|&e| {
                 tracing::warn!(raw = %s, field = field, error = %e, "corrupt datetime in database");
-                e
             })
             .ok()
     })

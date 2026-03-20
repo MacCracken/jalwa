@@ -24,9 +24,7 @@ pub enum MprisCommand {
 ///
 /// Returns a receiver for commands from media keys / desktop integration.
 /// The server runs until the receiver is dropped.
-pub fn spawn_mpris_server(
-    state: Arc<Mutex<PlaybackState>>,
-) -> mpsc::Receiver<MprisCommand> {
+pub fn spawn_mpris_server(state: Arc<Mutex<PlaybackState>>) -> mpsc::Receiver<MprisCommand> {
     let (tx, rx) = mpsc::channel();
 
     std::thread::Builder::new()
@@ -214,7 +212,7 @@ mod tests {
 
     #[test]
     fn mpris_command_variants() {
-        let cmds = vec![
+        let cmds = [
             MprisCommand::Play,
             MprisCommand::Pause,
             MprisCommand::Stop,
