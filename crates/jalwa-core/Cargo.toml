@@ -21,3 +21,10 @@ lofty = { workspace = true }
 walkdir = { workspace = true }
 tracing = { workspace = true }
 notify = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "library_bench"
+harness = false

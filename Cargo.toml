@@ -84,6 +84,17 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
 [[bin]]
 name = "jalwa"
 path = "src/main.rs"
+
+[[bench]]
+name = "library"
+harness = false
+
+[[bench]]
+name = "dsp"
+harness = false
