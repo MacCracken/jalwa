@@ -32,13 +32,13 @@ Current: 55.9% (1038/1858 lines). Target: 80%.
 ## Engineering Backlog — from 2026-03-19 audit
 
 ### High
-- [ ] Wrap multi-step DB operations in SQLite transactions (`jalwa-core/db.rs`)
-- [ ] Pre-allocate reusable audio buffers in decode pipeline (`jalwa-playback/decode_thread.rs`, `dsp.rs`)
-- [ ] Log warning on corrupted UUID instead of silent regeneration (`db.rs:147,205`)
-- [ ] Log warning on invalid datetime instead of silent `Utc::now()` fallback (`db.rs:161`)
-- [ ] Add max size validation for embedded album art in scanner (`jalwa-core/scanner.rs`)
-- [ ] Zeroize API keys / suppress Debug on credential types (`jalwa-ai/daimon.rs`)
-- [ ] Parallelize fingerprint computation with rayon + add fingerprint cache (`jalwa-ai/fingerprint.rs`)
+- [x] Wrap multi-step DB operations in SQLite transactions (`jalwa-core/db.rs`) *(2026-03-19)*
+- [x] Pre-allocate reusable audio buffers in decode pipeline (`jalwa-playback/decode_thread.rs`, `dsp.rs`) *(2026-03-19)*
+- [x] Log warning on corrupted UUID instead of silent regeneration (`db.rs:147,205`) *(2026-03-19)*
+- [x] Log warning on invalid datetime instead of silent `Utc::now()` fallback (`db.rs:161`) *(2026-03-19)*
+- [x] Add max size validation for embedded album art in scanner (`jalwa-core/scanner.rs`) *(2026-03-19)*
+- [x] Zeroize API keys / suppress Debug on credential types (`jalwa-ai/daimon.rs`) *(2026-03-19)*
+- [x] Parallelize fingerprint computation with rayon + add fingerprint cache (`jalwa-ai/fingerprint.rs`) *(2026-03-19)*
 
 ### Medium
 - [ ] Use RwLock or atomics for decode status instead of Mutex in audio hot path (`decode_thread.rs:288`)
