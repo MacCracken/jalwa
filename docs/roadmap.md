@@ -14,8 +14,9 @@ Current: 55.9% (1038/1858 lines). Target: 80%.
 - [x] `decode_thread.rs`: integration test with NullOutput + minimal WAV *(2026-03-16)*
 - [x] `mpris.rs`: test MPRIS command dispatch *(already covered in tui.rs mpris handler tests)*
 
-## Completed — Tarang upgrade + MCP + AI fingerprinting (2026-03-16)
-- [x] Bumped tarang from `2026.3.16` to `2026.3.16-1` (26 security fixes, lock-free PipeWire, 110+ new tests)
+## Completed — Tarang + MCP + AI fingerprinting (2026-03-16 → 2026-03-19)
+- [x] Bumped tarang from `2026.3.16` to `2026.3.16-1` (26 security fixes, lock-free PipeWire, 110+ new tests) *(2026-03-16)*
+- [x] Migrated tarang from 5 git subcrates to published `tarang 0.19.3` crates.io umbrella crate as optional feature *(2026-03-19)*
 - [x] Fixed MCP tool stubs — `jalwa_pause`, `jalwa_status`, `jalwa_queue` now use shared `PlaybackEngine` state
 - [x] Wired `tarang-ai` fingerprinting directly into `jalwa-ai` for local similarity search (`find_similar_local`)
 
@@ -29,11 +30,11 @@ Current: 55.9% (1038/1858 lines). Target: 80%.
 - [ ] Audio/video sync
 
 ## Phase 7 — Desktop UI
-- [ ] egui or Tauri v2 desktop app
-- [ ] Album grid / list view
-- [ ] Now playing screen with album art
+- [x] egui desktop app (jalwa-gui with eframe/wgpu backend) *(2026-03-18)*
+- [x] Album grid / list view with `LibraryViewMode` toggle *(2026-03-18)*
+- [x] Now playing screen with album art *(2026-03-18)*
+- [x] Keyboard shortcuts (MPRIS media keys, spacebar, arrows) *(2026-03-16)*
 - [ ] Playlist editor
-- [ ] Keyboard shortcuts (media keys, spacebar, arrows)
 - [ ] System tray / notification integration
 
 ## Phase 8 — AI Features

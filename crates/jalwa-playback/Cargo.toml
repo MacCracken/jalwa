@@ -1,20 +1,18 @@
 [package]
 name = "jalwa-playback"
-version = "2026.3.18"
+version = "2026.3.19"
 edition = "2024"
 description = "Playback engine for Jalwa — tarang decode pipeline + PipeWire audio output"
 license = "GPL-3.0"
 
 [features]
-default = ["pipewire"]
-pipewire = ["tarang-audio/pipewire"]
+default = ["tarang", "pipewire"]
+tarang = ["dep:tarang", "jalwa-core/tarang"]
+pipewire = ["tarang", "tarang/pipewire"]
 
 [dependencies]
-jalwa-core = { path = "../jalwa-core" }
-tarang-core = { workspace = true }
-tarang-demux = { workspace = true }
-tarang-audio = { workspace = true }
-tarang-video = { workspace = true }
+jalwa-core = { path = "../jalwa-core", default-features = false }
+tarang = { workspace = true, optional = true }
 bytemuck = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

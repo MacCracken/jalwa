@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tarang_core::{AudioCodec, ContainerFormat, MediaInfo, VideoCodec};
+use tarang::core::{AudioCodec, ContainerFormat, MediaInfo, VideoCodec};
 use uuid::Uuid;
 
 /// A media item in the library
@@ -42,8 +42,8 @@ pub struct MediaItem {
 impl MediaItem {
     /// Create a new media item from a file path and tarang probe info
     pub fn from_probe(path: PathBuf, info: &MediaInfo) -> Self {
-        let audio_codec = info.audio_streams().first().map(|a| a.codec);
-        let video_codec = info.video_streams().first().map(|v| v.codec);
+        let audio_codec = info.audio_streams().next().map(|a| a.codec);
+        let video_codec = info.video_streams().next().map(|v| v.codec);
         let media_type = if info.has_video() {
             MediaType::Video
         } else {
@@ -437,7 +437,7 @@ pub enum JalwaError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("tarang error: {0}")]
-    Tarang(#[from] tarang_core::TarangError),
+    Tarang(#[from] tarang::core::TarangError),
 }
 
 pub type Result<T> = std::result::Result<T, JalwaError>;
@@ -448,7 +448,7 @@ pub type Result<T> = std::result::Result<T, JalwaError>;
 /// The functions are cheap (no I/O, no allocations beyond the returned struct).
 pub mod test_fixtures {
     use super::*;
-    use tarang_core::{AudioCodec, ContainerFormat};
+    use tarang::core::{AudioCodec, ContainerFormat};
 
     /// Create a `MediaItem` with common test defaults.
     pub fn make_media_item(title: &str, artist: &str, duration_secs: u64) -> MediaItem {
@@ -507,7 +507,7 @@ pub mod test_fixtures {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tarang_core::*;
+    use tarang::core::*;
 
     fn make_audio_info() -> MediaInfo {
         MediaInfo {

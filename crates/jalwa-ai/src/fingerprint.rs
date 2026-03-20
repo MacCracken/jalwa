@@ -4,7 +4,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tarang_ai::{AudioFingerprint, FingerprintConfig, compute_fingerprint, fingerprint_match};
+use tarang::ai::{AudioFingerprint, FingerprintConfig, compute_fingerprint, fingerprint_match};
 use uuid::Uuid;
 
 /// A fingerprint match result for a library item.
@@ -16,9 +16,9 @@ pub struct FingerprintMatch {
 }
 
 /// Convert raw audio buffer bytes to f32 samples based on the actual sample format.
-fn decode_samples_to_f32(buf: &tarang_core::AudioBuffer) -> Vec<f32> {
+fn decode_samples_to_f32(buf: &tarang::core::AudioBuffer) -> Vec<f32> {
     match buf.sample_format {
-        tarang_core::SampleFormat::F32 => {
+        tarang::core::SampleFormat::F32 => {
             match bytemuck::try_cast_slice::<u8, f32>(&buf.data) {
                 Ok(s) => s.to_vec(),
                 Err(_) => {
@@ -30,12 +30,12 @@ fn decode_samples_to_f32(buf: &tarang_core::AudioBuffer) -> Vec<f32> {
                 }
             }
         }
-        tarang_core::SampleFormat::I16 => buf
+        tarang::core::SampleFormat::I16 => buf
             .data
             .chunks_exact(2)
             .map(|c| i16::from_ne_bytes([c[0], c[1]]) as f32 / 32768.0)
             .collect(),
-        tarang_core::SampleFormat::I32 => buf
+        tarang::core::SampleFormat::I32 => buf
             .data
             .chunks_exact(4)
             .map(|c| i32::from_ne_bytes([c[0], c[1], c[2], c[3]]) as f32 / 2_147_483_648.0)
@@ -52,7 +52,7 @@ fn decode_samples_to_f32(buf: &tarang_core::AudioBuffer) -> Vec<f32> {
 
 /// Compute the audio fingerprint for a file by decoding its first ~30 seconds.
 pub fn fingerprint_file(path: &Path) -> Result<AudioFingerprint> {
-    let mut decoder = tarang_audio::FileDecoder::open_path(path)?;
+    let mut decoder = tarang::audio::FileDecoder::open_path(path)?;
     let config = FingerprintConfig::default();
 
     // Decode enough audio for a meaningful fingerprint (~30 seconds)
@@ -77,7 +77,7 @@ pub fn fingerprint_file(path: &Path) -> Result<AudioFingerprint> {
                     break;
                 }
             }
-            Err(tarang_core::TarangError::EndOfStream) => break,
+            Err(tarang::core::TarangError::EndOfStream) => break,
             Err(e) => return Err(e.into()),
         }
     }
@@ -87,9 +87,9 @@ pub fn fingerprint_file(path: &Path) -> Result<AudioFingerprint> {
     }
 
     let bytes: &[u8] = bytemuck::cast_slice(&all_samples);
-    let buf = tarang_core::AudioBuffer {
+    let buf = tarang::core::AudioBuffer {
         data: bytes::Bytes::copy_from_slice(bytes),
-        sample_format: tarang_core::SampleFormat::F32,
+        sample_format: tarang::core::SampleFormat::F32,
         channels: 1,
         sample_rate: config.sample_rate,
         num_samples: all_samples.len(),

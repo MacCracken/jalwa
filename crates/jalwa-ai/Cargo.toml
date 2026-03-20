@@ -1,15 +1,17 @@
 [package]
 name = "jalwa-ai"
-version = "2026.3.18"
+version = "2026.3.19"
 edition = "2024"
 description = "AI features for Jalwa — smart playlists, recommendations, transcription routing via hoosh"
 license = "GPL-3.0"
 
+[features]
+default = []
+tarang = ["dep:tarang", "jalwa-core/tarang"]
+
 [dependencies]
-jalwa-core = { path = "../jalwa-core" }
-tarang-core = { workspace = true }
-tarang-audio = { workspace = true }
-tarang-ai = { workspace = true }
+jalwa-core = { path = "../jalwa-core", default-features = false }
+tarang = { workspace = true, optional = true }
 bytes = { workspace = true }
 bytemuck = { workspace = true }
 serde = { workspace = true }

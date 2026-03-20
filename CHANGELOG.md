@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.3.19
+
+Switched tarang dependency from git subcrates to the published crates.io umbrella crate.
+
+### Tarang crates.io migration
+- Replaced 5 git-pinned subcrate dependencies (`tarang-core`, `tarang-demux`, `tarang-audio`, `tarang-video`, `tarang-ai` from `github.com/MacCracken/tarang` tag `2026.3.16-1`) with a single `tarang = "0.19.3"` from crates.io
+- Tarang is now an optional feature (`tarang`) included in `default` — build with `--no-default-features` to compile without it
+- Feature propagates through workspace: `jalwa/tarang` enables `jalwa-core/tarang`, `jalwa-playback/tarang`, `jalwa-ai/tarang`
+- Updated all import paths from subcrate style (`tarang_core::`, `tarang_audio::`, `tarang_ai::`) to umbrella module style (`tarang::core::`, `tarang::audio::`, `tarang::ai::`)
+- Adapted to published API: `MediaInfo::audio_streams()` returns an iterator (`.next()`) instead of a slice (`.first()`)
+
+### Version bump
+- All crates bumped to 2026.3.19
+
 ## 2026.3.18
 
 Polish release: MCP stdio integration tests, GUI headless tests, library grid view, lru advisory tracking.

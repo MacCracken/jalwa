@@ -48,21 +48,23 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 libc = "0.2"
 
 # Tarang media framework
-tarang-core = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16-1" }
-tarang-demux = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16-1" }
-tarang-audio = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16-1" }
-tarang-video = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16-1" }
-tarang-ai = { git = "https://github.com/MacCracken/tarang.git", tag = "2026.3.16-1" }
+tarang = { version = "0.19.3", default-features = false }
 
 [package]
 name = "jalwa"
-version = "2026.3.18"
+version = "2026.3.19"
 edition = "2024"
 description = "Jalwa — AI-native media player for AGNOS, built on the Tarang media framework"
 license = "GPL-3.0"
 
 [features]
-default = ["pipewire"]
+default = ["tarang", "pipewire"]
+tarang = [
+    "dep:tarang",
+    "jalwa-core/tarang",
+    "jalwa-playback/tarang",
+    "jalwa-ai/tarang",
+]
 pipewire = ["jalwa-playback/pipewire"]
 
 [dependencies]
@@ -71,9 +73,7 @@ jalwa-playback = { path = "crates/jalwa-playback", default-features = false }
 jalwa-ui = { path = "crates/jalwa-ui" }
 jalwa-gui = { path = "crates/jalwa-gui" }
 jalwa-ai = { path = "crates/jalwa-ai" }
-tarang-core = { workspace = true }
-tarang-audio = { workspace = true }
-tarang-ai = { workspace = true }
+tarang = { workspace = true, optional = true }
 uuid = { workspace = true }
 libc = { workspace = true }
 clap = { workspace = true }

@@ -1,6 +1,6 @@
 [package]
 name = "jalwa-ui"
-version = "2026.3.18"
+version = "2026.3.19"
 edition = "2024"
 description = "UI layer for Jalwa media player — terminal and desktop interfaces"
 license = "GPL-3.0"
@@ -16,6 +16,6 @@ crossterm = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-tarang-core = { workspace = true }
+tarang = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }

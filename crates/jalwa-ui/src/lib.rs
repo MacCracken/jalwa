@@ -111,7 +111,7 @@ mod tests {
     use super::*;
     use jalwa_core::*;
     use std::path::PathBuf;
-    use tarang_core::*;
+    use tarang::core::*;
     use uuid::Uuid;
 
     fn make_item(title: &str, artist: &str, duration_secs: u64) -> MediaItem {

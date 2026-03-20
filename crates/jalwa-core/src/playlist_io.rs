@@ -49,7 +49,7 @@ mod tests {
     use super::*;
     use crate::{MediaItem, MediaType};
     use std::time::Duration;
-    use tarang_core::{AudioCodec, ContainerFormat};
+    use tarang::core::{AudioCodec, ContainerFormat};
     use uuid::Uuid;
 
     fn make_item(title: &str, artist: &str, path: &str) -> MediaItem {

@@ -2,7 +2,7 @@
 //!
 //! All functions operate on interleaved F32 `AudioBuffer`s from tarang-core.
 
-use tarang_core::AudioBuffer;
+use tarang::core::AudioBuffer;
 
 // ---- Volume Normalization / ReplayGain ----
 
@@ -354,7 +354,7 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use std::time::Duration;
-    use tarang_core::SampleFormat;
+    use tarang::core::SampleFormat;
 
     fn make_buf(samples: &[f32], channels: u16, sample_rate: u32) -> AudioBuffer {
         let bytes: &[u8] = bytemuck::cast_slice(samples);

@@ -165,7 +165,7 @@ fn cmd_play(path: &str) -> Result<()> {
 
 fn cmd_info(path: &str) -> Result<()> {
     let file = std::fs::File::open(path)?;
-    let info = tarang_audio::probe_audio(file)?;
+    let info = tarang::audio::probe_audio(file)?;
 
     println!("File:     {path}");
     println!("Format:   {}", info.format);
@@ -176,19 +176,19 @@ fn cmd_info(path: &str) -> Result<()> {
 
     for (i, stream) in info.streams.iter().enumerate() {
         match stream {
-            tarang_core::StreamInfo::Audio(a) => {
+            tarang::core::StreamInfo::Audio(a) => {
                 println!(
                     "  [{}] Audio: {} {}Hz {}ch",
                     i, a.codec, a.sample_rate, a.channels
                 );
             }
-            tarang_core::StreamInfo::Video(v) => {
+            tarang::core::StreamInfo::Video(v) => {
                 println!(
                     "  [{}] Video: {} {}x{} {:.1}fps",
                     i, v.codec, v.width, v.height, v.frame_rate
                 );
             }
-            tarang_core::StreamInfo::Subtitle { language } => {
+            tarang::core::StreamInfo::Subtitle { language } => {
                 println!(
                     "  [{}] Subtitle: {}",
                     i,
@@ -199,7 +199,7 @@ fn cmd_info(path: &str) -> Result<()> {
     }
 
     // AI analysis
-    let analysis = tarang_ai::analyze_media(&info);
+    let analysis = tarang::ai::analyze_media(&info);
     println!("\nAI Analysis:");
     println!("  Type:       {}", analysis.content_type);
     println!("  Quality:    {:.0}/100", analysis.quality_score);

@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::{JalwaError, MediaItem, Result};
-use tarang_core::MediaInfo;
+use tarang::core::MediaInfo;
 
 /// Supported audio/media file extensions
 const SUPPORTED_EXTENSIONS: &[&str] = &[
@@ -69,7 +69,7 @@ pub fn scan_directory(path: &Path) -> Result<Vec<ScannedFile>> {
 fn scan_file(path: &Path) -> Result<ScannedFile> {
     // Probe with tarang for duration/codec/format info
     let file = std::fs::File::open(path)?;
-    let info = tarang_audio::probe_audio(file).map_err(JalwaError::Tarang)?;
+    let info = tarang::audio::probe_audio(file).map_err(JalwaError::Tarang)?;
 
     // Extract rich tags + album art with lofty
     let (title, artist, album, art_mime, art_data) = match lofty::read_from_path(path) {
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn scanned_to_media_item_applies_tags() {
-        use tarang_core::*;
+        use tarang::core::*;
         let info = MediaInfo {
             id: uuid::Uuid::new_v4(),
             format: ContainerFormat::Mp3,
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn scanned_to_media_item_no_tags() {
-        use tarang_core::*;
+        use tarang::core::*;
         let info = MediaInfo {
             id: uuid::Uuid::new_v4(),
             format: ContainerFormat::Flac,

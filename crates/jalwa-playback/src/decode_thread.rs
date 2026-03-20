@@ -8,8 +8,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use tarang_audio::{AudioOutput, ChannelLayout, FileDecoder, OutputConfig, mix_channels, resample};
-use tarang_core::TarangError;
+use tarang::audio::{
+    AudioOutput, ChannelLayout, FileDecoder, OutputConfig, mix_channels, resample,
+};
+use tarang::core::TarangError;
 
 use crate::EngineConfig;
 use crate::dsp::{self, Equalizer};
@@ -68,11 +70,11 @@ impl Default for DecodeStatus {
 fn create_output() -> Box<dyn AudioOutput> {
     #[cfg(feature = "pipewire")]
     {
-        Box::new(tarang_audio::PipeWireOutput::new())
+        Box::new(tarang::audio::PipeWireOutput::new())
     }
     #[cfg(not(feature = "pipewire"))]
     {
-        Box::new(tarang_audio::NullOutput::new())
+        Box::new(tarang::audio::NullOutput::new())
     }
 }
 
@@ -302,11 +304,14 @@ pub fn decode_loop(
 }
 
 /// Apply volume gain to an AudioBuffer, returning a new buffer.
-pub(crate) fn apply_volume(buf: &tarang_core::AudioBuffer, gain: f32) -> tarang_core::AudioBuffer {
+pub(crate) fn apply_volume(
+    buf: &tarang::core::AudioBuffer,
+    gain: f32,
+) -> tarang::core::AudioBuffer {
     let samples = dsp::buf_to_f32_safe(buf);
     let scaled: Vec<f32> = samples.iter().map(|s| s * gain).collect();
     let bytes: &[u8] = bytemuck::cast_slice(&scaled);
-    tarang_core::AudioBuffer {
+    tarang::core::AudioBuffer {
         data: bytes::Bytes::copy_from_slice(bytes),
         sample_format: buf.sample_format,
         channels: buf.channels,

@@ -1,9 +1,13 @@
 [package]
 name = "jalwa-core"
-version = "2026.3.18"
+version = "2026.3.19"
 edition = "2024"
 description = "Core types for Jalwa media player — library, playlists, queue, playback state"
 license = "GPL-3.0"
+
+[features]
+default = []
+tarang = ["dep:tarang"]
 
 [dependencies]
 serde = { workspace = true }
@@ -11,8 +15,7 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
-tarang-core = { workspace = true }
-tarang-audio = { workspace = true }
+tarang = { workspace = true, optional = true }
 rusqlite = { workspace = true }
 lofty = { workspace = true }
 walkdir = { workspace = true }

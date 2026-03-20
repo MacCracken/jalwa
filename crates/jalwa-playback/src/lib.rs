@@ -81,7 +81,7 @@ impl PlaybackEngine {
 
         // Probe the file via tarang
         let file = std::fs::File::open(path)?;
-        let info = tarang_audio::probe_audio(file).map_err(JalwaError::Tarang)?;
+        let info = tarang::audio::probe_audio(file).map_err(JalwaError::Tarang)?;
 
         self.duration = info.duration;
         self.current_path = Some(path.to_path_buf());
@@ -555,11 +555,11 @@ mod tests {
 
     // ---- apply_volume tests ----
 
-    fn make_test_buf(samples: &[f32]) -> tarang_core::AudioBuffer {
+    fn make_test_buf(samples: &[f32]) -> tarang::core::AudioBuffer {
         let bytes: &[u8] = bytemuck::cast_slice(samples);
-        tarang_core::AudioBuffer {
+        tarang::core::AudioBuffer {
             data: bytes::Bytes::copy_from_slice(bytes),
-            sample_format: tarang_core::SampleFormat::F32,
+            sample_format: tarang::core::SampleFormat::F32,
             channels: 1,
             sample_rate: 44100,
             num_samples: samples.len(),
@@ -567,7 +567,7 @@ mod tests {
         }
     }
 
-    fn read_f32(buf: &tarang_core::AudioBuffer) -> Vec<f32> {
+    fn read_f32(buf: &tarang::core::AudioBuffer) -> Vec<f32> {
         dsp::buf_to_f32_safe(buf).into_owned()
     }
 
