@@ -64,6 +64,7 @@ tarang = [
     "jalwa-core/tarang",
     "jalwa-playback/tarang",
     "jalwa-ai/tarang",
+    "jalwa-ui/tarang",
 ]
 pipewire = ["jalwa-playback/pipewire"]
 

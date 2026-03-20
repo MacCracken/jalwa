@@ -2,6 +2,7 @@
 //!
 //! All functions operate on interleaved F32 `AudioBuffer`s from tarang-core.
 
+#[cfg(feature = "tarang")]
 use tarang::core::AudioBuffer;
 
 // ---- Volume Normalization / ReplayGain ----
@@ -18,9 +19,11 @@ pub struct LoudnessInfo {
 }
 
 /// Target RMS for normalization (~-18 dBFS, typical ReplayGain reference).
+#[cfg(feature = "tarang")]
 const TARGET_RMS: f32 = 0.125;
 
 /// Analyze a buffer's loudness and compute normalization gain.
+#[cfg(feature = "tarang")]
 pub fn analyze_loudness(buf: &AudioBuffer) -> LoudnessInfo {
     let samples = buf_to_f32(buf);
     if samples.is_empty() {
@@ -54,6 +57,7 @@ pub fn analyze_loudness(buf: &AudioBuffer) -> LoudnessInfo {
 }
 
 /// Apply normalization gain to a buffer, with peak limiting to prevent clipping.
+#[cfg(feature = "tarang")]
 pub fn normalize(buf: &AudioBuffer, gain: f32) -> AudioBuffer {
     let samples = buf_to_f32(buf);
     let limited_gain = if gain > 1.0 {
@@ -174,6 +178,7 @@ impl EqSettings {
 
 /// Biquad filter coefficients for a single band.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(feature = "tarang"), allow(dead_code))]
 struct BiquadCoeffs {
     b0: f32,
     b1: f32,
@@ -184,6 +189,7 @@ struct BiquadCoeffs {
 
 /// Biquad filter state (per channel).
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(not(feature = "tarang"), allow(dead_code))]
 struct BiquadState {
     x1: f32,
     x2: f32,
@@ -193,6 +199,7 @@ struct BiquadState {
 
 /// Compute peaking EQ biquad coefficients.
 /// `freq`: center frequency, `gain_db`: boost/cut, `q`: quality factor, `sr`: sample rate.
+#[cfg_attr(not(feature = "tarang"), allow(dead_code))]
 fn peaking_eq(freq: f32, gain_db: f32, q: f32, sr: f32) -> BiquadCoeffs {
     let a = 10.0f32.powf(gain_db / 40.0);
     let w0 = 2.0 * std::f32::consts::PI * freq / sr;
@@ -217,6 +224,7 @@ fn peaking_eq(freq: f32, gain_db: f32, q: f32, sr: f32) -> BiquadCoeffs {
 }
 
 /// Apply a biquad filter to a single sample, updating state.
+#[cfg_attr(not(feature = "tarang"), allow(dead_code))]
 fn biquad_process(c: &BiquadCoeffs, s: &mut BiquadState, input: f32) -> f32 {
     let output = c.b0 * input + c.b1 * s.x1 + c.b2 * s.x2 - c.a1 * s.y1 - c.a2 * s.y2;
     s.x2 = s.x1;
@@ -273,6 +281,7 @@ impl Equalizer {
     }
 
     /// Process an audio buffer through the 10-band EQ in-place.
+    #[cfg(feature = "tarang")]
     pub fn process(&mut self, buf: &AudioBuffer) -> AudioBuffer {
         if !self.settings.enabled || self.settings.is_flat() {
             return buf.clone();
@@ -314,6 +323,7 @@ impl Equalizer {
 /// If the underlying `Bytes` is not 4-byte aligned we copy into an
 /// aligned temporary. The returned `Cow` avoids the copy when alignment
 /// is already correct (the common path).
+#[cfg(feature = "tarang")]
 pub(crate) fn buf_to_f32_safe(buf: &AudioBuffer) -> std::borrow::Cow<'_, [f32]> {
     if buf.data.is_empty() {
         return std::borrow::Cow::Borrowed(&[]);
@@ -333,10 +343,12 @@ pub(crate) fn buf_to_f32_safe(buf: &AudioBuffer) -> std::borrow::Cow<'_, [f32]> 
 }
 
 /// Legacy alias used by existing call sites that only need a `&[f32]` view.
+#[cfg(feature = "tarang")]
 fn buf_to_f32(buf: &AudioBuffer) -> std::borrow::Cow<'_, [f32]> {
     buf_to_f32_safe(buf)
 }
 
+#[cfg(feature = "tarang")]
 fn f32_to_buf(samples: &[f32], template: &AudioBuffer) -> AudioBuffer {
     let bytes: &[u8] = bytemuck::cast_slice(samples);
     AudioBuffer {
@@ -349,8 +361,8 @@ fn f32_to_buf(samples: &[f32], template: &AudioBuffer) -> AudioBuffer {
     }
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "tarang"))]
+mod tarang_tests {
     use super::*;
     use bytes::Bytes;
     use std::time::Duration;

@@ -4,6 +4,7 @@
 
 pub mod db;
 pub mod playlist_io;
+#[cfg(feature = "tarang")]
 pub mod scanner;
 pub mod watcher;
 
@@ -11,8 +12,71 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tarang::core::{AudioCodec, ContainerFormat, MediaInfo, VideoCodec};
 use uuid::Uuid;
+
+#[cfg(feature = "tarang")]
+pub use tarang::core::{AudioCodec, ContainerFormat, MediaInfo, VideoCodec};
+
+/// Fallback type definitions when the `tarang` feature is disabled.
+#[cfg(not(feature = "tarang"))]
+mod fallback_types {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum ContainerFormat {
+        Mp4,
+        Mkv,
+        WebM,
+        Ogg,
+        Wav,
+        Flac,
+        Mp3,
+        Avi,
+    }
+
+    impl std::fmt::Display for ContainerFormat {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum AudioCodec {
+        Pcm,
+        Mp3,
+        Aac,
+        Flac,
+        Vorbis,
+        Opus,
+        Alac,
+        Wma,
+    }
+
+    impl std::fmt::Display for AudioCodec {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum VideoCodec {
+        H264,
+        H265,
+        Vp8,
+        Vp9,
+        Av1,
+        Theora,
+    }
+
+    impl std::fmt::Display for VideoCodec {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+}
+
+#[cfg(not(feature = "tarang"))]
+pub use fallback_types::{AudioCodec, ContainerFormat, VideoCodec};
 
 /// A media item in the library
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +105,7 @@ pub struct MediaItem {
 
 impl MediaItem {
     /// Create a new media item from a file path and tarang probe info
+    #[cfg(feature = "tarang")]
     pub fn from_probe(path: PathBuf, info: &MediaInfo) -> Self {
         let audio_codec = info.audio_streams().next().map(|a| a.codec);
         let video_codec = info.video_streams().next().map(|v| v.codec);
@@ -436,6 +501,7 @@ pub enum JalwaError {
     Scanner(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[cfg(feature = "tarang")]
     #[error("tarang error: {0}")]
     Tarang(#[from] tarang::core::TarangError),
 }
@@ -448,7 +514,6 @@ pub type Result<T> = std::result::Result<T, JalwaError>;
 /// The functions are cheap (no I/O, no allocations beyond the returned struct).
 pub mod test_fixtures {
     use super::*;
-    use tarang::core::{AudioCodec, ContainerFormat};
 
     /// Create a `MediaItem` with common test defaults.
     pub fn make_media_item(title: &str, artist: &str, duration_secs: u64) -> MediaItem {
@@ -504,7 +569,7 @@ pub mod test_fixtures {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "tarang"))]
 mod tests {
     use super::*;
     use tarang::core::*;

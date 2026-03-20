@@ -5,6 +5,10 @@ edition = "2024"
 description = "UI layer for Jalwa media player — terminal and desktop interfaces"
 license = "GPL-3.0"
 
+[features]
+default = []
+tarang = ["jalwa-core/tarang"]
+
 [dependencies]
 jalwa-core = { path = "../jalwa-core" }
 jalwa-playback = { path = "../jalwa-playback", default-features = false }

@@ -4,12 +4,14 @@
 //! and media analysis powered by tarang-ai.
 
 pub mod daimon;
+#[cfg(feature = "tarang")]
 pub mod fingerprint;
 
 pub use daimon::{
     DaimonClient, DaimonConfig, HooshConfig as HooshLlmConfig, HooshLlmClient, LlmRecommendation,
     LlmSuggestion, RagResult, SimilarMedia, TranscriptionResult,
 };
+#[cfg(feature = "tarang")]
 pub use fingerprint::{FingerprintMatch, find_similar_local};
 
 use jalwa_core::{Library, MediaType, Playlist};

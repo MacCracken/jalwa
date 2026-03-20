@@ -5,15 +5,20 @@
 //! via an `mpsc` channel and pushes status updates back via a `watch`.
 
 use std::path::PathBuf;
+#[cfg(feature = "tarang")]
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
+#[cfg(feature = "tarang")]
 use tarang::audio::{
     AudioOutput, ChannelLayout, FileDecoder, OutputConfig, mix_channels, resample,
 };
+#[cfg(feature = "tarang")]
 use tarang::core::TarangError;
 
+#[cfg(feature = "tarang")]
 use crate::EngineConfig;
+#[cfg(feature = "tarang")]
 use crate::dsp::{self, Equalizer};
 
 /// Commands sent from the engine to the decode thread.
@@ -67,6 +72,7 @@ impl Default for DecodeStatus {
 }
 
 /// Create the appropriate audio output for the platform.
+#[cfg(feature = "tarang")]
 fn create_output() -> Box<dyn AudioOutput> {
     #[cfg(feature = "pipewire")]
     {
@@ -81,6 +87,7 @@ fn create_output() -> Box<dyn AudioOutput> {
 /// Run the decode loop. Blocks until the track ends or a `Stop` command is received.
 ///
 /// This function is intended to be called from `std::thread::spawn`.
+#[cfg(feature = "tarang")]
 pub fn decode_loop(
     path: PathBuf,
     cmd_rx: mpsc::Receiver<EngineCommand>,
@@ -304,6 +311,7 @@ pub fn decode_loop(
 }
 
 /// Apply volume gain to an AudioBuffer, returning a new buffer.
+#[cfg(feature = "tarang")]
 pub(crate) fn apply_volume(
     buf: &tarang::core::AudioBuffer,
     gain: f32,
@@ -321,7 +329,7 @@ pub(crate) fn apply_volume(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "tarang"))]
 mod tests {
     use super::*;
 

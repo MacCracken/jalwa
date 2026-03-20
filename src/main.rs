@@ -163,6 +163,7 @@ fn cmd_play(path: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "tarang")]
 fn cmd_info(path: &str) -> Result<()> {
     let file = std::fs::File::open(path)?;
     let info = tarang::audio::probe_audio(file)?;
@@ -211,6 +212,11 @@ fn cmd_info(path: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(feature = "tarang"))]
+fn cmd_info(_path: &str) -> Result<()> {
+    anyhow::bail!("media probing requires the 'tarang' feature");
+}
+
 fn cmd_search(query: &str) -> Result<()> {
     let plib = open_library()?;
     let results = plib.library.search(query);
@@ -230,6 +236,7 @@ fn cmd_stats() -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "tarang")]
 fn cmd_scan(directory: &str) -> Result<()> {
     let dir = std::path::Path::new(directory);
     let mut plib = open_library()?;
@@ -254,6 +261,11 @@ fn cmd_scan(directory: &str) -> Result<()> {
     println!("Added {added} new items to library");
     println!("{}", jalwa_ui::render_library_stats(&plib.library));
     Ok(())
+}
+
+#[cfg(not(feature = "tarang"))]
+fn cmd_scan(_directory: &str) -> Result<()> {
+    anyhow::bail!("scanning requires the 'tarang' feature");
 }
 
 fn cmd_library() -> Result<()> {
@@ -301,7 +313,8 @@ fn cmd_import(file: &str) -> Result<()> {
     let mut added = 0;
 
     for path in &paths {
-        // Add to library if not already present
+        // Add to library if not already present (requires tarang for scanning)
+        #[cfg(feature = "tarang")]
         if plib.library.find_by_path(path).is_none() {
             match jalwa_core::scanner::scan_directory(path.parent().unwrap_or(path)) {
                 Ok(scanned) => {
@@ -405,6 +418,7 @@ mod tests {
         dir
     }
 
+    #[cfg(feature = "tarang")]
     #[test]
     fn info_with_wav() {
         let dir = tmp_dir_with_wav();
@@ -444,6 +458,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(feature = "tarang")]
     #[test]
     fn scan_with_wav() {
         let dir = tmp_dir_with_wav();
@@ -463,6 +478,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
+    #[cfg(feature = "tarang")]
     #[test]
     fn scan_nonexistent_dir() {
         let result = jalwa_core::scanner::scan_directory(std::path::Path::new("/nonexistent"));
@@ -501,6 +517,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(feature = "tarang")]
     #[test]
     fn scan_skips_duplicates() {
         let dir = tmp_dir_with_wav();
@@ -532,6 +549,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
+    #[cfg(feature = "tarang")]
     #[test]
     fn export_import_roundtrip() {
         let dir = tmp_dir_with_wav();
@@ -562,6 +580,7 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
+    #[cfg(feature = "tarang")]
     #[test]
     fn info_shows_streams() {
         let dir = tmp_dir_with_wav();
@@ -614,6 +633,7 @@ mod tests {
         assert!(p.to_str().unwrap().contains("jalwa"));
     }
 
+    #[cfg(feature = "tarang")]
     #[test]
     fn import_finds_existing_items() {
         let dir = tmp_dir_with_wav();

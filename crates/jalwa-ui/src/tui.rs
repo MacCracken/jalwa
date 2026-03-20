@@ -93,7 +93,8 @@ pub fn run(mut app: App) -> io::Result<()> {
             for ev in w.poll() {
                 match ev {
                     jalwa_core::watcher::LibraryEvent::FileCreated(path) => {
-                        // Auto-add new media files to library
+                        // Auto-add new media files to library (requires tarang feature)
+                        #[cfg(feature = "tarang")]
                         if app.library.library.find_by_path(&path).is_none()
                             && let Ok(scanned) =
                                 jalwa_core::scanner::scan_directory(path.parent().unwrap_or(&path))
@@ -106,6 +107,8 @@ pub fn run(mut app: App) -> io::Result<()> {
                                 }
                             }
                         }
+                        #[cfg(not(feature = "tarang"))]
+                        let _ = &path;
                     }
                     jalwa_core::watcher::LibraryEvent::FileRemoved(path) => {
                         if let Some(item) = app.library.library.find_by_path(&path) {

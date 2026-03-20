@@ -47,9 +47,8 @@ pub fn load_m3u(path: &Path) -> Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MediaItem, MediaType};
+    use crate::{AudioCodec, ContainerFormat, MediaItem, MediaType};
     use std::time::Duration;
-    use tarang::core::{AudioCodec, ContainerFormat};
     use uuid::Uuid;
 
     fn make_item(title: &str, artist: &str, path: &str) -> MediaItem {

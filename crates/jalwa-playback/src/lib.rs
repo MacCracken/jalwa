@@ -71,6 +71,7 @@ impl PlaybackEngine {
     }
 
     /// Open a media file for playback (probe only)
+    #[cfg(feature = "tarang")]
     pub fn open(&mut self, path: &Path) -> Result<()> {
         if !path.exists() {
             return Err(JalwaError::NotFound(path.to_string_lossy().to_string()));
@@ -98,12 +99,24 @@ impl PlaybackEngine {
         Ok(())
     }
 
+    /// Open a media file for playback (stub when tarang is unavailable)
+    #[cfg(not(feature = "tarang"))]
+    pub fn open(&mut self, path: &Path) -> Result<()> {
+        if !path.exists() {
+            return Err(JalwaError::NotFound(path.to_string_lossy().to_string()));
+        }
+        self.stop();
+        self.current_path = Some(path.to_path_buf());
+        self.position = Duration::ZERO;
+        self.state = PlaybackState::Stopped;
+        Ok(())
+    }
+
     /// Start or resume playback
     pub fn play(&mut self) -> Result<()> {
-        let path = self
-            .current_path
-            .clone()
-            .ok_or_else(|| JalwaError::Playback("no file loaded".to_string()))?;
+        if self.current_path.is_none() {
+            return Err(JalwaError::Playback("no file loaded".to_string()));
+        }
 
         if self.state == PlaybackState::Paused {
             // Resume existing decode thread
@@ -114,29 +127,36 @@ impl PlaybackEngine {
             return Ok(());
         }
 
-        // Spawn new decode thread
-        let (cmd_tx, cmd_rx) = mpsc::channel();
-        let status = Arc::new(Mutex::new(DecodeStatus::default()));
-        let status_clone = status.clone();
-        let (event_tx, event_rx) = mpsc::channel();
+        #[cfg(not(feature = "tarang"))]
+        return Err(JalwaError::Playback("playback requires the 'tarang' feature".to_string()));
 
-        let config = self.config.clone();
-        let duration = self.duration;
+        #[cfg(feature = "tarang")]
+        {
+            let path = self.current_path.clone().unwrap();
+            // Spawn new decode thread
+            let (cmd_tx, cmd_rx) = mpsc::channel();
+            let status = Arc::new(Mutex::new(DecodeStatus::default()));
+            let status_clone = status.clone();
+            let (event_tx, event_rx) = mpsc::channel();
 
-        let handle = std::thread::Builder::new()
-            .name("jalwa-decode".into())
-            .spawn(move || {
-                decode_thread::decode_loop(path, cmd_rx, status_clone, event_tx, config, duration);
-            })
-            .map_err(|e| JalwaError::Playback(format!("spawn decode thread: {e}")))?;
+            let config = self.config.clone();
+            let duration = self.duration;
 
-        self.cmd_tx = Some(cmd_tx);
-        self.decode_status = Some(status);
-        self.event_rx = Some(event_rx);
-        self.decode_handle = Some(handle);
-        self.state = PlaybackState::Playing;
+            let handle = std::thread::Builder::new()
+                .name("jalwa-decode".into())
+                .spawn(move || {
+                    decode_thread::decode_loop(path, cmd_rx, status_clone, event_tx, config, duration);
+                })
+                .map_err(|e| JalwaError::Playback(format!("spawn decode thread: {e}")))?;
 
-        Ok(())
+            self.cmd_tx = Some(cmd_tx);
+            self.decode_status = Some(status);
+            self.event_rx = Some(event_rx);
+            self.decode_handle = Some(handle);
+            self.state = PlaybackState::Playing;
+
+            Ok(())
+        }
     }
 
     /// Pause playback
@@ -553,7 +573,11 @@ mod tests {
         assert!(!status.muted);
     }
 
-    // ---- apply_volume tests ----
+}
+
+#[cfg(all(test, feature = "tarang"))]
+mod tarang_tests {
+    use super::*;
 
     fn make_test_buf(samples: &[f32]) -> tarang::core::AudioBuffer {
         let bytes: &[u8] = bytemuck::cast_slice(samples);

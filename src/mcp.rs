@@ -361,6 +361,12 @@ fn tool_library(
             if path.is_empty() {
                 return mcp_err("path required for scan");
             }
+            #[cfg(not(feature = "tarang"))]
+            {
+                let _ = path;
+                mcp_err("scanning requires the 'tarang' feature")
+            }
+            #[cfg(feature = "tarang")]
             match jalwa_core::scanner::scan_directory(std::path::Path::new(path)) {
                 Ok(scanned) => {
                     let mut lib = plib.lock().unwrap();
@@ -820,6 +826,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(feature = "tarang")]
     #[test]
     fn tool_library_scan_valid_dir() {
         // Create a temp dir with a WAV file

@@ -7,8 +7,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use uuid::Uuid;
 
-use crate::{JalwaError, Library, MediaItem, MediaType, Playlist, Result};
-use tarang::core::{AudioCodec, ContainerFormat, VideoCodec};
+use crate::{AudioCodec, ContainerFormat, JalwaError, Library, MediaItem, MediaType, Playlist, Result, VideoCodec};
 
 /// Low-level database handle.
 pub struct LibraryDb {
@@ -551,7 +550,7 @@ pub fn default_db_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tarang::core::*;
+    use crate::{AudioCodec, ContainerFormat};
 
     fn make_test_item(title: &str, artist: &str) -> MediaItem {
         MediaItem {
