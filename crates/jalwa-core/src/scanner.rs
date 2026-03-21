@@ -229,6 +229,7 @@ mod tests {
             title: None,
             artist: None,
             album: None,
+            metadata: std::collections::HashMap::new(),
         };
 
         let scanned = ScannedFile {
@@ -268,6 +269,7 @@ mod tests {
             title: Some("Probe Title".to_string()),
             artist: Some("Probe Artist".to_string()),
             album: None,
+            metadata: std::collections::HashMap::new(),
         };
 
         let scanned = ScannedFile {

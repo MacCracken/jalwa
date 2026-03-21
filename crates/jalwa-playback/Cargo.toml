@@ -13,6 +13,7 @@ pipewire = ["tarang", "tarang/pipewire"]
 [dependencies]
 jalwa-core = { path = "../jalwa-core", default-features = false }
 tarang = { workspace = true, optional = true }
+dhvani = { workspace = true }
 bytemuck = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

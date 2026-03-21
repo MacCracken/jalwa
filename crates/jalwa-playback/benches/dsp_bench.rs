@@ -22,7 +22,7 @@ mod tarang_benches {
             sample_format: tarang::core::SampleFormat::F32,
             channels,
             sample_rate,
-            num_samples,
+            num_frames: num_samples,
             timestamp: Duration::ZERO,
         }
     }

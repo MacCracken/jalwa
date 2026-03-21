@@ -100,7 +100,7 @@ pub fn decode_loop(
     let mut muted = false;
     let mut equalizer = Equalizer::new(config.sample_rate);
     let mut normalize_enabled = false;
-    let mut smooth_gain: f32 = 1.0; // Smoothed normalization gain to prevent pumping
+    let mut smooth_gain = crate::dsp::GainSmoother::new(0.3, 0.05);
     let mut _scratch: Vec<f32> = Vec::with_capacity(config.buffer_size * config.channels as usize);
 
     // Open decoder
@@ -269,10 +269,8 @@ pub fn decode_loop(
         // Apply normalization with smoothed gain to prevent pumping
         let buf = if normalize_enabled {
             let info = dsp::analyze_loudness(&buf);
-            // Exponential moving average: attack fast (0.3), release slow (0.05)
-            let alpha = if info.gain < smooth_gain { 0.3 } else { 0.05 };
-            smooth_gain = smooth_gain + alpha * (info.gain - smooth_gain);
-            dsp::normalize(&buf, smooth_gain)
+            let gain = smooth_gain.smooth(info.gain);
+            dsp::normalize(&buf, gain)
         } else {
             buf
         };
@@ -340,7 +338,7 @@ pub(crate) fn apply_volume(
         sample_format: buf.sample_format,
         channels: buf.channels,
         sample_rate: buf.sample_rate,
-        num_samples: buf.num_samples,
+        num_frames: buf.num_frames,
         timestamp: buf.timestamp,
     }
 }

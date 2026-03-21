@@ -196,6 +196,9 @@ fn cmd_info(path: &str) -> Result<()> {
                     language.as_deref().unwrap_or("unknown")
                 );
             }
+            _ => {
+                println!("  [{}] Unknown stream type", i);
+            }
         }
     }
 

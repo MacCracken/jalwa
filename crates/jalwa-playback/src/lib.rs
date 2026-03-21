@@ -596,7 +596,7 @@ mod tarang_tests {
             sample_format: tarang::core::SampleFormat::F32,
             channels: 1,
             sample_rate: 44100,
-            num_samples: samples.len(),
+            num_frames: samples.len(),
             timestamp: Duration::ZERO,
         }
     }
@@ -639,7 +639,7 @@ mod tarang_tests {
         let out = decode_thread::apply_volume(&buf, 0.8);
         assert_eq!(out.channels, buf.channels);
         assert_eq!(out.sample_rate, buf.sample_rate);
-        assert_eq!(out.num_samples, buf.num_samples);
+        assert_eq!(out.num_frames, buf.num_frames);
         assert_eq!(out.timestamp, buf.timestamp);
     }
 }

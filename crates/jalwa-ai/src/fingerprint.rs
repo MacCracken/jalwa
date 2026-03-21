@@ -93,7 +93,7 @@ pub fn fingerprint_file(path: &Path) -> Result<AudioFingerprint> {
         sample_format: tarang::core::SampleFormat::F32,
         channels: 1,
         sample_rate: config.sample_rate,
-        num_samples: all_samples.len(),
+        num_frames: all_samples.len(),
         timestamp: std::time::Duration::ZERO,
     };
 

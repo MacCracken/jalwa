@@ -625,6 +625,7 @@ mod tests {
             title: Some("Test Song".to_string()),
             artist: Some("Test Artist".to_string()),
             album: Some("Test Album".to_string()),
+            metadata: HashMap::new(),
         }
     }
 
@@ -656,6 +657,7 @@ mod tests {
             title: Some("Test Movie".to_string()),
             artist: None,
             album: None,
+            metadata: HashMap::new(),
         }
     }
 
