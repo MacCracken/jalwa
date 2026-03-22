@@ -19,6 +19,7 @@ pub enum View {
     NowPlaying,
     Queue,
     Equalizer,
+    Video,
 }
 
 /// Library view layout mode.
@@ -40,6 +41,7 @@ pub struct GuiApp {
     pub library_view_mode: LibraryViewMode,
     pub art_cache: ArtCache,
     pub current_playing_id: Option<Uuid>,
+    pub video_texture: Option<egui::TextureHandle>,
 
     mpris_rx: Receiver<MprisCommand>,
     _watcher: Option<LibraryWatcher>,
@@ -66,6 +68,7 @@ impl GuiApp {
             library_view_mode: LibraryViewMode::List,
             art_cache: ArtCache::new(),
             current_playing_id: None,
+            video_texture: None,
             mpris_rx,
             _watcher: watcher,
         }
@@ -113,7 +116,7 @@ impl GuiApp {
                 }
             }
             View::Queue => self.queue.len(),
-            View::NowPlaying => 0,
+            View::NowPlaying | View::Video => 0,
             View::Equalizer => 10,
         }
     }
@@ -123,6 +126,7 @@ impl GuiApp {
         for ev in &events {
             match ev {
                 EngineEvent::TrackFinished => {
+                    self.video_texture = None;
                     if let Some(id) = self.current_playing_id.take() {
                         let _ = self.library.update_play_count(id);
                     }
@@ -216,6 +220,7 @@ impl GuiApp {
             library_view_mode: LibraryViewMode::List,
             art_cache: ArtCache::new(),
             current_playing_id: None,
+            video_texture: None,
             mpris_rx,
             _watcher: None,
         }
@@ -268,11 +273,20 @@ impl eframe::App for GuiApp {
                 views::sidebar::sidebar(ui, self);
             });
 
+        // Auto-switch to video view when a video starts playing
+        if self.engine.is_video()
+            && self.engine.state() == jalwa_core::PlaybackState::Playing
+            && self.view != View::Video
+        {
+            self.view = View::Video;
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| match self.view {
             View::Library => views::library::library_view(ui, self),
             View::NowPlaying => views::now_playing::now_playing_view(ui, ctx, self),
             View::Queue => views::queue::queue_view(ui, self),
             View::Equalizer => views::equalizer::equalizer_view(ui, self),
+            View::Video => views::video::video_view(ui, ctx, self),
         });
     }
 }

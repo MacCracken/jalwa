@@ -61,7 +61,7 @@ ai-hwaccel = { version = "0.21.3", default-features = false }
 
 [package]
 name = "jalwa"
-version = "2026.3.19"
+version = "2026.3.22"
 edition = "2024"
 description = "Jalwa — AI-native media player for AGNOS, built on the Tarang media framework"
 license = "GPL-3.0"
@@ -76,6 +76,7 @@ tarang = [
     "jalwa-ui/tarang",
 ]
 pipewire = ["jalwa-playback/pipewire"]
+video = ["jalwa-playback/video"]
 
 [dependencies]
 jalwa-core = { path = "crates/jalwa-core" }
@@ -95,6 +96,7 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+egui = { workspace = true }
 
 [[bin]]
 name = "jalwa"
@@ -106,4 +108,8 @@ harness = false
 
 [[bench]]
 name = "dsp"
+harness = false
+
+[[bench]]
+name = "video"
 harness = false

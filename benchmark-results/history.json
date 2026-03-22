@@ -1,0 +1,93 @@
+[
+  {
+    "timestamp": "2026-03-22T22:41:43Z",
+    "rust_version": "rustc 1.93.0 (254b59607 2026-01-19)",
+    "commit": "4748f06",
+    "benchmarks": [
+      {
+        "name": "load_all_presets",
+        "low_us": 0.031,
+        "mid_us": 0.031,
+        "high_us": 0.032,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "is_flat_true",
+        "low_us": 0.002,
+        "mid_us": 0.002,
+        "high_us": 0.002,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "is_flat_false",
+        "low_us": 0.002,
+        "mid_us": 0.002,
+        "high_us": 0.002,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "persistent_add_100_items",
+        "low_us": 8683.1,
+        "mid_us": 8714.7,
+        "high_us": 8745.3,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "persistent_reopen_500_items",
+        "low_us": 758.79,
+        "mid_us": 763.35,
+        "high_us": 768.03,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "recommend_1000_items_top10",
+        "low_us": 160.78,
+        "mid_us": 161.36,
+        "high_us": 161.98,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "smart_playlist_1000_items",
+        "low_us": 58.985,
+        "mid_us": 59.247,
+        "high_us": 59.536,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "display_frame_1080p_create",
+        "low_us": 247.55,
+        "mid_us": 261.87,
+        "high_us": 278.19,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "display_frame_720p_create",
+        "low_us": 61.181,
+        "mid_us": 62.36,
+        "high_us": 63.561,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "display_frame_1080p_clone",
+        "low_us": 181.04,
+        "mid_us": 183.69,
+        "high_us": 186.76,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "color_image_from_rgb_1080p",
+        "low_us": 1082.5,
+        "mid_us": 1089.8,
+        "high_us": 1098.1,
+        "unit": "\u00b5s"
+      },
+      {
+        "name": "color_image_from_rgb_720p",
+        "low_us": 455.91,
+        "mid_us": 457.21,
+        "high_us": 458.62,
+        "unit": "\u00b5s"
+      }
+    ]
+  }
+]

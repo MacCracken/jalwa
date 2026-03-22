@@ -1,6 +1,6 @@
 [package]
 name = "jalwa-gui"
-version = "2026.3.19"
+version = "2026.3.22"
 edition = "2024"
 description = "Desktop GUI for Jalwa media player — egui/eframe with wgpu backend"
 license = "GPL-3.0"

@@ -1,6 +1,6 @@
 [package]
 name = "jalwa-core"
-version = "2026.3.19"
+version = "2026.3.22"
 edition = "2024"
 description = "Core types for Jalwa media player — library, playlists, queue, playback state"
 license = "GPL-3.0"

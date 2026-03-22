@@ -1,6 +1,6 @@
 [package]
 name = "jalwa-playback"
-version = "2026.3.19"
+version = "2026.3.22"
 edition = "2024"
 description = "Playback engine for Jalwa — tarang decode pipeline + PipeWire audio output"
 license = "GPL-3.0"
@@ -9,6 +9,7 @@ license = "GPL-3.0"
 default = ["tarang", "pipewire"]
 tarang = ["dep:tarang", "jalwa-core/tarang"]
 pipewire = ["tarang", "tarang/pipewire"]
+video = ["tarang", "tarang/dav1d", "tarang/openh264"]
 
 [dependencies]
 jalwa-core = { path = "../jalwa-core", default-features = false }

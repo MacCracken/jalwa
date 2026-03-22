@@ -31,7 +31,7 @@
 - [ ] Send specific `PrepareNextFailed` event for gapless failure (`decode_thread.rs:192`)
 - [ ] Use `recv_timeout` for paused decode thread safety (`decode_thread.rs:139`)
 
-## Phase 6 — Video Playback (v2) — *planned, not started*
+## Phase 6 — Video Playback (v2) — *in progress*
 > **Prerequisites met**: tarang-video now has full decode/encode for AV1, H.264, VP8/VP9.
 > Uses **aethersafta** for compositing, scene graph, and hardware-accelerated rendering.
 
@@ -59,13 +59,13 @@
 - [ ] Playlist editor
 - [ ] System tray / notification integration
 
-## Phase 8 — AI Features
+## Phase 9 — AI Features
 - [ ] Content-based recommendations via hoosh
 - [ ] Transcription overlay for video/podcasts
 - [ ] "Play something like this" via semantic search (fingerprint + daimon RAG)
 - [ ] Mood-based playlists
 
-## Phase 9 — AGNOS Integration
+## Phase 10 — AGNOS Integration
 - [ ] Marketplace recipe
 - [ ] MCP tools registered in daimon
 - [ ] agnoshi intents ("play music", "next track", "search library")

@@ -6,12 +6,17 @@ use crate::theme;
 pub fn sidebar(ui: &mut egui::Ui, app: &mut GuiApp) {
     ui.add_space(8.0);
 
-    let entries = [
+    let mut entries = vec![
         (View::Library, "Library", "\u{1F4DA}"),
         (View::NowPlaying, "Now Playing", "\u{266B}"),
         (View::Queue, "Queue", "\u{1F4CB}"),
         (View::Equalizer, "EQ", "\u{1F3DA}"),
     ];
+
+    // Show Video entry when a video is loaded
+    if app.engine.is_video() {
+        entries.insert(2, (View::Video, "Video", "\u{1F3AC}"));
+    }
 
     for (view, label, icon) in entries {
         let is_active = app.view == view;

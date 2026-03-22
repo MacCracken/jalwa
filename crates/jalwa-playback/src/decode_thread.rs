@@ -73,7 +73,7 @@ impl Default for DecodeStatus {
 
 /// Create the appropriate audio output for the platform.
 #[cfg(feature = "tarang")]
-fn create_output() -> Box<dyn AudioOutput> {
+pub(crate) fn create_audio_output() -> Box<dyn AudioOutput> {
     #[cfg(feature = "pipewire")]
     {
         Box::new(tarang::audio::PipeWireOutput::new())
@@ -113,7 +113,7 @@ pub fn decode_loop(
     };
 
     // Open audio output
-    let mut output = create_output();
+    let mut output = create_audio_output();
     let out_config = OutputConfig {
         sample_rate: config.sample_rate,
         channels: config.channels,

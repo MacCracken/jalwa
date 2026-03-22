@@ -6,6 +6,7 @@
 pub mod decode_thread;
 pub mod dsp;
 pub mod mpris;
+pub mod video_decode_thread;
 
 use jalwa_core::{JalwaError, PlaybackState, PlaybackStatus, Result};
 use std::path::{Path, PathBuf};
@@ -14,6 +15,7 @@ use std::time::Duration;
 
 pub use decode_thread::{DecodeStatus, EngineCommand, EngineEvent};
 pub use dsp::EqSettings;
+pub use video_decode_thread::DisplayFrame;
 
 /// Playback engine configuration
 #[derive(Debug, Clone)]
@@ -49,6 +51,9 @@ pub struct PlaybackEngine {
     decode_status: Option<Arc<Mutex<DecodeStatus>>>,
     event_rx: Option<mpsc::Receiver<EngineEvent>>,
     decode_handle: Option<std::thread::JoinHandle<()>>,
+    // Video frame channel (populated when playing video)
+    is_video: bool,
+    video_frame_rx: Option<mpsc::Receiver<DisplayFrame>>,
 }
 
 impl PlaybackEngine {
@@ -67,6 +72,8 @@ impl PlaybackEngine {
             decode_status: None,
             event_rx: None,
             decode_handle: None,
+            is_video: false,
+            video_frame_rx: None,
         }
     }
 
@@ -80,23 +87,75 @@ impl PlaybackEngine {
         // Stop any existing playback
         self.stop();
 
-        // Probe the file via tarang
-        let file = std::fs::File::open(path)?;
-        let info = tarang::audio::probe_audio(file).map_err(JalwaError::Tarang)?;
+        // Try demuxer-based probe first (handles MP4, MKV with video)
+        let has_video = self.try_probe_demuxer(path);
 
-        self.duration = info.duration;
+        if !has_video {
+            // Fall back to audio-only probe
+            let file = std::fs::File::open(path)?;
+            let info = tarang::audio::probe_audio(file).map_err(JalwaError::Tarang)?;
+            self.duration = info.duration;
+            self.is_video = false;
+
+            tracing::info!(
+                path = %path.display(),
+                format = %info.format,
+                streams = info.streams.len(),
+                "opened audio file"
+            );
+        }
+
         self.current_path = Some(path.to_path_buf());
         self.position = Duration::ZERO;
         self.state = PlaybackState::Stopped;
 
-        tracing::info!(
-            path = %path.display(),
-            format = %info.format,
-            streams = info.streams.len(),
-            "opened media file"
-        );
-
         Ok(())
+    }
+
+    /// Try to probe a file as a video container. Returns true if video stream found.
+    #[cfg(feature = "tarang")]
+    fn try_probe_demuxer(&mut self, path: &Path) -> bool {
+        use std::io::Read;
+
+        let mut header = [0u8; 16];
+        let Ok(mut file) = std::fs::File::open(path) else {
+            return false;
+        };
+        if file.read(&mut header).unwrap_or(0) < 12 {
+            return false;
+        }
+
+        let Ok(format) = tarang::demux::detect_format(&header) else {
+            return false;
+        };
+
+        // Only MP4 and MKV/WebM can contain video
+        let reader = std::io::BufReader::new(std::fs::File::open(path).unwrap());
+        let mut demuxer: Box<dyn tarang::demux::Demuxer> = match format {
+            tarang::core::ContainerFormat::Mp4 => Box::new(tarang::demux::Mp4Demuxer::new(reader)),
+            tarang::core::ContainerFormat::Mkv => Box::new(tarang::demux::MkvDemuxer::new(reader)),
+            _ => return false,
+        };
+
+        let Ok(info) = demuxer.probe() else {
+            return false;
+        };
+
+        if info.has_video() {
+            self.duration = info.duration;
+            self.is_video = true;
+
+            tracing::info!(
+                path = %path.display(),
+                format = %info.format,
+                streams = info.streams.len(),
+                video_streams = info.video_streams().count(),
+                "opened video file"
+            );
+            true
+        } else {
+            false
+        }
     }
 
     /// Open a media file for playback (stub when tarang is unavailable)
@@ -135,33 +194,61 @@ impl PlaybackEngine {
         #[cfg(feature = "tarang")]
         {
             let path = self.current_path.clone().unwrap();
-            // Spawn new decode thread
             let (cmd_tx, cmd_rx) = mpsc::channel();
             let status = Arc::new(Mutex::new(DecodeStatus::default()));
             let status_clone = status.clone();
             let (event_tx, event_rx) = mpsc::channel();
-
             let config = self.config.clone();
             let duration = self.duration;
 
-            let handle = std::thread::Builder::new()
-                .name("jalwa-decode".into())
-                .spawn(move || {
-                    decode_thread::decode_loop(
-                        path,
-                        cmd_rx,
-                        status_clone,
-                        event_tx,
-                        config,
-                        duration,
-                    );
-                })
-                .map_err(|e| JalwaError::Playback(format!("spawn decode thread: {e}")))?;
+            let handle = if self.is_video {
+                #[cfg(feature = "video")]
+                {
+                    let (frame_tx, frame_rx) = mpsc::sync_channel(4);
+                    let h = std::thread::Builder::new()
+                        .name("jalwa-video-decode".into())
+                        .spawn(move || {
+                            video_decode_thread::video_decode_loop(
+                                path,
+                                cmd_rx,
+                                status_clone,
+                                event_tx,
+                                frame_tx,
+                                config,
+                                duration,
+                            );
+                        })
+                        .map_err(|e| JalwaError::Playback(format!("spawn video thread: {e}")))?;
+                    self.video_frame_rx = Some(frame_rx);
+                    h
+                }
+                #[cfg(not(feature = "video"))]
+                {
+                    return Err(JalwaError::Playback(
+                        "video playback requires the 'video' feature".to_string(),
+                    ));
+                }
+            } else {
+                std::thread::Builder::new()
+                    .name("jalwa-decode".into())
+                    .spawn(move || {
+                        decode_thread::decode_loop(
+                            path,
+                            cmd_rx,
+                            status_clone,
+                            event_tx,
+                            config,
+                            duration,
+                        );
+                    })
+                    .map_err(|e| JalwaError::Playback(format!("spawn decode thread: {e}")))?
+            };
+
+            self.decode_handle = Some(handle);
 
             self.cmd_tx = Some(cmd_tx);
             self.decode_status = Some(status);
             self.event_rx = Some(event_rx);
-            self.decode_handle = Some(handle);
             self.state = PlaybackState::Playing;
 
             Ok(())
@@ -190,6 +277,8 @@ impl PlaybackEngine {
         self.cmd_tx = None;
         self.decode_status = None;
         self.event_rx = None;
+        self.video_frame_rx = None;
+        self.is_video = false;
         self.state = PlaybackState::Stopped;
         self.position = Duration::ZERO;
     }
@@ -321,6 +410,22 @@ impl PlaybackEngine {
     /// Get current file path
     pub fn current_path(&self) -> Option<&Path> {
         self.current_path.as_deref()
+    }
+
+    /// Whether the current file is a video.
+    pub fn is_video(&self) -> bool {
+        self.is_video
+    }
+
+    /// Try to receive the latest decoded video frame (non-blocking).
+    pub fn take_video_frame(&self) -> Option<DisplayFrame> {
+        let rx = self.video_frame_rx.as_ref()?;
+        // Drain to the latest frame, dropping older ones
+        let mut latest = None;
+        while let Ok(frame) = rx.try_recv() {
+            latest = Some(frame);
+        }
+        latest
     }
 
     /// Get full playback status snapshot
@@ -582,6 +687,53 @@ mod tests {
         assert_eq!(status.position, Duration::ZERO);
         assert_eq!(status.volume, 1.0);
         assert!(!status.muted);
+    }
+
+    #[test]
+    fn is_video_default_false() {
+        let engine = PlaybackEngine::new(EngineConfig::default());
+        assert!(!engine.is_video());
+    }
+
+    #[test]
+    fn take_video_frame_none_without_video() {
+        let engine = PlaybackEngine::new(EngineConfig::default());
+        assert!(engine.take_video_frame().is_none());
+    }
+
+    #[test]
+    fn stop_clears_video_state() {
+        let mut engine = PlaybackEngine::new(EngineConfig::default());
+        engine.is_video = true;
+        engine.stop();
+        assert!(!engine.is_video());
+        assert!(engine.video_frame_rx.is_none());
+    }
+
+    #[test]
+    fn take_video_frame_drains_to_latest() {
+        let engine = PlaybackEngine::new(EngineConfig::default());
+        // Without a video frame channel, should return None
+        assert!(engine.take_video_frame().is_none());
+
+        // With a channel, should drain to latest
+        let (tx, rx) = mpsc::sync_channel(8);
+        let mut engine2 = PlaybackEngine::new(EngineConfig::default());
+        engine2.video_frame_rx = Some(rx);
+
+        // Send multiple frames
+        for i in 0..3 {
+            let _ = tx.send(DisplayFrame {
+                data: vec![i as u8; 12],
+                width: 2,
+                height: 2,
+                pts: Duration::from_millis(i * 33),
+            });
+        }
+
+        // Should get the latest frame (pts = 66ms)
+        let frame = engine2.take_video_frame().unwrap();
+        assert_eq!(frame.pts, Duration::from_millis(66));
     }
 }
 

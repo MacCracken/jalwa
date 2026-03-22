@@ -1,6 +1,6 @@
 [package]
 name = "jalwa-ai"
-version = "2026.3.19"
+version = "2026.3.22"
 edition = "2024"
 description = "AI features for Jalwa — smart playlists, recommendations, transcription routing via hoosh"
 license = "GPL-3.0"
