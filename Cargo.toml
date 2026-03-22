@@ -53,6 +53,12 @@ tarang = { version = "0.20.3", default-features = false }
 # Audio engine
 dhvani = { version = "0.20.4", default-features = false, features = ["dsp", "analysis", "simd"] }
 
+# Media compositing (video surface, scene graph, HW-accelerated encoding)
+aethersafta = { version = "0.21.3", default-features = false, features = ["pipewire", "hwaccel"] }
+
+# Hardware accelerator detection
+ai-hwaccel = { version = "0.21.3", default-features = false }
+
 [package]
 name = "jalwa"
 version = "2026.3.19"

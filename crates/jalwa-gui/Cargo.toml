@@ -14,6 +14,7 @@ image = { workspace = true }
 lofty = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
+aethersafta = { workspace = true }
 
 [dev-dependencies]
 uuid = { workspace = true }

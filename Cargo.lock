@@ -25,6 +25,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "aethersafta"
+version = "0.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "951cd1a0cb867e88fae07c1ef7ab778701219a6a2fb7be88b0bbee1bf8630f97"
+dependencies = [
+ "ai-hwaccel",
+ "anyhow",
+ "bytes",
+ "chrono",
+ "clap",
+ "dhvani 0.21.4",
+ "image",
+ "ranga",
+ "serde",
+ "serde_json",
+ "tarang 0.21.3",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -44,6 +68,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "ai-hwaccel"
+version = "0.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cf22beab2a92f753d3f02c3341d063729c115deeb29965152e6ebd3a62debb6"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -988,6 +1023,18 @@ version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30899697e7cb3446a0efba14a17077ebfd355c86d2564293a45dd172e5c625c0"
 dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "dhvani"
+version = "0.21.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8aa3c37adb58f044dd1fb56feeb59dcc13fcbe6b29f7397d5c01c3a7344504f1"
+dependencies = [
+ "pipewire",
  "serde",
  "thiserror 2.0.18",
  "tracing",
@@ -2165,7 +2212,7 @@ dependencies = [
  "jalwa-ui",
  "libc",
  "serde_json",
- "tarang",
+ "tarang 0.20.3",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2185,7 +2232,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "tarang",
+ "tarang 0.20.3",
  "thiserror 2.0.18",
  "tracing",
  "uuid",
@@ -2202,7 +2249,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "tarang",
+ "tarang 0.20.3",
  "thiserror 2.0.18",
  "tracing",
  "uuid",
@@ -2213,6 +2260,7 @@ dependencies = [
 name = "jalwa-gui"
 version = "2026.3.19"
 dependencies = [
+ "aethersafta",
  "eframe",
  "egui",
  "image",
@@ -2227,12 +2275,13 @@ dependencies = [
 name = "jalwa-playback"
 version = "2026.3.19"
 dependencies = [
+ "ai-hwaccel",
  "bytemuck",
  "bytes",
  "criterion",
- "dhvani",
+ "dhvani 0.20.4",
  "jalwa-core",
- "tarang",
+ "tarang 0.20.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2249,7 +2298,7 @@ dependencies = [
  "jalwa-core",
  "jalwa-playback",
  "ratatui",
- "tarang",
+ "tarang 0.20.3",
  "thiserror 2.0.18",
  "tracing",
  "uuid",
@@ -3620,6 +3669,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ranga"
+version = "0.21.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "795e7e4dc0e7d12b923cc2bc8b0043e5b9c2c15daf62aa8cd5639f9d515e3301"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "ratatui"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4655,6 +4716,29 @@ dependencies = [
  "clap",
  "image",
  "pipewire",
+ "reqwest 0.13.2",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "symphonia",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "tarang"
+version = "0.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e913a8a894fe60e48ce284be2e602ef5bd37c9b53ebcd19c7014970fe6c06e7b"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "clap",
+ "image",
  "reqwest 0.13.2",
  "rustfft",
  "serde",

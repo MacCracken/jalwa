@@ -33,14 +33,29 @@
 
 ## Phase 6 — Video Playback (v2) — *planned, not started*
 > **Prerequisites met**: tarang-video now has full decode/encode for AV1, H.264, VP8/VP9.
-> Blocked on aethersafha Wayland surface integration.
+> Uses **aethersafta** for compositing, scene graph, and hardware-accelerated rendering.
 
+- [ ] aethersafta integration: scene graph for video surface within egui window
 - [ ] tarang-video decode integration (dav1d, openh264, libvpx)
-- [ ] Wayland surface for video output (via aethersafha)
-- [ ] Subtitle rendering (SRT, VTT, ASS)
-- [ ] Audio/video sync
+- [ ] Hardware-accelerated encode/decode via aethersafta `vaapi` / `hwaccel` features
+- [ ] Wayland video surface output (via aethersafta PipeWire + compositing pipeline)
+- [ ] Subtitle rendering (SRT, VTT, ASS) composited as scene graph overlay
+- [ ] Audio/video sync (aethersafta capture timing + dhvani PipeWire output)
+- [ ] Audio visualizer overlay via aethersafta scene graph
 
-## Phase 7 — Desktop UI
+## Phase 7 — Hardware Media Sources
+> **Blocked on**: **yantra** (AGNOS hardware device crate) (udev, hotplug, optical drive abstraction — built at AGNOS level, consumed here).
+> Also leverages **ai-hwaccel** for hardware-accelerated I/O.
+
+- [ ] Integrate **yantra** (AGNOS hardware device crate) when available
+- [ ] USB storage auto-detect: subscribe to device events, auto-add mount as scan path
+- [ ] USB hotplug: detect insert/eject, prompt to scan or eject safely
+- [ ] CD audio (CDDA) playback: read audio tracks from optical drives
+- [ ] DVD/Blu-ray disc browsing and playback (UDF/ISO 9660)
+- [ ] ai-hwaccel integration for hardware-accelerated disc I/O
+- [ ] Graceful handling of device removal during playback
+
+## Phase 8 — Desktop UI
 - [ ] Playlist editor
 - [ ] System tray / notification integration
 
@@ -54,4 +69,4 @@
 - [ ] Marketplace recipe
 - [ ] MCP tools registered in daimon
 - [ ] agnoshi intents ("play music", "next track", "search library")
-- [ ] aethersafha media widget (mini player in compositor panel)
+- [ ] aethersafta media widget (mini player in compositor panel)

@@ -20,6 +20,7 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
 zbus = { workspace = true }
+ai-hwaccel = { workspace = true }
 
 [dev-dependencies]
 uuid = { workspace = true }
