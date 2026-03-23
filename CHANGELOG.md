@@ -1,5 +1,79 @@
 # Changelog
 
+## 2026.3.22
+
+Hardware device integration, full engineering backlog resolution, and audit/refactoring pass.
+
+### Phase 7 — Hardware Media Sources (complete)
+- Integrated **yukti 0.22.3** (AGNOS device abstraction layer) for USB, optical, and udev hotplug
+- New `jalwa-core::hardware` module: `HardwareManager` wraps yukti with media-player-specific events
+- USB auto-detect: mounted USB storage emits `UsbMounted` event, auto-adds mount point as scan path
+- Optical drives: disc insert/eject detection, TOC reading (`read_toc`), tray control (`open_tray`/`close_tray`)
+- Hotplug: raw udev events translated to `HardwareEvent` variants (UsbMounted, UsbRemoved, DiscInserted, DiscEjected, PlaybackDeviceRemoved, DeviceError)
+- Graceful device removal: detects when a playing device is removed, stops playback and notifies UI
+- `is_on_removable_device()` helper for checking file paths against mounted devices
+- New CLI command: `jalwa devices` lists detected USB storage and optical drives
+- New GUI view: Devices panel in sidebar with hardware notifications and device listing
+
+### Playback engine refactoring
+- `Arc<Mutex<DecodeStatus>>` replaced with `Arc<RwLock<DecodeStatus>>` — readers no longer block the decode thread
+- Engine command channel changed from unbounded to `sync_channel(32)` with backpressure
+- `state()` now reads from RwLock instead of stale local field
+- Decode errors: skip up to 10 consecutive bad frames before stopping (was: stop immediately)
+- PipeWire output: retry once on write failure before giving up (was: fail immediately)
+- `smooth_gain` reset on seek to prevent normalization artifacts
+- New `PrepareNextFailed(String)` event for gapless transition errors (was: silent drop)
+- Paused decode thread uses `recv_timeout(1s)` instead of indefinite blocking
+- Section-header comments added to the 250-line `decode_loop()` function
+
+### Scanner + database improvements
+- Scanner WalkDir capped at `max_depth(20)` to prevent symlink loop infinite traversal
+- New `ScanResult` struct returns `files`, `errors`, and `dirs_walked` (was: just `Vec<ScannedFile>`)
+- DB error messages include table/operation context (e.g. "prepare media_items select" instead of "prepare")
+- Unknown codec fallback values now log `tracing::warn!`
+
+### TUI improvements
+- Engine errors shown in status bar as `[ERR: message]` in bold red, auto-clears after 5 seconds
+- "Library is empty" help text shown when no items
+- Search query input capped at 256 characters
+- EQ band access via `.get()` for bounds safety
+
+### GUI improvements
+- Search results use `std::mem::take` instead of `.clone()` per frame — zero-cost move
+- `no_art` HashSet clears at 1000 entries to prevent unbounded memory growth
+- EQ band access via `.get().copied().unwrap_or(0.0)` for bounds safety
+
+### MCP + DSP fixes
+- Malformed JSON input now returns proper JSON-RPC `-32700` parse error response (was: silently skipped)
+- `chunks_exact(4)` guarded with alignment check and `tracing::warn!` on non-aligned buffers
+
+### Production safety
+- 3 `.unwrap()` calls removed from production code (video_decode_thread, PlaybackEngine)
+- PlayQueue `advance()`/`go_back()` use `.get()` instead of direct indexing
+- `detect_optical_type()` correctly maps iso9660 to CdData, udf to DvdRom
+- MPRIS server probes channel every 5s and shuts down cleanly when receiver drops
+- `#[inline]` on trivial getters (`is_audio`, `is_video`, `current`, `len`, `is_empty`, `progress`)
+
+### Testing
+- 411 tests (was 337), +74 new tests (+22%)
+- 7 new integration tests in `tests/integration.rs` (hardware lifecycle, library persistence, playlist I/O)
+- 6 new playlist_io tests (roundtrip, empty, comments, nonexistent, creates file, empty playlist)
+- 27 unit tests in `hardware.rs`
+- Tests for TUI error display, search cap, MPRIS shutdown, optical detection, DSP alignment
+
+### Benchmarks
+- 18 benchmarks across 4 suites (was 6 across 2)
+- New `benches/hardware.rs`: event processing, device lookup, removable device check, display formatting
+- New `benches/video.rs`: frame creation, clone, RGB conversion at 720p and 1080p
+
+### Infrastructure
+- `VERSION` bumped to 2026.3.22
+- `Makefile` expanded: audit, deny, coverage, doc targets; `check` = fmt + clippy + test + audit
+- `scripts/bench-history.sh`: CSV benchmark tracking + 3-point trend markdown generation
+- `scripts/version-bump.sh`: version sync across workspace
+- Engineering backlog from 2026-03-19 audit: 23 of 25 items resolved, completed items removed from roadmap
+- Phase 7 items removed from roadmap (complete)
+
 ## 2026.3.19
 
 Tarang crates.io migration, aarch64 build fix, and full security/performance audit.
