@@ -79,7 +79,7 @@ tarang = [
     "jalwa-ui/tarang",
 ]
 pipewire = ["jalwa-playback/pipewire"]
-video = ["jalwa-playback/video"]
+video = ["jalwa-playback/video", "jalwa-gui/aethersafta"]
 yukti = ["jalwa-core/yukti", "jalwa-gui/yukti"]
 
 [dependencies]

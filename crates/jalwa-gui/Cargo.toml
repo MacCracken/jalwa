@@ -8,6 +8,7 @@ license = "GPL-3.0"
 [features]
 default = []
 yukti = ["jalwa-core/yukti"]
+aethersafta = ["dep:aethersafta"]
 
 [dependencies]
 jalwa-core = { path = "../jalwa-core" }
@@ -18,7 +19,7 @@ image = { workspace = true }
 lofty = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
-aethersafta = { workspace = true }
+aethersafta = { workspace = true, optional = true }
 
 [dev-dependencies]
 uuid = { workspace = true }
