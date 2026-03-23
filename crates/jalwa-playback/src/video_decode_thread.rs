@@ -61,15 +61,21 @@ pub fn video_decode_loop(
         }
     };
 
-    let reader = std::io::BufReader::new(file);
-
-    // Read magic bytes for format detection
+    // Read magic bytes for format detection, then reopen for demuxing
     let mut header = [0u8; 16];
     {
         use std::io::Read;
-        let mut r = std::io::BufReader::new(std::fs::File::open(&path).unwrap());
+        let mut r = std::io::BufReader::new(file);
         let _ = r.read(&mut header);
     }
+
+    let reader = match std::fs::File::open(&path) {
+        Ok(f) => std::io::BufReader::new(f),
+        Err(e) => {
+            let _ = event_tx.send(EngineEvent::Error(format!("video reopen: {e}")));
+            return;
+        }
+    };
 
     let format = match tarang::demux::detect_format(&header) {
         Ok(f) => f,

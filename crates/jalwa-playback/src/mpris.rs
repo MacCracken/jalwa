@@ -18,6 +18,8 @@ pub enum MprisCommand {
     Previous,
     Seek(f64),      // offset in seconds
     SetVolume(f64), // 0.0..1.0
+    /// Internal keep-alive probe — ignored by command handlers.
+    Noop,
 }
 
 /// Spawn the MPRIS2 D-Bus server on a background tokio task.
@@ -50,6 +52,8 @@ fn run_mpris_server(
     rt.block_on(async move {
         let conn = zbus::Connection::session().await?;
 
+        // Keep a probe sender to detect when the receiver is dropped.
+        let probe_tx = tx.clone();
         let player = MprisPlayer { cmd_tx: tx, state };
         let root = MprisRoot;
 
@@ -64,10 +68,19 @@ fn run_mpris_server(
             zbus::names::WellKnownName::try_from("org.mpris.MediaPlayer2.jalwa").unwrap();
         conn.request_name(bus_name).await?;
 
-        // Keep running until sender side is dropped
+        // Keep the D-Bus connection alive until the receiver is dropped
+        // (i.e. the application is shutting down). We detect this by
+        // periodically probing the channel; once the receiver is gone,
+        // `send()` returns `Err` and we break out cleanly.
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            if probe_tx.send(MprisCommand::Noop).is_err() {
+                tracing::debug!("MPRIS receiver dropped, shutting down server");
+                break;
+            }
         }
+
+        Ok(())
     })
 }
 
@@ -220,8 +233,9 @@ mod tests {
             MprisCommand::Previous,
             MprisCommand::Seek(10.0),
             MprisCommand::SetVolume(0.5),
+            MprisCommand::Noop,
         ];
-        assert_eq!(cmds.len(), 7);
+        assert_eq!(cmds.len(), 8);
     }
 
     #[test]

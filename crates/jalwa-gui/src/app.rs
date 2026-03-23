@@ -227,6 +227,7 @@ impl GuiApp {
                 MprisCommand::SetVolume(vol) => {
                     self.engine.set_volume(vol as f32);
                 }
+                MprisCommand::Noop => {}
             }
         }
     }

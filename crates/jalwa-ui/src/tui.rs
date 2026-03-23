@@ -200,6 +200,7 @@ fn handle_mpris_command(app: &mut App, cmd: &MprisCommand, current_id: &mut Opti
         MprisCommand::SetVolume(vol) => {
             app.engine.set_volume(*vol as f32);
         }
+        MprisCommand::Noop => {}
     }
 }
 

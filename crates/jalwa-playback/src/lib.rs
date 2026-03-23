@@ -130,7 +130,10 @@ impl PlaybackEngine {
         };
 
         // Only MP4 and MKV/WebM can contain video
-        let reader = std::io::BufReader::new(std::fs::File::open(path).unwrap());
+        let Ok(reopen) = std::fs::File::open(path) else {
+            return false;
+        };
+        let reader = std::io::BufReader::new(reopen);
         let mut demuxer: Box<dyn tarang::demux::Demuxer> = match format {
             tarang::core::ContainerFormat::Mp4 => Box::new(tarang::demux::Mp4Demuxer::new(reader)),
             tarang::core::ContainerFormat::Mkv => Box::new(tarang::demux::MkvDemuxer::new(reader)),
@@ -193,7 +196,10 @@ impl PlaybackEngine {
 
         #[cfg(feature = "tarang")]
         {
-            let path = self.current_path.clone().unwrap();
+            let path = self
+                .current_path
+                .clone()
+                .expect("current_path checked at function entry");
             let (cmd_tx, cmd_rx) = mpsc::sync_channel(32);
             let status = Arc::new(RwLock::new(DecodeStatus::default()));
             let status_clone = status.clone();

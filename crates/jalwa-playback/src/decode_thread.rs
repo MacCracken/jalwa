@@ -137,7 +137,9 @@ pub fn decode_loop(
     const MAX_CONSECUTIVE_ERRORS: u32 = 10;
 
     loop {
-        // Handle commands (non-blocking when playing, blocking when paused)
+        // -------------------------------------------------------------------
+        // Section: Command dispatch
+        // -------------------------------------------------------------------
         loop {
             let cmd = if paused {
                 match cmd_rx.recv_timeout(Duration::from_secs(1)) {
@@ -216,7 +218,9 @@ pub fn decode_loop(
             }
         }
 
-        // Decode next buffer
+        // -------------------------------------------------------------------
+        // Section: Decode step
+        // -------------------------------------------------------------------
         let buf = match decoder.next_buffer() {
             Ok(b) => {
                 consecutive_errors = 0;
@@ -247,6 +251,11 @@ pub fn decode_loop(
                 continue;
             }
         };
+
+        // -------------------------------------------------------------------
+        // Section: Audio processing pipeline (resample, channel mix, EQ,
+        //          normalization, volume)
+        // -------------------------------------------------------------------
 
         // Resample if needed
         let buf = if buf.sample_rate != config.sample_rate {
@@ -298,7 +307,9 @@ pub fn decode_loop(
             apply_volume_in_place(&mut buf, gain);
         }
 
-        // Update status
+        // -------------------------------------------------------------------
+        // Section: Status update
+        // -------------------------------------------------------------------
         if let Ok(mut s) = status.write() {
             s.state = jalwa_core::PlaybackState::Playing;
             s.position = buf.timestamp;
@@ -306,7 +317,9 @@ pub fn decode_loop(
             s.muted = muted;
         }
 
-        // Check near-end for gapless prebuffer hint
+        // -------------------------------------------------------------------
+        // Section: Near-end / gapless transition check
+        // -------------------------------------------------------------------
         if !near_end_sent
             && let Some(dur) = duration
             && dur.as_secs_f64() - buf.timestamp.as_secs_f64() < 2.0
@@ -315,7 +328,9 @@ pub fn decode_loop(
             near_end_sent = true;
         }
 
-        // Write to output — retry once on failure (e.g. PipeWire reconnect)
+        // -------------------------------------------------------------------
+        // Section: Output write (PipeWire)
+        // -------------------------------------------------------------------
         if let Err(e) = output.write(&buf) {
             let _ = event_tx.send(EngineEvent::Error(format!("output write: {e}, retrying")));
             let _ = output.close();

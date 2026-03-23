@@ -142,10 +142,12 @@ impl MediaItem {
         }
     }
 
+    #[inline]
     pub fn is_audio(&self) -> bool {
         self.media_type == MediaType::Audio
     }
 
+    #[inline]
     pub fn is_video(&self) -> bool {
         self.media_type == MediaType::Video
     }
@@ -209,10 +211,12 @@ impl Playlist {
         }
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
@@ -257,6 +261,7 @@ impl PlayQueue {
         }
     }
 
+    #[inline]
     pub fn current(&self) -> Option<Uuid> {
         self.position.and_then(|p| self.items.get(p).copied())
     }
@@ -264,12 +269,13 @@ impl PlayQueue {
     pub fn advance(&mut self) -> Option<Uuid> {
         let pos = self.position?;
         let next = pos + 1;
-        if next < self.items.len() {
+        if let Some(&id) = self.items.get(next) {
             self.position = Some(next);
-            Some(self.items[next])
-        } else if self.repeat_mode == RepeatMode::All && !self.items.is_empty() {
+            Some(id)
+        } else if self.repeat_mode == RepeatMode::All {
+            let id = *self.items.first()?;
             self.position = Some(0);
-            Some(self.items[0])
+            Some(id)
         } else {
             None
         }
@@ -278,12 +284,15 @@ impl PlayQueue {
     pub fn go_back(&mut self) -> Option<Uuid> {
         let pos = self.position?;
         if pos > 0 {
-            self.position = Some(pos - 1);
-            Some(self.items[pos - 1])
-        } else if self.repeat_mode == RepeatMode::All && !self.items.is_empty() {
-            let last = self.items.len() - 1;
+            let prev = pos - 1;
+            let id = *self.items.get(prev)?;
+            self.position = Some(prev);
+            Some(id)
+        } else if self.repeat_mode == RepeatMode::All {
+            let last = self.items.len().checked_sub(1)?;
+            let id = *self.items.get(last)?;
             self.position = Some(last);
-            Some(self.items[last])
+            Some(id)
         } else {
             None
         }
@@ -294,10 +303,12 @@ impl PlayQueue {
         self.position = None;
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
@@ -380,6 +391,7 @@ impl PlaybackStatus {
         }
     }
 
+    #[inline]
     pub fn progress(&self) -> Option<f64> {
         self.duration
             .filter(|d| !d.is_zero())

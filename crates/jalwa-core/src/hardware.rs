@@ -416,11 +416,15 @@ fn is_media_relevant(info: &DeviceInfo) -> bool {
 }
 
 /// Detect optical disc type from device info and filesystem.
+///
+/// Maps filesystem types to disc types since yukti's `detect_disc_type`
+/// expects media type strings (e.g. "cd", "dvd") not filesystem names.
 fn detect_optical_type(info: &DeviceInfo) -> yukti::optical::DiscType {
-    if let Some(fs) = &info.fs_type {
-        yukti::optical::detect_disc_type(fs, false, true)
-    } else {
-        yukti::optical::DiscType::Unknown
+    match info.fs_type.as_deref() {
+        Some("iso9660") => yukti::optical::DiscType::CdData,
+        Some("udf") => yukti::optical::DiscType::DvdRom,
+        Some(other) => yukti::optical::detect_disc_type(other, false, true),
+        None => yukti::optical::DiscType::Unknown,
     }
 }
 
@@ -685,6 +689,24 @@ mod tests {
         info.fs_type = Some("iso9660".into());
         let dt = detect_optical_type(&info);
         assert_eq!(dt, yukti::optical::DiscType::CdData);
+    }
+
+    #[test]
+    fn detect_optical_type_udf() {
+        let mut info = make_optical_device("sr0", true);
+        info.fs_type = Some("udf".into());
+        let dt = detect_optical_type(&info);
+        assert_eq!(dt, yukti::optical::DiscType::DvdRom);
+    }
+
+    #[test]
+    fn detect_optical_type_unknown_fs() {
+        let mut info = make_optical_device("sr0", true);
+        info.fs_type = Some("ntfs".into());
+        let dt = detect_optical_type(&info);
+        // Unknown/unrecognized filesystem falls through to yukti's detect_disc_type
+        // which returns Unknown for non-media-type strings
+        assert_eq!(dt, yukti::optical::DiscType::Unknown);
     }
 
     #[test]
