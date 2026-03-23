@@ -125,15 +125,34 @@ impl Equalizer {
 /// If the underlying `Bytes` is not 4-byte aligned we copy into an
 /// aligned temporary. The returned `Cow` avoids the copy when alignment
 /// is already correct (the common path).
+///
+/// # Alignment requirement
+///
+/// Each f32 sample occupies 4 bytes, so `buf.data.len()` must be a
+/// multiple of 4. If a corrupted or partial buffer has trailing bytes
+/// that don't form a complete f32, those bytes are silently truncated
+/// (equivalent to `chunks_exact` ignoring the remainder).
 #[cfg(feature = "tarang")]
 pub(crate) fn buf_to_f32_safe(buf: &AudioBuffer) -> std::borrow::Cow<'_, [f32]> {
     if buf.data.is_empty() {
         return std::borrow::Cow::Borrowed(&[]);
     }
+
+    // Guard: if the buffer length is not 4-byte aligned, log a warning.
+    // Trailing bytes that don't form a complete f32 sample are truncated.
+    if !buf.data.len().is_multiple_of(4) {
+        tracing::warn!(
+            "AudioBuffer has {} bytes which is not 4-byte aligned; \
+             truncating {} trailing byte(s) for f32 conversion",
+            buf.data.len(),
+            buf.data.len() % 4,
+        );
+    }
+
     match bytemuck::try_cast_slice::<u8, f32>(&buf.data) {
         Ok(s) => std::borrow::Cow::Borrowed(s),
         Err(_) => {
-            // Fallback: copy into an aligned Vec
+            // Fallback: copy into an aligned Vec, truncating any trailing bytes
             let n = buf.data.len() / 4;
             let mut out = vec![0.0f32; n];
             for (i, chunk) in buf.data.chunks_exact(4).enumerate() {
@@ -437,5 +456,48 @@ mod tarang_tests {
     fn rms(samples: &[f32]) -> f32 {
         let sum: f64 = samples.iter().map(|s| (*s as f64) * (*s as f64)).sum();
         (sum / samples.len() as f64).sqrt() as f32
+    }
+
+    // ---- Buffer alignment guard tests ----
+
+    #[test]
+    fn buf_to_f32_aligned_buffer() {
+        // 8 bytes = exactly 2 f32 samples -- should work without issues
+        let samples = [0.5f32, -0.25f32];
+        let buf = make_buf(&samples, 1, 44100);
+        let result = buf_to_f32_safe(&buf);
+        assert_eq!(result.len(), 2);
+        assert!((result[0] - 0.5).abs() < f32::EPSILON);
+        assert!((result[1] - (-0.25)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn buf_to_f32_unaligned_buffer_truncates() {
+        // Construct a buffer with 5 bytes (not a multiple of 4).
+        // The guard should truncate the trailing byte and return 1 f32 sample.
+        let sample = 0.75f32;
+        let mut raw_bytes = sample.to_ne_bytes().to_vec();
+        raw_bytes.push(0xAB); // extra trailing byte
+        assert_eq!(raw_bytes.len(), 5);
+
+        let buf = AudioBuffer {
+            data: Bytes::from(raw_bytes),
+            sample_format: SampleFormat::F32,
+            channels: 1,
+            sample_rate: 44100,
+            num_frames: 1,
+            timestamp: Duration::ZERO,
+        };
+        let result = buf_to_f32_safe(&buf);
+        // Should have truncated the trailing byte, yielding 1 sample
+        assert_eq!(result.len(), 1);
+        assert!((result[0] - 0.75).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn buf_to_f32_empty_buffer() {
+        let buf = make_buf(&[], 1, 44100);
+        let result = buf_to_f32_safe(&buf);
+        assert!(result.is_empty());
     }
 }

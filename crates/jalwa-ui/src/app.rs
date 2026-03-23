@@ -1,5 +1,7 @@
 //! Application state for the interactive TUI.
 
+use std::time::Instant;
+
 use jalwa_core::PlayQueue;
 use jalwa_core::db::PersistentLibrary;
 use jalwa_playback::PlaybackEngine;
@@ -42,6 +44,10 @@ pub struct App {
     pub search_results: Vec<usize>,
     pub input_mode: InputMode,
     pub running: bool,
+    /// Latest engine error message, cleared after 5 seconds or on next successful event.
+    pub last_error: Option<String>,
+    /// When the last error was recorded.
+    pub last_error_at: Option<Instant>,
 }
 
 impl App {
@@ -56,6 +62,8 @@ impl App {
             search_results: Vec::new(),
             input_mode: InputMode::Normal,
             running: true,
+            last_error: None,
+            last_error_at: None,
         }
     }
 
@@ -120,6 +128,28 @@ impl App {
         if self.selected_index >= self.search_results.len() && !self.search_results.is_empty() {
             self.selected_index = self.search_results.len() - 1;
         }
+    }
+
+    /// Set an engine error message.
+    pub fn set_error(&mut self, msg: String) {
+        self.last_error = Some(msg);
+        self.last_error_at = Some(Instant::now());
+    }
+
+    /// Clear the error if it has expired (older than 5 seconds).
+    pub fn clear_stale_error(&mut self) {
+        if let Some(at) = self.last_error_at
+            && at.elapsed() >= std::time::Duration::from_secs(5)
+        {
+            self.last_error = None;
+            self.last_error_at = None;
+        }
+    }
+
+    /// Clear the error immediately (on successful event).
+    pub fn clear_error(&mut self) {
+        self.last_error = None;
+        self.last_error_at = None;
     }
 
     /// Get the library index for the currently selected item.
@@ -307,5 +337,39 @@ mod tests {
         let mut app = make_test_app();
         app.view = View::Queue;
         assert_eq!(app.selected_library_index(), None);
+    }
+
+    #[test]
+    fn set_error_stores_message() {
+        let mut app = make_test_app();
+        assert!(app.last_error.is_none());
+        app.set_error("decoder failed".to_string());
+        assert_eq!(app.last_error.as_deref(), Some("decoder failed"));
+        assert!(app.last_error_at.is_some());
+    }
+
+    #[test]
+    fn clear_error_removes_message() {
+        let mut app = make_test_app();
+        app.set_error("some error".to_string());
+        app.clear_error();
+        assert!(app.last_error.is_none());
+        assert!(app.last_error_at.is_none());
+    }
+
+    #[test]
+    fn clear_stale_error_keeps_fresh() {
+        let mut app = make_test_app();
+        app.set_error("fresh error".to_string());
+        app.clear_stale_error();
+        // Error is fresh, should not be cleared
+        assert!(app.last_error.is_some());
+    }
+
+    #[test]
+    fn app_new_has_no_error() {
+        let app = make_test_app();
+        assert!(app.last_error.is_none());
+        assert!(app.last_error_at.is_none());
     }
 }

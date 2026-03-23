@@ -39,6 +39,9 @@ pub fn run(mut app: App) -> io::Result<()> {
     let mut current_playing_id: Option<uuid::Uuid> = None;
 
     while app.running {
+        // Clear stale error messages (older than 5 seconds)
+        app.clear_stale_error();
+
         // Draw
         terminal.draw(|frame| {
             widgets::render(frame, &app);
@@ -49,6 +52,7 @@ pub fn run(mut app: App) -> io::Result<()> {
         for ev in &events {
             match ev {
                 EngineEvent::TrackFinished => {
+                    app.clear_error();
                     // Update play count for finished track
                     if let Some(id) = current_playing_id.take() {
                         let _ = app.library.update_play_count(id);
@@ -64,6 +68,7 @@ pub fn run(mut app: App) -> io::Result<()> {
                     }
                 }
                 EngineEvent::TrackChanged => {
+                    app.clear_error();
                     // Gapless transition — update play count for previous track
                     if let Some(id) = current_playing_id.take() {
                         let _ = app.library.update_play_count(id);
@@ -80,6 +85,9 @@ pub fn run(mut app: App) -> io::Result<()> {
                     {
                         app.engine.prepare_next(&item.path);
                     }
+                }
+                EngineEvent::Error(msg) => {
+                    app.set_error(msg.clone());
                 }
                 _ => {}
             }
@@ -98,10 +106,10 @@ pub fn run(mut app: App) -> io::Result<()> {
                         // Auto-add new media files to library (requires tarang feature)
                         #[cfg(feature = "tarang")]
                         if app.library.library.find_by_path(&path).is_none()
-                            && let Ok(scanned) =
+                            && let Ok(scan_result) =
                                 jalwa_core::scanner::scan_directory(path.parent().unwrap_or(&path))
                         {
-                            for s in scanned {
+                            for s in scan_result.files {
                                 if s.path == path {
                                     let item = jalwa_core::scanner::scanned_to_media_item(s);
                                     let _ = app.library.add_item(item);
@@ -397,9 +405,11 @@ fn handle_search_input(app: &mut App, key: KeyCode) {
             app.selected_index = 0;
         }
         KeyCode::Char(c) => {
-            app.search_query.push(c);
-            app.update_search();
-            app.selected_index = 0;
+            if app.search_query.len() < 256 {
+                app.search_query.push(c);
+                app.update_search();
+                app.selected_index = 0;
+            }
         }
         KeyCode::Up => app.select_prev(),
         KeyCode::Down => app.select_next(),
@@ -718,5 +728,31 @@ mod tests {
         let mut current_id = None;
         handle_mpris_command(&mut app, &MprisCommand::Previous, &mut current_id);
         assert!(current_id.is_none());
+    }
+
+    // ---- search query cap tests ----
+
+    #[test]
+    fn search_input_caps_at_256_chars() {
+        let mut app = make_test_app();
+        app.input_mode = InputMode::Search;
+        // Fill query to exactly 256 characters
+        app.search_query = "a".repeat(256);
+
+        handle_search_input(&mut app, KeyCode::Char('x'));
+        assert_eq!(app.search_query.len(), 256);
+        // The extra char should be ignored
+        assert!(!app.search_query.contains('x'));
+    }
+
+    #[test]
+    fn search_input_allows_under_256() {
+        let mut app = make_test_app();
+        app.input_mode = InputMode::Search;
+        app.search_query = "a".repeat(255);
+
+        handle_search_input(&mut app, KeyCode::Char('z'));
+        assert_eq!(app.search_query.len(), 256);
+        assert!(app.search_query.ends_with('z'));
     }
 }

@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 #[cfg(feature = "tarang")]
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, RwLock, mpsc};
 use std::time::Duration;
 
 #[cfg(feature = "tarang")]
@@ -49,6 +49,7 @@ pub enum EngineEvent {
     TrackChanged,
     NearEnd,
     Error(String),
+    PrepareNextFailed(String),
 }
 
 /// Snapshot of decode‐thread state, published via `watch`.
@@ -91,7 +92,7 @@ pub(crate) fn create_audio_output() -> Box<dyn AudioOutput> {
 pub fn decode_loop(
     path: PathBuf,
     cmd_rx: mpsc::Receiver<EngineCommand>,
-    status: Arc<Mutex<DecodeStatus>>,
+    status: Arc<RwLock<DecodeStatus>>,
     event_tx: mpsc::Sender<EngineEvent>,
     config: EngineConfig,
     duration: Option<Duration>,
@@ -132,14 +133,19 @@ pub fn decode_loop(
 
     // Pre-buffered next track for gapless
     let mut next_decoder: Option<FileDecoder> = None;
+    let mut consecutive_errors: u32 = 0;
+    const MAX_CONSECUTIVE_ERRORS: u32 = 10;
 
     loop {
         // Handle commands (non-blocking when playing, blocking when paused)
         loop {
             let cmd = if paused {
-                match cmd_rx.recv() {
+                match cmd_rx.recv_timeout(Duration::from_secs(1)) {
                     Ok(c) => Some(c),
-                    Err(_) => {
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
                         let _ = output.flush();
                         let _ = output.close();
                         return;
@@ -162,7 +168,7 @@ pub fn decode_loop(
                     paused = true;
                     let _ =
                         event_tx.send(EngineEvent::StateChanged(jalwa_core::PlaybackState::Paused));
-                    if let Ok(mut s) = status.lock() {
+                    if let Ok(mut s) = status.write() {
                         s.state = jalwa_core::PlaybackState::Paused;
                         s.volume = volume;
                         s.muted = muted;
@@ -182,6 +188,8 @@ pub fn decode_loop(
                     }
                     // Reset EQ filter state to prevent transient click from stale samples
                     equalizer.reset();
+                    // Reset gain smoother to avoid normalization artifacts after seek
+                    smooth_gain.reset(1.0);
                     break;
                 }
                 Some(EngineCommand::Volume(v)) => {
@@ -193,7 +201,8 @@ pub fn decode_loop(
                 Some(EngineCommand::PrepareNext { path }) => match FileDecoder::open_path(&path) {
                     Ok(d) => next_decoder = Some(d),
                     Err(e) => {
-                        let _ = event_tx.send(EngineEvent::Error(format!("prepare next: {e}")));
+                        let _ = event_tx
+                            .send(EngineEvent::PrepareNextFailed(format!("prepare next: {e}")));
                     }
                 },
                 Some(EngineCommand::EqUpdate(settings)) => {
@@ -209,7 +218,10 @@ pub fn decode_loop(
 
         // Decode next buffer
         let buf = match decoder.next_buffer() {
-            Ok(b) => b,
+            Ok(b) => {
+                consecutive_errors = 0;
+                b
+            }
             Err(TarangError::EndOfStream) => {
                 // Try gapless transition
                 if let Some(next) = next_decoder.take() {
@@ -225,10 +237,14 @@ pub fn decode_loop(
                 return;
             }
             Err(e) => {
+                consecutive_errors += 1;
                 let _ = event_tx.send(EngineEvent::Error(format!("decode: {e}")));
-                let _ = output.flush();
-                let _ = output.close();
-                return;
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    let _ = output.flush();
+                    let _ = output.close();
+                    return;
+                }
+                continue;
             }
         };
 
@@ -283,7 +299,7 @@ pub fn decode_loop(
         }
 
         // Update status
-        if let Ok(mut s) = status.lock() {
+        if let Ok(mut s) = status.write() {
             s.state = jalwa_core::PlaybackState::Playing;
             s.position = buf.timestamp;
             s.volume = volume;
@@ -299,11 +315,22 @@ pub fn decode_loop(
             near_end_sent = true;
         }
 
-        // Write to output
+        // Write to output — retry once on failure (e.g. PipeWire reconnect)
         if let Err(e) = output.write(&buf) {
-            let _ = event_tx.send(EngineEvent::Error(format!("output write: {e}")));
+            let _ = event_tx.send(EngineEvent::Error(format!("output write: {e}, retrying")));
             let _ = output.close();
-            return;
+            output = create_audio_output();
+            if let Err(e2) = output.open(&out_config) {
+                let _ = event_tx.send(EngineEvent::Error(format!("audio reopen failed: {e2}")));
+                return;
+            }
+            if let Err(e2) = output.write(&buf) {
+                let _ = event_tx.send(EngineEvent::Error(format!(
+                    "output write retry failed: {e2}"
+                )));
+                let _ = output.close();
+                return;
+            }
         }
     }
 }
@@ -362,7 +389,7 @@ mod tests {
     fn decode_loop_plays_to_end() {
         let wav_path = write_test_wav();
         let (_cmd_tx, cmd_rx) = mpsc::channel();
-        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let status = Arc::new(std::sync::RwLock::new(DecodeStatus::default()));
         let (event_tx, event_rx) = mpsc::channel();
         let config = crate::EngineConfig {
             buffer_size: 4096,
@@ -401,7 +428,7 @@ mod tests {
     fn decode_loop_stop_command() {
         let wav_path = write_test_wav();
         let (cmd_tx, cmd_rx) = mpsc::channel();
-        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let status = Arc::new(std::sync::RwLock::new(DecodeStatus::default()));
         let (event_tx, event_rx) = mpsc::channel();
         let config = crate::EngineConfig {
             buffer_size: 4096,
@@ -439,7 +466,7 @@ mod tests {
     fn decode_loop_volume_command() {
         let wav_path = write_test_wav();
         let (cmd_tx, cmd_rx) = mpsc::channel();
-        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let status = Arc::new(std::sync::RwLock::new(DecodeStatus::default()));
         let (event_tx, _event_rx) = mpsc::channel();
         let config = crate::EngineConfig {
             buffer_size: 4096,
@@ -465,7 +492,7 @@ mod tests {
         handle.join().unwrap();
 
         // Check status reflects the volume
-        let s = status.lock().unwrap();
+        let s = status.read().unwrap();
         // Volume should have been applied (either 0.5 if read before end, or default)
         assert!(s.volume >= 0.0 && s.volume <= 1.0);
     }
@@ -473,7 +500,7 @@ mod tests {
     #[test]
     fn decode_loop_nonexistent_file() {
         let (_cmd_tx, cmd_rx) = mpsc::channel();
-        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let status = Arc::new(std::sync::RwLock::new(DecodeStatus::default()));
         let (event_tx, event_rx) = mpsc::channel();
         let config = crate::EngineConfig::default();
 
@@ -504,7 +531,7 @@ mod tests {
     fn decode_loop_pause_resume() {
         let wav_path = write_test_wav();
         let (cmd_tx, cmd_rx) = mpsc::channel();
-        let status = Arc::new(Mutex::new(DecodeStatus::default()));
+        let status = Arc::new(std::sync::RwLock::new(DecodeStatus::default()));
         let (event_tx, event_rx) = mpsc::channel();
         let config = crate::EngineConfig {
             buffer_size: 4096,
@@ -564,5 +591,66 @@ mod tests {
         let ev = EngineEvent::TrackFinished;
         let cloned = ev.clone();
         assert!(matches!(cloned, EngineEvent::TrackFinished));
+    }
+
+    #[test]
+    fn prepare_next_failed_event_variant() {
+        let ev = EngineEvent::PrepareNextFailed("file not found".to_string());
+        let cloned = ev.clone();
+        match cloned {
+            EngineEvent::PrepareNextFailed(msg) => {
+                assert_eq!(msg, "file not found");
+            }
+            _ => panic!("expected PrepareNextFailed"),
+        }
+    }
+
+    #[test]
+    fn prepare_next_failed_debug() {
+        let ev = EngineEvent::PrepareNextFailed("bad path".to_string());
+        let dbg = format!("{:?}", ev);
+        assert!(dbg.contains("PrepareNextFailed"));
+        assert!(dbg.contains("bad path"));
+    }
+
+    #[test]
+    fn prepare_next_failed_on_nonexistent_file() {
+        let wav_path = write_test_wav();
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let status = Arc::new(std::sync::RwLock::new(DecodeStatus::default()));
+        let (event_tx, event_rx) = mpsc::channel();
+        let config = crate::EngineConfig {
+            buffer_size: 4096,
+            sample_rate: 44100,
+            channels: 1,
+        };
+
+        let status_clone = status.clone();
+        let handle = std::thread::spawn(move || {
+            decode_loop(
+                wav_path.clone(),
+                cmd_rx,
+                status_clone,
+                event_tx,
+                config,
+                Some(Duration::from_millis(100)),
+            );
+        });
+
+        // Send PrepareNext with a nonexistent path
+        let _ = cmd_tx.send(EngineCommand::PrepareNext {
+            path: std::path::PathBuf::from("/nonexistent/next_track.wav"),
+        });
+
+        handle.join().unwrap();
+
+        // Should have received PrepareNextFailed (not a generic Error)
+        let mut got_prepare_next_failed = false;
+        while let Ok(ev) = event_rx.try_recv() {
+            if matches!(ev, EngineEvent::PrepareNextFailed(_)) {
+                got_prepare_next_failed = true;
+            }
+        }
+        assert!(got_prepare_next_failed);
     }
 }

@@ -43,7 +43,24 @@ where
     while let Ok(Some(line)) = lines.next_line().await {
         let request: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                // JSON-RPC spec: code -32700 = Parse error
+                let err_response = json!({
+                    "jsonrpc": "2.0",
+                    "id": null,
+                    "error": {
+                        "code": -32700,
+                        "message": "Parse error",
+                        "data": e.to_string()
+                    }
+                });
+                writer
+                    .write_all(serde_json::to_string(&err_response)?.as_bytes())
+                    .await?;
+                writer.write_all(b"\n").await?;
+                writer.flush().await?;
+                continue;
+            }
         };
 
         let method = request["method"].as_str().unwrap_or("");
@@ -405,10 +422,10 @@ fn tool_library(
             }
             #[cfg(feature = "tarang")]
             match jalwa_core::scanner::scan_directory(&path) {
-                Ok(scanned) => {
+                Ok(scan_result) => {
                     let mut lib = lock_or_err!(plib, "library");
                     let mut added = 0;
-                    for file in scanned {
+                    for file in scan_result.files {
                         let p = file.path.clone();
                         if lib.library.find_by_path(&p).is_some() {
                             continue;
@@ -1205,14 +1222,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_malformed_json_skipped() {
+    async fn run_malformed_json_returns_parse_error() {
         let input = "this is not json\n".to_string()
             + r#"{"jsonrpc":"2.0","id":5,"method":"initialize"}"#
             + "\n";
         let responses = run_on_input(&input).await;
-        // Malformed line is skipped; only the valid request produces a response.
+        // Malformed line now returns a JSON-RPC parse error, then the valid request succeeds.
+        assert_eq!(responses.len(), 2);
+        // First response: parse error
+        let err = &responses[0];
+        assert_eq!(err["jsonrpc"], "2.0");
+        assert!(err["id"].is_null());
+        assert_eq!(err["error"]["code"], -32700);
+        assert_eq!(err["error"]["message"], "Parse error");
+        assert!(!err["error"]["data"].as_str().unwrap().is_empty());
+        // Second response: valid initialize
+        assert_eq!(responses[1]["id"], 5);
+    }
+
+    #[tokio::test]
+    async fn run_parse_error_only() {
+        let input = "not valid json at all\n".to_string();
+        let responses = run_on_input(&input).await;
         assert_eq!(responses.len(), 1);
-        assert_eq!(responses[0]["id"], 5);
+        let err = &responses[0];
+        assert_eq!(err["error"]["code"], -32700);
+        assert_eq!(err["error"]["message"], "Parse error");
+        assert!(err["id"].is_null());
     }
 
     #[tokio::test]

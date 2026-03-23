@@ -62,11 +62,13 @@ pub fn library_view(ui: &mut egui::Ui, app: &mut GuiApp) {
 
     ui.separator();
 
-    // Collect visible item indices
-    let items: Vec<usize> = if !app.search_query.is_empty() {
-        app.search_results.clone()
+    // Collect visible item indices.
+    // When search is active, temporarily take search_results to avoid cloning
+    // (it's swapped back after rendering). When not searching, build a range vec.
+    let (items, took_search) = if !app.search_query.is_empty() {
+        (std::mem::take(&mut app.search_results), true)
     } else {
-        (0..app.library.library.items.len()).collect()
+        ((0..app.library.library.items.len()).collect(), false)
     };
 
     if items.is_empty() {
@@ -80,12 +82,20 @@ pub fn library_view(ui: &mut egui::Ui, app: &mut GuiApp) {
                 ui.label(egui::RichText::new("No matches").color(theme::TEXT_MUTED));
             }
         });
+        if took_search {
+            app.search_results = items;
+        }
         return;
     }
 
     match app.library_view_mode {
         LibraryViewMode::List => list_view(ui, app, &items),
         LibraryViewMode::Grid => grid_view(ui, app, &items),
+    }
+
+    // Restore search_results if we took them
+    if took_search {
+        app.search_results = items;
     }
 }
 

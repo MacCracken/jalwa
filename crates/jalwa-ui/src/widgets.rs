@@ -70,7 +70,7 @@ fn render_status_area(frame: &mut Frame, area: Rect, app: &App) {
         format!("{}%", (status.volume * 100.0) as u8)
     };
 
-    let status_line = Line::from(vec![
+    let mut spans = vec![
         Span::styled(
             format!(" {state_icon} "),
             Style::default()
@@ -85,7 +85,17 @@ fn render_status_area(frame: &mut Frame, area: Rect, app: &App) {
         ),
         Span::raw("  "),
         Span::styled(volume, Style::default().fg(Color::Yellow)),
-    ]);
+    ];
+
+    if let Some(ref err) = app.last_error {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("[ERR: {err}]"),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    let status_line = Line::from(spans);
 
     frame.render_widget(Paragraph::new(status_line), chunks[0]);
 
@@ -140,6 +150,16 @@ fn render_library_view(frame: &mut Frame, area: Rect, app: &App) {
             .map(|(i, item)| make_list_item(item, i))
             .collect()
     };
+
+    if items.is_empty() && app.search_query.is_empty() {
+        let help = Paragraph::new(Line::from(Span::styled(
+            "Library is empty. Run 'jalwa scan <directory>' to add files.",
+            Style::default().fg(Color::DarkGray),
+        )))
+        .block(block);
+        frame.render_widget(help, area);
+        return;
+    }
 
     let mut state = ListState::default();
     if !items.is_empty() {
@@ -283,7 +303,7 @@ fn render_eq_view(frame: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = (0..10)
         .map(|i| {
             let name = EqSettings::band_name(i);
-            let gain = eq.bands[i];
+            let gain = eq.bands.get(i).copied().unwrap_or(0.0);
             let bar_width = 20;
             let center = bar_width / 2;
             let filled = ((gain / 12.0) * center as f32) as i32;
@@ -535,5 +555,32 @@ mod tests {
         let output = render_to_string(&app, 120, 15);
         assert!(output.contains("band"));
         assert!(output.contains("gain"));
+    }
+
+    // ---- Error display ----
+
+    #[test]
+    fn render_status_bar_with_error() {
+        let mut app = make_test_app();
+        app.set_error("decode failed".to_string());
+        let output = render_to_string(&app, 120, 10);
+        assert!(output.contains("ERR: decode failed"));
+    }
+
+    #[test]
+    fn render_status_bar_no_error() {
+        let app = make_test_app();
+        let output = render_to_string(&app, 120, 10);
+        assert!(!output.contains("ERR:"));
+    }
+
+    // ---- Empty library help text ----
+
+    #[test]
+    fn render_library_empty_shows_help() {
+        let app = make_test_app();
+        let output = render_to_string(&app, 80, 10);
+        assert!(output.contains("Library is empty"));
+        assert!(output.contains("jalwa scan"));
     }
 }

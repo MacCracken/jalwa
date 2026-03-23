@@ -2,8 +2,8 @@
 
 #![cfg(feature = "yukti")]
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use jalwa_core::hardware::{is_on_removable_device, HardwareManager};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use jalwa_core::hardware::{HardwareManager, is_on_removable_device};
 use std::path::PathBuf;
 use yukti::device::{DeviceClass, DeviceId, DeviceInfo, DeviceState};
 use yukti::event::{DeviceEvent, DeviceEventKind};

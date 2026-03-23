@@ -28,10 +28,7 @@ pub enum HardwareEvent {
         mount_point: PathBuf,
     },
     /// A USB storage device was removed.
-    UsbRemoved {
-        device_id: DeviceId,
-        label: String,
-    },
+    UsbRemoved { device_id: DeviceId, label: String },
     /// An optical disc was inserted (CDDA, DVD, Blu-ray).
     DiscInserted {
         device_id: DeviceId,
@@ -39,9 +36,7 @@ pub enum HardwareEvent {
         dev_path: PathBuf,
     },
     /// An optical disc was ejected.
-    DiscEjected {
-        device_id: DeviceId,
-    },
+    DiscEjected { device_id: DeviceId },
     /// A device that is currently being played from was removed.
     PlaybackDeviceRemoved {
         device_id: DeviceId,
@@ -203,7 +198,10 @@ impl HardwareManager {
 
         // Check if we're playing from this device
         if let Some(mount) = &info.mount_point
-            && self.active_playback_paths.iter().any(|p| p.starts_with(mount))
+            && self
+                .active_playback_paths
+                .iter()
+                .any(|p| p.starts_with(mount))
         {
             info!(device = %id, "stopping playback before eject");
             let _ = self.event_tx.send(HardwareEvent::PlaybackDeviceRemoved {
@@ -357,7 +355,10 @@ impl HardwareManager {
         // Check if we're playing from this device
         if let Some(info) = self.devices.get(id)
             && let Some(mount) = &info.mount_point
-            && self.active_playback_paths.iter().any(|p| p.starts_with(mount))
+            && self
+                .active_playback_paths
+                .iter()
+                .any(|p| p.starts_with(mount))
         {
             warn!(device = %id, "device removed while playing — notifying app");
             let _ = self.event_tx.send(HardwareEvent::PlaybackDeviceRemoved {
@@ -588,7 +589,10 @@ mod tests {
 
         // Should get PlaybackDeviceRemoved first, then UsbRemoved
         let event1 = rx.try_recv().unwrap();
-        assert!(matches!(event1, HardwareEvent::PlaybackDeviceRemoved { .. }));
+        assert!(matches!(
+            event1,
+            HardwareEvent::PlaybackDeviceRemoved { .. }
+        ));
         let event2 = rx.try_recv().unwrap();
         assert!(matches!(event2, HardwareEvent::UsbRemoved { .. }));
     }
@@ -604,10 +608,7 @@ mod tests {
 
         let device = hw.devices.get(&id).unwrap();
         assert_eq!(device.state, DeviceState::Mounted);
-        assert_eq!(
-            device.mount_point,
-            Some(PathBuf::from("/mnt/usb"))
-        );
+        assert_eq!(device.mount_point, Some(PathBuf::from("/mnt/usb")));
 
         let event = rx.try_recv().unwrap();
         assert!(matches!(event, HardwareEvent::UsbMounted { .. }));
@@ -699,10 +700,7 @@ mod tests {
     fn is_on_removable_device_found() {
         let dev = make_usb_device("sdb1", true);
         let devices = vec![&dev];
-        let result = is_on_removable_device(
-            Path::new("/mnt/sdb1/music/song.flac"),
-            &devices,
-        );
+        let result = is_on_removable_device(Path::new("/mnt/sdb1/music/song.flac"), &devices);
         assert_eq!(result, Some(DeviceId::new("sdb1")));
     }
 
@@ -710,20 +708,14 @@ mod tests {
     fn is_on_removable_device_not_found() {
         let dev = make_usb_device("sdb1", true);
         let devices = vec![&dev];
-        let result = is_on_removable_device(
-            Path::new("/home/user/music/song.flac"),
-            &devices,
-        );
+        let result = is_on_removable_device(Path::new("/home/user/music/song.flac"), &devices);
         assert!(result.is_none());
     }
 
     #[test]
     fn is_on_removable_device_empty() {
         let devices: Vec<&DeviceInfo> = vec![];
-        let result = is_on_removable_device(
-            Path::new("/mnt/usb/song.flac"),
-            &devices,
-        );
+        let result = is_on_removable_device(Path::new("/mnt/usb/song.flac"), &devices);
         assert!(result.is_none());
     }
 

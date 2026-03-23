@@ -248,11 +248,14 @@ fn cmd_scan(directory: &str) -> Result<()> {
     let mut plib = open_library()?;
 
     println!("Scanning {}...", dir.display());
-    let scanned = jalwa_core::scanner::scan_directory(dir)?;
-    println!("Found {} media files", scanned.len());
+    let scan_result = jalwa_core::scanner::scan_directory(dir)?;
+    println!("Found {} media files", scan_result.files.len());
+    if !scan_result.errors.is_empty() {
+        println!("{} files had errors", scan_result.errors.len());
+    }
 
     let mut added = 0;
-    for file in scanned {
+    for file in scan_result.files {
         let path = file.path.clone();
         // Skip if already in library
         if plib.library.find_by_path(&path).is_some() {
@@ -367,8 +370,8 @@ fn cmd_import(file: &str) -> Result<()> {
         #[cfg(feature = "tarang")]
         if plib.library.find_by_path(path).is_none() {
             match jalwa_core::scanner::scan_directory(path.parent().unwrap_or(path)) {
-                Ok(scanned) => {
-                    for s in scanned {
+                Ok(scan_result) => {
+                    for s in scan_result.files {
                         if s.path == *path {
                             let item = jalwa_core::scanner::scanned_to_media_item(s);
                             let _ = plib.add_item(item);
@@ -514,10 +517,10 @@ mod tests {
         let dir = tmp_dir_with_wav();
         let (db_path, mut plib) = tmp_db();
 
-        let scanned = jalwa_core::scanner::scan_directory(&dir).unwrap();
-        assert_eq!(scanned.len(), 1);
+        let scan_result = jalwa_core::scanner::scan_directory(&dir).unwrap();
+        assert_eq!(scan_result.files.len(), 1);
 
-        for file in scanned {
+        for file in scan_result.files {
             let item = jalwa_core::scanner::scanned_to_media_item(file);
             plib.add_item(item).unwrap();
         }
@@ -573,17 +576,17 @@ mod tests {
         let dir = tmp_dir_with_wav();
         let (db_path, mut plib) = tmp_db();
 
-        let scanned = jalwa_core::scanner::scan_directory(&dir).unwrap();
-        for file in scanned {
+        let scan_result = jalwa_core::scanner::scan_directory(&dir).unwrap();
+        for file in scan_result.files {
             let item = jalwa_core::scanner::scanned_to_media_item(file);
             plib.add_item(item).unwrap();
         }
         assert_eq!(plib.library.items.len(), 1);
 
         // Second scan — should skip duplicates
-        let scanned2 = jalwa_core::scanner::scan_directory(&dir).unwrap();
+        let scan_result2 = jalwa_core::scanner::scan_directory(&dir).unwrap();
         let mut added = 0;
-        for file in scanned2 {
+        for file in scan_result2.files {
             let p = file.path.clone();
             if plib.library.find_by_path(&p).is_some() {
                 continue;
@@ -605,8 +608,8 @@ mod tests {
         let dir = tmp_dir_with_wav();
         let (db_path, mut plib) = tmp_db();
 
-        let scanned = jalwa_core::scanner::scan_directory(&dir).unwrap();
-        for file in scanned {
+        let scan_result = jalwa_core::scanner::scan_directory(&dir).unwrap();
+        for file in scan_result.files {
             let item = jalwa_core::scanner::scanned_to_media_item(file);
             plib.add_item(item).unwrap();
         }
@@ -776,8 +779,8 @@ mod tests {
         let dir = tmp_dir_with_wav();
         let (db_path, mut plib) = tmp_db();
 
-        let scanned = jalwa_core::scanner::scan_directory(&dir).unwrap();
-        for file in scanned {
+        let scan_result = jalwa_core::scanner::scan_directory(&dir).unwrap();
+        for file in scan_result.files {
             let item = jalwa_core::scanner::scanned_to_media_item(file);
             plib.add_item(item).unwrap();
         }

@@ -10,6 +10,19 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "wav", "ogg", "m4a", "mp4", "mkv", "webm", "aac", "opus",
 ];
 
+/// An error encountered during scanning.
+pub struct ScanError {
+    pub path: PathBuf,
+    pub error: String,
+}
+
+/// Result of scanning a directory, including partial results and any errors.
+pub struct ScanResult {
+    pub files: Vec<ScannedFile>,
+    pub errors: Vec<ScanError>,
+    pub dirs_walked: usize,
+}
+
 /// A scanned file with extracted metadata
 pub struct ScannedFile {
     pub path: PathBuf,
@@ -24,7 +37,7 @@ pub struct ScannedFile {
 }
 
 /// Scan a directory recursively for supported media files.
-pub fn scan_directory(path: &Path) -> Result<Vec<ScannedFile>> {
+pub fn scan_directory(path: &Path) -> Result<ScanResult> {
     if !path.is_dir() {
         return Err(JalwaError::Scanner(format!(
             "not a directory: {}",
@@ -32,14 +45,21 @@ pub fn scan_directory(path: &Path) -> Result<Vec<ScannedFile>> {
         )));
     }
 
-    let mut results = Vec::new();
+    let mut files = Vec::new();
+    let mut errors = Vec::new();
+    let mut dirs_walked: usize = 0;
 
     for entry in walkdir::WalkDir::new(path)
         .follow_links(true)
+        .max_depth(20)
         .into_iter()
         .filter_map(|e| e.ok())
     {
         let entry_path = entry.path();
+        if entry_path.is_dir() {
+            dirs_walked += 1;
+            continue;
+        }
         if !entry_path.is_file() {
             continue;
         }
@@ -55,14 +75,22 @@ pub fn scan_directory(path: &Path) -> Result<Vec<ScannedFile>> {
         }
 
         match scan_file(entry_path) {
-            Ok(scanned) => results.push(scanned),
+            Ok(scanned) => files.push(scanned),
             Err(e) => {
                 tracing::warn!(path = %entry_path.display(), error = %e, "skipping file");
+                errors.push(ScanError {
+                    path: entry_path.to_path_buf(),
+                    error: e.to_string(),
+                });
             }
         }
     }
 
-    Ok(results)
+    Ok(ScanResult {
+        files,
+        errors,
+        dirs_walked,
+    })
 }
 
 /// Scan a single file: probe with tarang, then extract rich tags + album art with lofty.
@@ -188,7 +216,9 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("jalwa_scan_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
         let result = scan_directory(&tmp).unwrap();
-        assert!(result.is_empty());
+        assert!(result.files.is_empty());
+        assert!(result.errors.is_empty());
+        assert!(result.dirs_walked > 0);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -199,7 +229,7 @@ mod tests {
         std::fs::write(tmp.join("readme.txt"), "hello").unwrap();
         std::fs::write(tmp.join("code.rs"), "fn main() {}").unwrap();
         let result = scan_directory(&tmp).unwrap();
-        assert!(result.is_empty());
+        assert!(result.files.is_empty());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -299,10 +329,11 @@ mod tests {
         // Also write a non-media file that should be skipped
         std::fs::write(tmp.join("notes.txt"), "skip me").unwrap();
 
-        let results = scan_directory(&tmp).unwrap();
-        assert_eq!(results.len(), 1);
-        assert!(results[0].path.ends_with("test.wav"));
-        assert!(results[0].info.duration.is_some());
+        let result = scan_directory(&tmp).unwrap();
+        assert_eq!(result.files.len(), 1);
+        assert!(result.errors.is_empty());
+        assert!(result.files[0].path.ends_with("test.wav"));
+        assert!(result.files[0].info.duration.is_some());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -315,15 +346,52 @@ mod tests {
         let wav_path = tmp.join("song.wav");
         std::fs::write(&wav_path, &wav).unwrap();
 
-        let results = scan_directory(&tmp).unwrap();
-        assert_eq!(results.len(), 1);
+        let result = scan_directory(&tmp).unwrap();
+        assert_eq!(result.files.len(), 1);
 
-        let item = scanned_to_media_item(results.into_iter().next().unwrap());
+        let item = scanned_to_media_item(result.files.into_iter().next().unwrap());
         assert_eq!(item.title, "song"); // filename stem
         assert!(item.duration.is_some());
         let dur = item.duration.unwrap();
         assert!(dur.as_secs_f64() > 0.9 && dur.as_secs_f64() < 1.1);
 
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn scan_result_struct_fields() {
+        let result = ScanResult {
+            files: Vec::new(),
+            errors: vec![ScanError {
+                path: PathBuf::from("/bad/file.mp3"),
+                error: "corrupt header".to_string(),
+            }],
+            dirs_walked: 3,
+        };
+        assert!(result.files.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].path, PathBuf::from("/bad/file.mp3"));
+        assert_eq!(result.errors[0].error, "corrupt header");
+        assert_eq!(result.dirs_walked, 3);
+    }
+
+    #[test]
+    fn scan_error_stores_path_and_message() {
+        let err = ScanError {
+            path: PathBuf::from("/music/broken.flac"),
+            error: "unexpected EOF".to_string(),
+        };
+        assert_eq!(err.path.to_str().unwrap(), "/music/broken.flac");
+        assert!(err.error.contains("EOF"));
+    }
+
+    #[test]
+    fn scan_result_dirs_walked_counts_correctly() {
+        let tmp = std::env::temp_dir().join(format!("jalwa_scan_dirs_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(tmp.join("a/b")).unwrap();
+        let result = scan_directory(&tmp).unwrap();
+        // root + a + a/b = at least 3 directories
+        assert!(result.dirs_walked >= 3);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

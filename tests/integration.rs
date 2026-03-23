@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 #[cfg(feature = "yukti")]
 mod hardware {
-    use jalwa_core::hardware::{is_on_removable_device, HardwareEvent, HardwareManager};
+    use jalwa_core::hardware::{HardwareEvent, HardwareManager, is_on_removable_device};
     use jalwa_core::test_fixtures::make_media_item;
     use std::path::PathBuf;
     use yukti::device::{DeviceClass, DeviceId, DeviceInfo, DeviceState};
@@ -149,7 +149,9 @@ mod hardware {
         );
         hw.handle_yukti_event(media_event);
 
-        let event = rx.try_recv().expect("expected DiscInserted on media change");
+        let event = rx
+            .try_recv()
+            .expect("expected DiscInserted on media change");
         assert!(matches!(event, HardwareEvent::DiscInserted { .. }));
 
         // Step 3: Eject (detach).
@@ -338,7 +340,12 @@ fn library_persistent_roundtrip() {
         let plib = PersistentLibrary::open(&db_path).unwrap();
         assert_eq!(plib.library.items.len(), 2);
 
-        let titles: Vec<&str> = plib.library.items.iter().map(|i| i.title.as_str()).collect();
+        let titles: Vec<&str> = plib
+            .library
+            .items
+            .iter()
+            .map(|i| i.title.as_str())
+            .collect();
         assert!(titles.contains(&"Roundtrip Song A"));
         assert!(titles.contains(&"Roundtrip Song B"));
 

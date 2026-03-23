@@ -262,8 +262,10 @@ impl GuiApp {
                     dev_path,
                     ..
                 } => {
-                    self.hardware_notifications
-                        .push(format!("Disc inserted: {disc_type} at {}", dev_path.display()));
+                    self.hardware_notifications.push(format!(
+                        "Disc inserted: {disc_type} at {}",
+                        dev_path.display()
+                    ));
                 }
                 HardwareEvent::DiscEjected { .. } => {
                     self.hardware_notifications.push("Disc ejected".into());

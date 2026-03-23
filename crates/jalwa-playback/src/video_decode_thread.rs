@@ -7,7 +7,7 @@
 #[cfg(feature = "video")]
 use std::path::PathBuf;
 #[cfg(feature = "video")]
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, RwLock, mpsc};
 use std::time::Duration;
 
 #[cfg(feature = "video")]
@@ -43,7 +43,7 @@ pub struct DisplayFrame {
 pub fn video_decode_loop(
     path: PathBuf,
     cmd_rx: mpsc::Receiver<EngineCommand>,
-    status: Arc<Mutex<DecodeStatus>>,
+    status: Arc<RwLock<DecodeStatus>>,
     event_tx: mpsc::Sender<EngineEvent>,
     frame_tx: mpsc::SyncSender<DisplayFrame>,
     config: EngineConfig,
@@ -197,7 +197,7 @@ pub fn video_decode_loop(
                     paused = true;
                     let _ =
                         event_tx.send(EngineEvent::StateChanged(jalwa_core::PlaybackState::Paused));
-                    if let Ok(mut s) = status.lock() {
+                    if let Ok(mut s) = status.write() {
                         s.state = jalwa_core::PlaybackState::Paused;
                     }
                     continue;
@@ -277,7 +277,7 @@ pub fn video_decode_loop(
             }
 
             // Update status with video timestamp
-            if let Ok(mut s) = status.lock() {
+            if let Ok(mut s) = status.write() {
                 s.state = jalwa_core::PlaybackState::Playing;
                 s.position = packet.timestamp;
                 s.volume = volume;

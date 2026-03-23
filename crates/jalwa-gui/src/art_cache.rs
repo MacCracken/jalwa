@@ -6,6 +6,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 const MAX_TEXTURES: usize = 200;
+const MAX_NO_ART: usize = 1000;
 
 struct CacheEntry {
     texture: TextureHandle,
@@ -55,6 +56,7 @@ impl ArtCache {
                 );
             } else {
                 self.no_art.insert(item_id);
+                self.evict_no_art_if_full();
                 return None;
             }
         }
@@ -83,6 +85,15 @@ impl ArtCache {
     #[cfg(test)]
     pub fn texture_count(&self) -> usize {
         self.textures.len()
+    }
+
+    /// Clear the no_art set when it grows past the threshold.
+    /// Since HashSet doesn't track insertion order, we clear the whole set
+    /// and let entries be re-added on cache miss.
+    fn evict_no_art_if_full(&mut self) {
+        if self.no_art.len() > MAX_NO_ART {
+            self.no_art.clear();
+        }
     }
 
     fn evict_if_full(&mut self) {
@@ -206,6 +217,46 @@ mod tests {
         let max = MAX_TEXTURES;
         assert!(max > 0, "MAX_TEXTURES must be positive");
         assert!(max <= 1000, "MAX_TEXTURES too large: {max}");
+    }
+
+    #[test]
+    fn no_art_set_eviction() {
+        let mut cache = ArtCache::new();
+        let ctx = egui::Context::default();
+        let fake_path = std::path::PathBuf::from("/nonexistent/track.mp3");
+
+        // Fill the no_art set past the threshold
+        for _ in 0..=MAX_NO_ART {
+            let id = Uuid::new_v4();
+            let _ = cache.get(&ctx, id, &fake_path);
+        }
+
+        // After exceeding MAX_NO_ART, the set should have been cleared
+        // (and then the last insert re-added one entry, so it's not empty
+        // but it's well under the threshold).
+        assert!(
+            cache.no_art.len() <= 1,
+            "no_art set should have been cleared after exceeding {MAX_NO_ART}, but has {} entries",
+            cache.no_art.len()
+        );
+    }
+
+    #[test]
+    fn no_art_set_below_threshold_not_cleared() {
+        let mut cache = ArtCache::new();
+        let ctx = egui::Context::default();
+        let fake_path = std::path::PathBuf::from("/nonexistent/track.mp3");
+
+        // Add entries below the threshold
+        for _ in 0..10 {
+            let id = Uuid::new_v4();
+            let _ = cache.get(&ctx, id, &fake_path);
+        }
+        assert_eq!(
+            cache.no_art_count(),
+            10,
+            "no_art set should retain entries below threshold"
+        );
     }
 
     #[test]

@@ -73,7 +73,13 @@ pub fn equalizer_view(ui: &mut egui::Ui, app: &mut GuiApp) {
     ui.columns(10, |columns| {
         for (band, col) in columns.iter_mut().enumerate() {
             let name = EqSettings::band_name(band);
-            let mut gain = app.engine.eq_settings().bands[band];
+            let mut gain = app
+                .engine
+                .eq_settings()
+                .bands
+                .get(band)
+                .copied()
+                .unwrap_or(0.0);
 
             col.vertical_centered(|ui| {
                 ui.label(

@@ -87,7 +87,7 @@ impl LibraryDb {
                     play_count, rating, tags
              FROM media_items",
             )
-            .map_err(|e| JalwaError::Database(format!("prepare: {e}")))?;
+            .map_err(|e| JalwaError::Database(format!("prepare media_items select: {e}")))?;
 
         let items = stmt
             .query_map([], |row| {
@@ -125,7 +125,7 @@ impl LibraryDb {
                     tags_json,
                 ))
             })
-            .map_err(|e| JalwaError::Database(format!("query: {e}")))?;
+            .map_err(|e| JalwaError::Database(format!("query media_items: {e}")))?;
 
         for row in items {
             let (
@@ -144,7 +144,7 @@ impl LibraryDb {
                 play_count,
                 rating,
                 tags_json,
-            ) = row.map_err(|e| JalwaError::Database(format!("row: {e}")))?;
+            ) = row.map_err(|e| JalwaError::Database(format!("row media_items: {e}")))?;
 
             let item = MediaItem {
                 id: Uuid::parse_str(&id).unwrap_or_else(|e| {
@@ -199,7 +199,7 @@ impl LibraryDb {
 
         for row in playlists {
             let (id, name, description, is_smart, created_at, modified_at) =
-                row.map_err(|e| JalwaError::Database(format!("row: {e}")))?;
+                row.map_err(|e| JalwaError::Database(format!("row playlists: {e}")))?;
 
             let mut playlist = Playlist::new(&name);
             playlist.id = Uuid::parse_str(&id).unwrap_or_else(|e| {
@@ -423,13 +423,13 @@ impl LibraryDb {
         let mut stmt = self
             .conn
             .prepare("SELECT path FROM scan_paths")
-            .map_err(|e| JalwaError::Database(format!("prepare: {e}")))?;
+            .map_err(|e| JalwaError::Database(format!("prepare scan_paths select: {e}")))?;
         let paths = stmt
             .query_map([], |row| {
                 let path: String = row.get(0)?;
                 Ok(PathBuf::from(path))
             })
-            .map_err(|e| JalwaError::Database(format!("query: {e}")))?;
+            .map_err(|e| JalwaError::Database(format!("query scan_paths: {e}")))?;
 
         Ok(paths.flatten().collect())
     }
@@ -566,7 +566,10 @@ fn parse_audio_codec(s: &str) -> AudioCodec {
         "Opus" => AudioCodec::Opus,
         "Alac" => AudioCodec::Alac,
         "Wma" => AudioCodec::Wma,
-        _ => AudioCodec::Pcm,
+        unknown => {
+            tracing::warn!(value = %unknown, "unknown audio codec in database, falling back to Pcm");
+            AudioCodec::Pcm
+        }
     }
 }
 
@@ -578,7 +581,10 @@ fn parse_video_codec(s: &str) -> VideoCodec {
         "Vp9" => VideoCodec::Vp9,
         "Av1" => VideoCodec::Av1,
         "Theora" => VideoCodec::Theora,
-        _ => VideoCodec::H264,
+        unknown => {
+            tracing::warn!(value = %unknown, "unknown video codec in database, falling back to H264");
+            VideoCodec::H264
+        }
     }
 }
 

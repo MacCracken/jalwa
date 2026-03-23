@@ -10,7 +10,7 @@ pub mod video_decode_thread;
 
 use jalwa_core::{JalwaError, PlaybackState, PlaybackStatus, Result};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, RwLock, mpsc};
 use std::time::Duration;
 
 pub use decode_thread::{DecodeStatus, EngineCommand, EngineEvent};
@@ -47,8 +47,8 @@ pub struct PlaybackEngine {
     eq_settings: EqSettings,
     normalize_enabled: bool,
     // Channel-based communication with decode thread
-    cmd_tx: Option<mpsc::Sender<EngineCommand>>,
-    decode_status: Option<Arc<Mutex<DecodeStatus>>>,
+    cmd_tx: Option<mpsc::SyncSender<EngineCommand>>,
+    decode_status: Option<Arc<RwLock<DecodeStatus>>>,
     event_rx: Option<mpsc::Receiver<EngineEvent>>,
     decode_handle: Option<std::thread::JoinHandle<()>>,
     // Video frame channel (populated when playing video)
@@ -194,8 +194,8 @@ impl PlaybackEngine {
         #[cfg(feature = "tarang")]
         {
             let path = self.current_path.clone().unwrap();
-            let (cmd_tx, cmd_rx) = mpsc::channel();
-            let status = Arc::new(Mutex::new(DecodeStatus::default()));
+            let (cmd_tx, cmd_rx) = mpsc::sync_channel(32);
+            let status = Arc::new(RwLock::new(DecodeStatus::default()));
             let status_clone = status.clone();
             let (event_tx, event_rx) = mpsc::channel();
             let config = self.config.clone();
@@ -387,15 +387,20 @@ impl PlaybackEngine {
         }
     }
 
-    /// Get current playback state
+    /// Get current playback state (reads from decode thread if running)
     pub fn state(&self) -> PlaybackState {
+        if let Some(ref status) = self.decode_status
+            && let Ok(s) = status.read()
+        {
+            return s.state;
+        }
         self.state
     }
 
     /// Get current position (reads from decode thread if running)
     pub fn position(&self) -> Duration {
         if let Some(ref status) = self.decode_status
-            && let Ok(s) = status.lock()
+            && let Ok(s) = status.read()
         {
             return s.position;
         }
@@ -432,7 +437,7 @@ impl PlaybackEngine {
     pub fn status(&self) -> PlaybackStatus {
         let position = self.position();
         PlaybackStatus {
-            state: self.state,
+            state: self.state(),
             current_item: None, // Caller maps path -> UUID
             position,
             duration: self.duration,
@@ -478,7 +483,7 @@ impl PlaybackEngine {
         }
         // Update position from decode status
         if let Some(ref status) = self.decode_status
-            && let Ok(s) = status.lock()
+            && let Ok(s) = status.read()
         {
             self.position = s.position;
         }
