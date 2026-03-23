@@ -59,6 +59,9 @@ aethersafta = { version = "0.21.3", default-features = false, features = ["pipew
 # Hardware accelerator detection
 ai-hwaccel = { version = "0.21.3", default-features = false }
 
+# Device abstraction (USB, optical, udev hotplug)
+yukti = { version = "0.22.3", default-features = true }
+
 [package]
 name = "jalwa"
 version = "2026.3.22"
@@ -67,7 +70,7 @@ description = "Jalwa — AI-native media player for AGNOS, built on the Tarang m
 license = "GPL-3.0"
 
 [features]
-default = ["tarang", "pipewire"]
+default = ["tarang", "pipewire", "yukti"]
 tarang = [
     "dep:tarang",
     "jalwa-core/tarang",
@@ -77,6 +80,7 @@ tarang = [
 ]
 pipewire = ["jalwa-playback/pipewire"]
 video = ["jalwa-playback/video"]
+yukti = ["jalwa-core/yukti", "jalwa-gui/yukti"]
 
 [dependencies]
 jalwa-core = { path = "crates/jalwa-core" }
@@ -97,6 +101,7 @@ serde_json = { workspace = true }
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 egui = { workspace = true }
+yukti = { workspace = true }
 
 [[bin]]
 name = "jalwa"
@@ -113,3 +118,8 @@ harness = false
 [[bench]]
 name = "video"
 harness = false
+
+[[bench]]
+name = "hardware"
+harness = false
+required-features = ["yukti"]

@@ -1,21 +1,33 @@
-.PHONY: check fmt clippy test bench build clean
+.PHONY: check fmt clippy test audit deny bench coverage build doc clean
 
-check: fmt clippy test
+check: fmt clippy test audit
 
 fmt:
 	cargo fmt --all -- --check
 
 clippy:
-	cargo clippy --workspace -- -D warnings
+	cargo clippy --all-features --all-targets -- -D warnings
 
 test:
-	cargo test --workspace
+	cargo test --all-features
+
+audit:
+	cargo audit
+
+deny:
+	cargo deny check
 
 bench:
-	./scripts/run-benchmarks.sh
+	./scripts/bench-history.sh
+
+coverage:
+	cargo llvm-cov --all-features --html --output-dir coverage/
 
 build:
-	cargo build --workspace
+	cargo build --release --all-features
+
+doc:
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 
 clean:
-	cargo clean
+	cargo clean && rm -rf coverage/

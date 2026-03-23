@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 #[cfg(feature = "video")]
-use tarang::core::{PixelFormat, StreamInfo, VideoFrame};
+use tarang::core::{PixelFormat, StreamInfo};
 #[cfg(feature = "video")]
-use tarang::demux::{Demuxer, Packet};
+use tarang::demux::Demuxer;
 #[cfg(feature = "video")]
 use tarang::video::{DecoderConfig, VideoDecoder};
 
@@ -49,7 +49,7 @@ pub fn video_decode_loop(
     config: EngineConfig,
     _duration: Option<Duration>,
 ) {
-    use tarang::audio::{AudioOutput, ChannelLayout, OutputConfig, mix_channels, resample};
+    use tarang::audio::{AudioOutput, OutputConfig};
     use tarang::core::TarangError;
 
     // Open the file and detect container format
@@ -66,7 +66,7 @@ pub fn video_decode_loop(
     // Read magic bytes for format detection
     let mut header = [0u8; 16];
     {
-        use std::io::{Read, Seek, SeekFrom};
+        use std::io::Read;
         let mut r = std::io::BufReader::new(std::fs::File::open(&path).unwrap());
         let _ = r.read(&mut header);
     }
@@ -147,7 +147,7 @@ pub fn video_decode_loop(
 
     // Open audio output if there's an audio stream
     let mut audio_output: Option<Box<dyn AudioOutput>> = None;
-    let mut audio_decoder: Option<tarang::audio::FileDecoder> = None;
+    let _audio_decoder: Option<tarang::audio::FileDecoder> = None;
 
     if let Some(ref _ainfo) = audio_stream_info {
         let mut out = crate::decode_thread::create_audio_output();

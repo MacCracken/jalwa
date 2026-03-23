@@ -3,6 +3,8 @@
 //! Media library, playlists, play queue, playback state, and settings.
 
 pub mod db;
+#[cfg(feature = "yukti")]
+pub mod hardware;
 pub mod playlist_io;
 #[cfg(feature = "tarang")]
 pub mod scanner;

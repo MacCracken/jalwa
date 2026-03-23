@@ -8,6 +8,7 @@ license = "GPL-3.0"
 [features]
 default = []
 tarang = ["dep:tarang"]
+yukti = ["dep:yukti"]
 
 [dependencies]
 serde = { workspace = true }
@@ -21,6 +22,7 @@ lofty = { workspace = true }
 walkdir = { workspace = true }
 tracing = { workspace = true }
 notify = { workspace = true }
+yukti = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

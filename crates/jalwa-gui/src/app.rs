@@ -2,6 +2,8 @@
 
 use jalwa_core::PlayQueue;
 use jalwa_core::db::PersistentLibrary;
+#[cfg(feature = "yukti")]
+use jalwa_core::hardware::{HardwareEvent, HardwareManager};
 use jalwa_core::watcher::LibraryWatcher;
 use jalwa_playback::mpris::{MprisCommand, spawn_mpris_server};
 use jalwa_playback::{EngineEvent, PlaybackEngine};
@@ -20,6 +22,7 @@ pub enum View {
     Queue,
     Equalizer,
     Video,
+    Devices,
 }
 
 /// Library view layout mode.
@@ -45,6 +48,12 @@ pub struct GuiApp {
 
     mpris_rx: Receiver<MprisCommand>,
     _watcher: Option<LibraryWatcher>,
+    #[cfg(feature = "yukti")]
+    pub hardware: Option<HardwareManager>,
+    #[cfg(feature = "yukti")]
+    hardware_rx: Option<Receiver<HardwareEvent>>,
+    #[cfg(feature = "yukti")]
+    pub hardware_notifications: Vec<String>,
 }
 
 impl GuiApp {
@@ -56,6 +65,17 @@ impl GuiApp {
         let mpris_state = Arc::new(Mutex::new(jalwa_core::PlaybackState::Stopped));
         let mpris_rx = spawn_mpris_server(mpris_state);
         let watcher = LibraryWatcher::new(&library.library.scan_paths).ok();
+
+        #[cfg(feature = "yukti")]
+        let (hardware, hardware_rx) = {
+            let (mut hw, rx) = HardwareManager::new();
+            if let Err(e) = hw.start_monitoring() {
+                tracing::warn!("hardware monitoring unavailable: {e}");
+                (None, None)
+            } else {
+                (Some(hw), Some(rx))
+            }
+        };
 
         Self {
             library,
@@ -71,6 +91,12 @@ impl GuiApp {
             video_texture: None,
             mpris_rx,
             _watcher: watcher,
+            #[cfg(feature = "yukti")]
+            hardware,
+            #[cfg(feature = "yukti")]
+            hardware_rx,
+            #[cfg(feature = "yukti")]
+            hardware_notifications: Vec::new(),
         }
     }
 
@@ -116,7 +142,7 @@ impl GuiApp {
                 }
             }
             View::Queue => self.queue.len(),
-            View::NowPlaying | View::Video => 0,
+            View::NowPlaying | View::Video | View::Devices => 0,
             View::Equalizer => 10,
         }
     }
@@ -205,6 +231,63 @@ impl GuiApp {
         }
     }
 
+    /// Poll hardware events and auto-scan mounted USB devices.
+    #[cfg(feature = "yukti")]
+    fn poll_hardware(&mut self) {
+        // Poll the hardware manager for raw yukti events
+        if let Some(ref mut hw) = self.hardware {
+            hw.poll();
+        }
+
+        // Process high-level hardware events
+        let Some(ref rx) = self.hardware_rx else {
+            return;
+        };
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                HardwareEvent::UsbMounted {
+                    label, mount_point, ..
+                } => {
+                    self.hardware_notifications
+                        .push(format!("USB mounted: {label} at {}", mount_point.display()));
+                    // Auto-add as scan path
+                    let _ = self.library.add_scan_path(mount_point);
+                }
+                HardwareEvent::UsbRemoved { label, .. } => {
+                    self.hardware_notifications
+                        .push(format!("USB removed: {label}"));
+                }
+                HardwareEvent::DiscInserted {
+                    disc_type,
+                    dev_path,
+                    ..
+                } => {
+                    self.hardware_notifications
+                        .push(format!("Disc inserted: {disc_type} at {}", dev_path.display()));
+                }
+                HardwareEvent::DiscEjected { .. } => {
+                    self.hardware_notifications.push("Disc ejected".into());
+                }
+                HardwareEvent::PlaybackDeviceRemoved { .. } => {
+                    self.engine.stop();
+                    self.current_playing_id = None;
+                    self.hardware_notifications
+                        .push("Device removed during playback — stopped".into());
+                }
+                HardwareEvent::DeviceError { message, .. } => {
+                    self.hardware_notifications
+                        .push(format!("Device error: {message}"));
+                }
+            }
+        }
+
+        // Trim notification list
+        if self.hardware_notifications.len() > 10 {
+            self.hardware_notifications
+                .drain(..self.hardware_notifications.len() - 10);
+        }
+    }
+
     /// Create a headless GuiApp for testing (no MPRIS, no watcher).
     #[cfg(test)]
     pub fn new_headless(library: PersistentLibrary, engine: PlaybackEngine) -> Self {
@@ -223,6 +306,12 @@ impl GuiApp {
             video_texture: None,
             mpris_rx,
             _watcher: None,
+            #[cfg(feature = "yukti")]
+            hardware: None,
+            #[cfg(feature = "yukti")]
+            hardware_rx: None,
+            #[cfg(feature = "yukti")]
+            hardware_notifications: Vec::new(),
         }
     }
 
@@ -245,6 +334,8 @@ impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_engine();
         self.poll_mpris();
+        #[cfg(feature = "yukti")]
+        self.poll_hardware();
 
         // Request repaint at ~30fps while playing
         if self.engine.state() == jalwa_core::PlaybackState::Playing {
@@ -287,6 +378,7 @@ impl eframe::App for GuiApp {
             View::Queue => views::queue::queue_view(ui, self),
             View::Equalizer => views::equalizer::equalizer_view(ui, self),
             View::Video => views::video::video_view(ui, ctx, self),
+            View::Devices => views::devices::devices_view(ui, self),
         });
     }
 }

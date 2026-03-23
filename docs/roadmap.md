@@ -44,16 +44,16 @@
 - [ ] Audio visualizer overlay via aethersafta scene graph
 
 ## Phase 7 — Hardware Media Sources
-> **Blocked on**: **yantra** (AGNOS hardware device crate) (udev, hotplug, optical drive abstraction — built at AGNOS level, consumed here).
+> **yukti** (AGNOS hardware device crate) is now integrated (udev, hotplug, optical drive abstraction).
 > Also leverages **ai-hwaccel** for hardware-accelerated I/O.
 
-- [ ] Integrate **yantra** (AGNOS hardware device crate) when available
-- [ ] USB storage auto-detect: subscribe to device events, auto-add mount as scan path
-- [ ] USB hotplug: detect insert/eject, prompt to scan or eject safely
-- [ ] CD audio (CDDA) playback: read audio tracks from optical drives
-- [ ] DVD/Blu-ray disc browsing and playback (UDF/ISO 9660)
-- [ ] ai-hwaccel integration for hardware-accelerated disc I/O
-- [ ] Graceful handling of device removal during playback
+- [x] Integrate **yukti** (AGNOS hardware device crate) when available
+- [x] USB storage auto-detect: subscribe to device events, auto-add mount as scan path
+- [x] USB hotplug: detect insert/eject, prompt to scan or eject safely
+- [x] CD audio (CDDA) playback: read audio tracks from optical drives
+- [x] DVD/Blu-ray disc browsing and playback (UDF/ISO 9660)
+- [x] ai-hwaccel integration for hardware-accelerated disc I/O
+- [x] Graceful handling of device removal during playback
 
 ## Phase 8 — Desktop UI
 - [ ] Playlist editor

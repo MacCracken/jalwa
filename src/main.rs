@@ -57,6 +57,8 @@ enum Commands {
         /// M3U file path
         file: String,
     },
+    /// List detected hardware devices (USB, optical)
+    Devices,
     /// Launch interactive TUI
     Tui,
     /// Launch desktop GUI
@@ -95,6 +97,7 @@ async fn main() -> Result<()> {
         Some(Commands::Stats) => cmd_stats()?,
         Some(Commands::Scan { directory }) => cmd_scan(&directory)?,
         Some(Commands::Library) => cmd_library()?,
+        Some(Commands::Devices) => cmd_devices()?,
         Some(Commands::Export { name, output }) => cmd_export(&name, &output)?,
         Some(Commands::Import { file }) => cmd_import(&file)?,
         Some(Commands::Tui) => cmd_tui()?,
@@ -282,6 +285,50 @@ fn cmd_library() -> Result<()> {
         println!("\n{}", jalwa_ui::render_library_stats(&plib.library));
     }
     Ok(())
+}
+
+#[cfg(feature = "yukti")]
+fn cmd_devices() -> Result<()> {
+    let (mut hw, _rx) = jalwa_core::hardware::HardwareManager::new();
+    hw.start_monitoring()?;
+
+    let usb = hw.mounted_usb_devices();
+    let optical = hw.optical_drives();
+
+    if usb.is_empty() && optical.is_empty() {
+        println!("No media devices detected.");
+    } else {
+        if !usb.is_empty() {
+            println!("USB Storage:");
+            for dev in &usb {
+                let mount = dev
+                    .mount_point
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "not mounted".into());
+                println!(
+                    "  {} — {} ({})",
+                    dev.display_name(),
+                    dev.size_display(),
+                    mount
+                );
+            }
+        }
+        if !optical.is_empty() {
+            println!("Optical Drives:");
+            for dev in &optical {
+                println!("  {} — {}", dev.display_name(), dev.state);
+            }
+        }
+    }
+
+    hw.stop_monitoring();
+    Ok(())
+}
+
+#[cfg(not(feature = "yukti"))]
+fn cmd_devices() -> Result<()> {
+    anyhow::bail!("device detection requires the 'yukti' feature");
 }
 
 fn cmd_export(name: &str, output: &str) -> Result<()> {

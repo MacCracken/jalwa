@@ -18,6 +18,8 @@ pub fn sidebar(ui: &mut egui::Ui, app: &mut GuiApp) {
         entries.insert(2, (View::Video, "Video", "\u{1F3AC}"));
     }
 
+    entries.push((View::Devices, "Devices", "\u{1F50C}"));
+
     for (view, label, icon) in entries {
         let is_active = app.view == view;
         let text = format!("{icon} {label}");

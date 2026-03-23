@@ -5,6 +5,10 @@ edition = "2024"
 description = "Desktop GUI for Jalwa media player — egui/eframe with wgpu backend"
 license = "GPL-3.0"
 
+[features]
+default = []
+yukti = ["jalwa-core/yukti"]
+
 [dependencies]
 jalwa-core = { path = "../jalwa-core" }
 jalwa-playback = { path = "../jalwa-playback", default-features = false }

@@ -1,3 +1,4 @@
+pub mod devices;
 pub mod equalizer;
 pub mod library;
 pub mod now_playing;

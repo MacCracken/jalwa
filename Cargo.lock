@@ -2259,6 +2259,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "yukti",
 ]
 
 [[package]]
@@ -2296,6 +2297,7 @@ dependencies = [
  "tracing",
  "uuid",
  "walkdir",
+ "yukti",
 ]
 
 [[package]]
@@ -6222,6 +6224,22 @@ dependencies = [
  "quote",
  "syn",
  "synstructure",
+]
+
+[[package]]
+name = "yukti"
+version = "0.22.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a17c724ce8d60ec7effb894e72d62a69c926b428919091a2b096c7f6d9dfa3d"
+dependencies = [
+ "bitflags 2.11.0",
+ "chrono",
+ "libc",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
