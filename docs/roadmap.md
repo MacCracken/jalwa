@@ -23,8 +23,63 @@
 - [ ] "Play something like this" via semantic search (fingerprint + daimon RAG)
 - [ ] Mood-based playlists
 
-## Phase 10 — AGNOS Integration
-- [ ] Marketplace recipe
+## Phase 10 — Streaming Service Integrations
+
+Connect jalwa to external streaming services as playback sources. Each adapter implements a common trait for auth, search, playback, and library sync.
+
+### Adapters
+
+| Service | Protocol | Priority | Notes |
+|---------|----------|----------|-------|
+| **Apple Music** | MusicKit / Apple Music API | High | Requires Apple Developer token. Streaming via HLS. Library sync for playlists, favorites, recently played. |
+| **Spotify** | Spotify Web API + Connect | High | OAuth 2.0 PKCE. Streaming via Spotify Connect (jalwa as controller). Library sync. |
+| **Tidal** | Tidal API | Medium | Hi-res audio (MQA/FLAC). OAuth 2.0. |
+| **YouTube Music** | YouTube Data API v3 | Medium | OAuth 2.0. Video-backed audio. |
+| **SoundCloud** | SoundCloud API | Low | OAuth 2.0. Indie/DJ content. |
+| **Bandcamp** | Web scraping (no official API) | Low | Purchase-based. DRM-free downloads. |
+| **Local / NAS** | SMB, NFS, DLNA/UPnP | Medium | Network-attached media libraries. No auth needed. |
+| **Podcast feeds** | RSS/Atom + enclosures | Medium | Standard podcast protocol. No auth. |
+
+### Adapter Architecture
+
+```
+jalwa-core
+  └── StreamingAdapter trait
+        ├── authenticate() → Token
+        ├── search(query) → Vec<Track>
+        ├── play(track_id) → AudioStream
+        ├── pause() / resume() / seek()
+        ├── library() → Playlists, Favorites, History
+        └── sync() → merge remote ↔ local state
+```
+
+Each adapter is feature-gated in `jalwa-playback`:
+```toml
+[features]
+apple-music = []
+spotify = []
+tidal = []
+youtube-music = []
+soundcloud = []
+local-network = []
+podcasts = []
+streaming-full = ["apple-music", "spotify", "tidal", "youtube-music"]
+```
+
+### Requirements
+
+- All auth via OAuth 2.0 / PKCE where possible — no storing passwords
+- All network requests via reqwest with rustls — no openssl dependency
+- Offline queue: mark tracks for offline, download when connected
+- Unified search: one search bar queries all enabled adapters simultaneously
+- Library merge: remote playlists appear alongside local playlists seamlessly
+- Playback routing: stream audio through dhvani regardless of source
+
+---
+
+## Phase 11 — AGNOS Integration
+- [ ] Marketplace recipe (in zugot)
 - [ ] MCP tools registered in daimon
-- [ ] agnoshi intents ("play music", "next track", "search library")
+- [ ] agnoshi intents ("play music", "next track", "search library", "play my Apple Music playlist")
 - [ ] aethersafta media widget (mini player in compositor panel)
+- [ ] vinimaya integration for premium content purchases

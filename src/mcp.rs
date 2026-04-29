@@ -3,9 +3,11 @@
 //! JSON-RPC 2.0 over stdio. Exposes 8 tools for AI agent integration:
 //! play, pause, status, search, recommend, queue, library, playlist.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
+use bote::{ToolDef, ToolSchema};
 use serde_json::json;
 
 // ---------------------------------------------------------------------------
@@ -100,89 +102,91 @@ where
 // Tool list
 // ---------------------------------------------------------------------------
 
+fn tool_defs() -> Vec<ToolDef> {
+    vec![
+        ToolDef::new(
+            "jalwa_play",
+            "Play a media file (audio or video)",
+            ToolSchema::new(
+                "object",
+                HashMap::from([("path".into(), json!({"type": "string"}))]),
+                vec!["path".into()],
+            ),
+        ),
+        ToolDef::new(
+            "jalwa_pause",
+            "Pause current playback",
+            ToolSchema::new("object", HashMap::new(), vec![]),
+        ),
+        ToolDef::new(
+            "jalwa_status",
+            "Get current playback status (state, position, volume)",
+            ToolSchema::new("object", HashMap::new(), vec![]),
+        ),
+        ToolDef::new(
+            "jalwa_search",
+            "Search the media library by title, artist, album, or tag",
+            ToolSchema::new(
+                "object",
+                HashMap::from([("query".into(), json!({"type": "string"}))]),
+                vec!["query".into()],
+            ),
+        ),
+        ToolDef::new(
+            "jalwa_recommend",
+            "Get AI-powered media recommendations based on a seed item",
+            ToolSchema::new(
+                "object",
+                HashMap::from([
+                    ("item_id".into(), json!({"type": "string", "description": "UUID of seed media item"})),
+                    ("max".into(), json!({"type": "integer", "description": "Max recommendations (default 5)"})),
+                ]),
+                vec!["item_id".into()],
+            ),
+        ),
+        ToolDef::new(
+            "jalwa_queue",
+            "Manage the play queue (list, enqueue, clear, shuffle)",
+            ToolSchema::new(
+                "object",
+                HashMap::from([
+                    ("action".into(), json!({"type": "string", "description": "Action: list, enqueue, clear, shuffle"})),
+                    ("item_id".into(), json!({"type": "string", "description": "UUID of media item (for enqueue)"})),
+                ]),
+                vec!["action".into()],
+            ),
+        ),
+        ToolDef::new(
+            "jalwa_library",
+            "Manage the media library (stats, scan, list)",
+            ToolSchema::new(
+                "object",
+                HashMap::from([
+                    ("action".into(), json!({"type": "string", "description": "Action: stats, scan, list"})),
+                    ("path".into(), json!({"type": "string", "description": "Directory path (for scan)"})),
+                ]),
+                vec!["action".into()],
+            ),
+        ),
+        ToolDef::new(
+            "jalwa_playlist",
+            "Manage playlists (list, create, add, remove, export)",
+            ToolSchema::new(
+                "object",
+                HashMap::from([
+                    ("action".into(), json!({"type": "string", "description": "Action: list, create, add, remove, export"})),
+                    ("name".into(), json!({"type": "string", "description": "Playlist name (for create/add/remove/export)"})),
+                    ("item_id".into(), json!({"type": "string", "description": "UUID of media item (for add/remove)"})),
+                    ("output".into(), json!({"type": "string", "description": "Output M3U file path (for export)"})),
+                ]),
+                vec!["action".into()],
+            ),
+        ),
+    ]
+}
+
 fn tool_list() -> serde_json::Value {
-    json!({
-        "tools": [
-            {
-                "name": "jalwa_play",
-                "description": "Play a media file (audio or video)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": { "path": { "type": "string" } },
-                    "required": ["path"]
-                }
-            },
-            {
-                "name": "jalwa_pause",
-                "description": "Pause current playback",
-                "inputSchema": { "type": "object", "properties": {} }
-            },
-            {
-                "name": "jalwa_status",
-                "description": "Get current playback status (state, position, volume)",
-                "inputSchema": { "type": "object", "properties": {} }
-            },
-            {
-                "name": "jalwa_search",
-                "description": "Search the media library by title, artist, album, or tag",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": { "query": { "type": "string" } },
-                    "required": ["query"]
-                }
-            },
-            {
-                "name": "jalwa_recommend",
-                "description": "Get AI-powered media recommendations based on a seed item",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "item_id": { "type": "string", "description": "UUID of seed media item" },
-                        "max": { "type": "integer", "description": "Max recommendations (default 5)" }
-                    },
-                    "required": ["item_id"]
-                }
-            },
-            {
-                "name": "jalwa_queue",
-                "description": "Manage the play queue (list, enqueue, clear, shuffle)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "action": { "type": "string", "description": "Action: list, enqueue, clear, shuffle" },
-                        "item_id": { "type": "string", "description": "UUID of media item (for enqueue)" }
-                    },
-                    "required": ["action"]
-                }
-            },
-            {
-                "name": "jalwa_library",
-                "description": "Manage the media library (stats, scan, list)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "action": { "type": "string", "description": "Action: stats, scan, list" },
-                        "path": { "type": "string", "description": "Directory path (for scan)" }
-                    },
-                    "required": ["action"]
-                }
-            },
-            {
-                "name": "jalwa_playlist",
-                "description": "Manage playlists (list, create, add, remove, export)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "action": { "type": "string", "description": "Action: list, create, add, remove, export" },
-                        "name": { "type": "string", "description": "Playlist name (for create/add/remove/export)" },
-                        "item_id": { "type": "string", "description": "UUID of media item (for add/remove)" },
-                        "output": { "type": "string", "description": "Output M3U file path (for export)" }
-                    },
-                    "required": ["action"]
-                }
-            }
-        ]
-    })
+    json!({ "tools": tool_defs() })
 }
 
 // ---------------------------------------------------------------------------

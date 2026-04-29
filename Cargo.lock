@@ -466,6 +466,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bote"
+version = "0.50.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "built"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2244,6 +2254,7 @@ name = "jalwa"
 version = "2026.3.22"
 dependencies = [
  "anyhow",
+ "bote",
  "clap",
  "criterion",
  "egui",
