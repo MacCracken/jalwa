@@ -14,7 +14,7 @@
 ## Source / oracle
 
 - **Rust oracle**: 15,355 LOC (40 `.rs` files, full 5-crate workspace) frozen at `rust-old/`. Do not edit.
-- **Cyrius port**: `src/error.cyr` + `src/core/types.cyr` + `src/core/playlist_io.cyr` — green. `src/main.cyr` still the smoke stub.
+- **Cyrius port**: `src/error.cyr` + `src/core/types.cyr` + `src/core/playlist_io.cyr` + `src/core/db.cyr` (helpers) — green. `src/main.cyr` still the smoke stub.
 
 ## Port progress
 
@@ -22,7 +22,7 @@
 |---|---|
 | 0 — scaffold + oracle freeze + `error.cyr` | ✅ done |
 | A — core types | ✅ done — all 7 types (6 enums, PlaybackStatus, Uuid, Playlist, PlayQueue, MediaItem, Library); 72 tests. ADR 0001 (linear-scan indexes) |
-| B — core services | ⏳ in progress — `playlist_io` ✅ (fs idiom); db/scanner/watcher/hardware next |
+| B — core services | ⏳ in progress — `playlist_io` ✅; `db` helpers ✅ (parse/uuid-hex/tags-JSON), patra layer next; scanner/watcher/hardware after |
 | C — playback + DSP | ☐ |
 | D — AI | ☐ |
 | E — terminal UI | ☐ |
@@ -35,7 +35,7 @@ MPRIS export (samvada client-only).
 
 ## Tests
 
-- `tests/error.tcyr` 19/19 · `tests/core_types.tcyr` 72/72 · `tests/playlist_io.tcyr` 17/17 — all green. Bare `cyrius test` all green.
+- `tests/error.tcyr` 19/19 · `tests/core_types.tcyr` 72/72 · `tests/playlist_io.tcyr` 17/17 · `tests/db_helpers.tcyr` 34/34 — all green. Bare `cyrius test` all green.
 - Per-module `.tcyr` suites land with each ported module, cross-checked against `rust-old/` `#[test]` blocks.
 
 ## Dependencies

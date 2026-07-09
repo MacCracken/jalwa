@@ -1,0 +1,161 @@
+# core/db.cyr -- patra-backed persistence for the media library.
+# Ports rust-old/crates/jalwa-core/src/db.rs. L1: depends on error.cyr +
+# core/types.cyr. rusqlite -> patra (stdlib distlib). serde_json tags ->
+# hand-built JSON. DateTime<Utc> -> epoch seconds stored as a decimal string.
+#
+# INCREMENT 1 (this file, so far): the pure serialization helpers -- enum
+# string parsers, default db path, uuid<->hex, tags<->JSON. The patra-backed
+# LibraryDb / PersistentLibrary land next.
+#
+# patra dialect notes (differs from SQLite): column types are INT/STR/BYTES;
+# supports AUTOINCREMENT, OR IGNORE, ORDER BY, LIMIT, UPDATE, DELETE; NO
+# PRIMARY KEY / FOREIGN KEY / OR REPLACE. Upsert = DELETE-then-INSERT; binds are
+# 0-indexed. Optionals ride sentinels ("" / -1), not SQL NULL.
+
+# ---- small cstring helpers ----
+
+# concat 2 cstrings into a fresh null-terminated cstring.
+#must_use
+fn jlw_cstr_cat2(a, b) {
+    var la = strlen(a);
+    var lb = strlen(b);
+    var dst = alloc(la + lb + 1);
+    memcpy(dst, a, la);
+    memcpy(dst + la, b, lb);
+    store8(dst + la + lb, 0);
+    return dst;
+}
+
+# ---- Uuid <-> hex string (32 lowercase hex chars, no hyphens) ----
+# Rust used the hyphenated Uuid::to_string(); the port uses bare 32-hex since no
+# test compares the exact string -- only that ids round-trip consistently.
+#must_use
+fn jlw_hexval(c) {
+    if (c >= 48) { if (c <= 57)  { return c - 48; } }   # '0'..'9'
+    if (c >= 97) { if (c <= 102) { return c - 87; } }   # 'a'..'f'
+    if (c >= 65) { if (c <= 70)  { return c - 55; } }   # 'A'..'F'
+    return 0;
+}
+
+#must_use
+fn jlw_uuid_to_str(u) {
+    var s = alloc(33);
+    var hex = "0123456789abcdef";
+    for (var i = 0; i < 16; i = i + 1) {
+        var b = load8(u + i);
+        store8(s + i * 2,     load8(hex + (b / 16)));   # high nibble
+        store8(s + i * 2 + 1, load8(hex + (b % 16)));   # low nibble
+    }
+    store8(s + 32, 0);
+    return s;
+}
+
+#must_use
+fn jlw_uuid_from_str(s) {
+    var u = alloc(16);
+    for (var i = 0; i < 16; i = i + 1) {
+        var hi = jlw_hexval(load8(s + i * 2));
+        var lo = jlw_hexval(load8(s + i * 2 + 1));
+        store8(u + i, hi * 16 + lo);
+    }
+    return u;
+}
+
+# ---- tags Vec<String> <-> JSON array string ----
+# serde_json::to_string / from_str, minus escaping (tag values are simple).
+#must_use
+fn jlw_tags_to_json(tags) {
+    var sb = str_builder_new();
+    str_builder_putc(sb, 91);            # '['
+    var n = vec_len(tags);
+    for (var i = 0; i < n; i = i + 1) {
+        if (i > 0) { str_builder_putc(sb, 44); }   # ','
+        str_builder_putc(sb, 34);        # '"'
+        str_builder_add_cstr(sb, vec_get(tags, i));
+        str_builder_putc(sb, 34);        # '"'
+    }
+    str_builder_putc(sb, 93);            # ']'
+    return str_cstr(str_builder_build(sb));
+}
+
+#must_use
+fn jlw_tags_from_json(json) {
+    var v = vec_new();
+    if (json == 0) { return v; }
+    var n = strlen(json);
+    var i = 0;
+    while (i < n) {
+        if (load8(json + i) == 34) {     # opening '"'
+            var start = i + 1;
+            var j = start;
+            var scanning = 1;
+            while (scanning == 1) {
+                if (j >= n) { scanning = 0; }
+                else { if (load8(json + j) == 34) { scanning = 0; } else { j = j + 1; } }
+            }
+            var len = j - start;
+            var tag = alloc(len + 1);
+            memcpy(tag, json + start, len);
+            store8(tag + len, 0);
+            vec_push(v, tag);
+            i = j + 1;
+        } else {
+            i = i + 1;
+        }
+    }
+    return v;
+}
+
+# ---- enum string parsers (Debug-name -> code, with the Rust fallbacks) ----
+#must_use
+fn jlw_parse_format(s) {
+    if (streq(s, "Mp4")  == 1) { return JLW_FMT_MP4; }
+    if (streq(s, "Mkv")  == 1) { return JLW_FMT_MKV; }
+    if (streq(s, "WebM") == 1) { return JLW_FMT_WEBM; }
+    if (streq(s, "Ogg")  == 1) { return JLW_FMT_OGG; }
+    if (streq(s, "Wav")  == 1) { return JLW_FMT_WAV; }
+    if (streq(s, "Flac") == 1) { return JLW_FMT_FLAC; }
+    if (streq(s, "Mp3")  == 1) { return JLW_FMT_MP3; }
+    if (streq(s, "Avi")  == 1) { return JLW_FMT_AVI; }
+    return JLW_FMT_MP3;                   # fallback
+}
+
+#must_use
+fn jlw_parse_audio_codec(s) {
+    if (streq(s, "Pcm")    == 1) { return JLW_ACODEC_PCM; }
+    if (streq(s, "Mp3")    == 1) { return JLW_ACODEC_MP3; }
+    if (streq(s, "Aac")    == 1) { return JLW_ACODEC_AAC; }
+    if (streq(s, "Flac")   == 1) { return JLW_ACODEC_FLAC; }
+    if (streq(s, "Vorbis") == 1) { return JLW_ACODEC_VORBIS; }
+    if (streq(s, "Opus")   == 1) { return JLW_ACODEC_OPUS; }
+    if (streq(s, "Alac")   == 1) { return JLW_ACODEC_ALAC; }
+    if (streq(s, "Wma")    == 1) { return JLW_ACODEC_WMA; }
+    return JLW_ACODEC_PCM;                # fallback
+}
+
+#must_use
+fn jlw_parse_video_codec(s) {
+    if (streq(s, "H264")   == 1) { return JLW_VCODEC_H264; }
+    if (streq(s, "H265")   == 1) { return JLW_VCODEC_H265; }
+    if (streq(s, "Vp8")    == 1) { return JLW_VCODEC_VP8; }
+    if (streq(s, "Vp9")    == 1) { return JLW_VCODEC_VP9; }
+    if (streq(s, "Av1")    == 1) { return JLW_VCODEC_AV1; }
+    if (streq(s, "Theora") == 1) { return JLW_VCODEC_THEORA; }
+    return JLW_VCODEC_H264;               # fallback
+}
+
+# default_db_path(): $XDG_DATA_HOME/jalwa/library.db, else $HOME/.local/share/...
+# (HOME defaults to "."). Requires args_init() to have been called (getenv).
+#must_use
+fn jlw_default_db_path() {
+    var base = 0;
+    var xdg = getenv("XDG_DATA_HOME");
+    if (xdg != 0) { if (strlen(xdg) > 0) { base = xdg; } }
+    if (base == 0) {
+        var home = getenv("HOME");
+        if (home == 0) { home = "."; }
+        if (strlen(home) == 0) { home = "."; }
+        base = jlw_cstr_cat2(home, "/.local/share");
+    }
+    return jlw_cstr_cat2(base, "/jalwa/library.db");
+}
