@@ -23,7 +23,7 @@
 | 0 — scaffold + oracle freeze + `error.cyr` | ✅ done |
 | A — core types | ✅ done — all 7 types (6 enums, PlaybackStatus, Uuid, Playlist, PlayQueue, MediaItem, Library); 72 tests. ADR 0001 (linear-scan indexes) |
 | B — core services | ✅ done — `playlist_io`, `db`, `scanner`, `watcher`, `hardware` (yukti). **jalwa-core fully ported.** |
-| C — playback + DSP | ⏳ next — dsp→dhvani (clean win), decode_thread (tarang stub), engine facade; mpris shape-only |
+| C — playback + DSP | ⏳ foundation ready — **dhvani dist wired + verified** (EQ/gain API maps 1:1 to Rust); dsp next (stub AudioBuffer + dhvani bridge), then decode_thread (tarang stub), engine facade; mpris shape-only |
 | D — AI | ☐ |
 | E — terminal UI | ☐ |
 | F — desktop GUI | ☐ |
@@ -44,7 +44,8 @@ MPRIS export (samvada client-only).
 
 - **stdlib** (via `cyrius lib sync`): string, fmt, alloc, vec, str, syscalls, io, args, assert, **math**
   (to grow: fs, thread, net, http, chrono, random, hashmap, tagged, result, fnptr, bayan, patra, vani, yukti, sakshi, mabda, simd)
-- **dist repos** (to wire in Wave 0): dhvani, ai-hwaccel, bote, shravan, chitra, dhancha, darshana, abaco
+- **dist repos** (`[deps.X]` via `cyrius deps`): **dhvani 2.2.1 + abaco 2.3.2 wired ✅**; ai-hwaccel, bote, shravan, chitra, dhancha, darshana to wire per-wave
+  - note: abaco emits benign `duplicate symbol ERR_INVALID / MAX_TOKENS (last wins)` warnings under the dhvani fold — harmless
 - **Blocked (still Rust)**: tarang, aethersafta
 
 ## Next

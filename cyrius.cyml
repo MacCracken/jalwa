@@ -12,3 +12,13 @@ output = "jalwa"
 
 [deps]
 stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert", "math", "random", "chrono", "patra", "fs", "yukti", "hashmap", "tagged", "process"]
+
+[deps.dhvani]
+path = "../dhvani"
+tag = "2.2.1"
+modules = ["dist/dhvani.cyr"]
+
+[deps.abaco]
+path = "../abaco"
+tag = "2.3.2"
+modules = ["dist/abaco.cyr"]
