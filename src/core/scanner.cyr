@@ -1,0 +1,205 @@
+# core/scanner.cyr -- recursive media directory scanner.
+# Ports rust-old/crates/jalwa-core/src/scanner.rs. L1: depends on error.cyr +
+# core/types.cyr. walkdir -> fs stdlib (dir_list/path_join/is_dir, Str-based);
+# lofty tag read + tarang probe -> STUBBED (see below).
+#
+# STUBS (blocked, structure preserved):
+#  - tarang probe_audio -> jlw_media_info_stub (no Cyrius tarang). scan_file
+#    returns an unknown-probe JlwMediaInfo.
+#  - lofty tags + album art -> scan_file leaves title/artist/album/art = None.
+#    shravan can read ID3v2/Vorbis TEXT but can't locate the Vorbis block inside
+#    a FLAC/Ogg container, and has no picture parser -- deferred. No ported test
+#    exercises scan_file on a real media file (the two WAV tests DROP), so the
+#    stub is behavior-equivalent for the ported suite.
+# Everything else (extension filter, dir-walk + dirs_walked count, ScanResult/
+# ScanError, scanned_to_media_item tag-override) ports faithfully.
+
+# ---- MediaInfo stub (was tarang::core::MediaInfo) ----
+#derive(accessors)
+struct JlwMediaInfo { format; duration; audio_codec; video_codec; has_video; artist; album; }
+
+#must_use
+fn jlw_media_info_new(format, duration, audio_codec, video_codec, has_video, artist, album) {
+    var mi = alloc(sizeof(JlwMediaInfo));
+    JlwMediaInfo_set_format(mi, format);
+    JlwMediaInfo_set_duration(mi, duration);
+    JlwMediaInfo_set_audio_codec(mi, audio_codec);
+    JlwMediaInfo_set_video_codec(mi, video_codec);
+    JlwMediaInfo_set_has_video(mi, has_video);
+    JlwMediaInfo_set_artist(mi, artist);
+    JlwMediaInfo_set_album(mi, album);
+    return mi;
+}
+
+# unknown-probe stub: audio, unknown format/codec/duration.
+#must_use
+fn jlw_media_info_stub() {
+    return jlw_media_info_new(JLW_FMT_MP3, JLW_NAN, (0 - 1), (0 - 1), 0, 0, 0);
+}
+
+# ---- ScannedFile / ScanError / ScanResult ----
+#derive(accessors)
+struct JlwScannedFile { path; info; title; artist; album; art_mime; art_data; }
+#must_use
+fn jlw_scanned_file_new(path, info, title, artist, album, art_mime, art_data) {
+    var sf = alloc(sizeof(JlwScannedFile));
+    JlwScannedFile_set_path(sf, path);
+    JlwScannedFile_set_info(sf, info);
+    JlwScannedFile_set_title(sf, title);
+    JlwScannedFile_set_artist(sf, artist);
+    JlwScannedFile_set_album(sf, album);
+    JlwScannedFile_set_art_mime(sf, art_mime);
+    JlwScannedFile_set_art_data(sf, art_data);
+    return sf;
+}
+
+#derive(accessors)
+struct JlwScanError { path; error; }
+#must_use
+fn jlw_scan_error_new(path, error) {
+    var e = alloc(sizeof(JlwScanError));
+    JlwScanError_set_path(e, path);
+    JlwScanError_set_error(e, error);
+    return e;
+}
+
+#derive(accessors)
+struct JlwScanResult { files; errors; dirs_walked; }
+#must_use
+fn jlw_scan_result_new() {
+    var r = alloc(sizeof(JlwScanResult));
+    JlwScanResult_set_files(r, vec_new());
+    JlwScanResult_set_errors(r, vec_new());
+    JlwScanResult_set_dirs_walked(r, 0);
+    return r;
+}
+
+# ---- path helpers (cstring) ----
+# basename stem: last path component with the final extension stripped.
+#must_use
+fn jlw_path_stem(path) {
+    var n = strlen(path);
+    var base = 0;
+    for (var i = 0; i < n; i = i + 1) { if (load8(path + i) == 47) { base = i + 1; } }
+    var dot = n;
+    for (var j = base; j < n; j = j + 1) { if (load8(path + j) == 46) { dot = j; } }
+    var len = dot - base;
+    var s = alloc(len + 1);
+    memcpy(s, path + base, len);
+    store8(s + len, 0);
+    return s;
+}
+
+# extension after the last '.' in the basename, or 0 if none.
+#must_use
+fn jlw_path_ext(path) {
+    var n = strlen(path);
+    var base = 0;
+    for (var i = 0; i < n; i = i + 1) { if (load8(path + i) == 47) { base = i + 1; } }
+    var dot = (0 - 1);
+    for (var j = base; j < n; j = j + 1) { if (load8(path + j) == 46) { dot = j; } }
+    if (dot == (0 - 1)) { return 0; }
+    var len = n - dot - 1;
+    if (len == 0) { return 0; }
+    var e = alloc(len + 1);
+    memcpy(e, path + dot + 1, len);
+    store8(e + len, 0);
+    return e;
+}
+
+# is_supported_extension: case-insensitive membership in the 10 media exts.
+#must_use
+fn jlw_scanner_is_supported_extension(ext) {
+    var e = str_lower_cstr(ext);
+    if (streq(e, "mp3")  == 1) { return 1; }
+    if (streq(e, "flac") == 1) { return 1; }
+    if (streq(e, "wav")  == 1) { return 1; }
+    if (streq(e, "ogg")  == 1) { return 1; }
+    if (streq(e, "m4a")  == 1) { return 1; }
+    if (streq(e, "mp4")  == 1) { return 1; }
+    if (streq(e, "mkv")  == 1) { return 1; }
+    if (streq(e, "webm") == 1) { return 1; }
+    if (streq(e, "aac")  == 1) { return 1; }
+    if (streq(e, "opus") == 1) { return 1; }
+    return 0;
+}
+
+# extract_art: STUB -- shravan has no picture parser. Always (None, None).
+fn jlw_scanner_extract_art(pics, out_mime, out_data) {
+    store64(out_mime, 0);
+    store64(out_data, 0);
+    return 0;
+}
+
+# scan_file: STUB probe + STUB tags (see module header). Returns a JlwScannedFile.
+#must_use
+fn jlw_scanner_scan_file(path) {
+    return jlw_scanned_file_new(path, jlw_media_info_stub(), 0, 0, 0, 0, 0);
+}
+
+# recursive walk: count each directory into *dirs_ptr; scan supported files.
+fn jlw_scanner_walk(dir, result, dirs_ptr) {
+    store64(dirs_ptr, load64(dirs_ptr) + 1);
+    var entries = dir_list(dir);
+    var n = vec_len(entries);
+    for (var i = 0; i < n; i = i + 1) {
+        var full = path_join(dir, vec_get(entries, i));
+        if (is_dir(full) == 1) {
+            jlw_scanner_walk(full, result, dirs_ptr);
+        } else {
+            var fullc = str_cstr(full);
+            var ext = jlw_path_ext(fullc);
+            if (ext != 0) {
+                if (jlw_scanner_is_supported_extension(ext) == 1) {
+                    var scanned = jlw_scanner_scan_file(fullc);
+                    if (scanned != 0) {
+                        vec_push(JlwScanResult_files(result), scanned);
+                    } else {
+                        vec_push(JlwScanResult_errors(result), jlw_scan_error_new(fullc, jlw_err_name(JLW_ERR_SCANNER)));
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+# scan_directory: recursive scan. Returns a JlwScanResult, or 0 (Err) if the
+# path is not a directory.
+#must_use
+fn jlw_scanner_scan_directory(path) {
+    var pstr = str_from(path);
+    if (is_dir(pstr) == 0) { return 0; }
+    var result = jlw_scan_result_new();
+    var dirs = alloc(8);
+    store64(dirs, 0);
+    jlw_scanner_walk(pstr, result, dirs);
+    JlwScanResult_set_dirs_walked(result, load64(dirs));
+    return result;
+}
+
+# scanned_to_media_item: from_probe (title = filename stem, media_type/format/
+# codecs/artist/album/duration from the probe info) then override with the
+# richer scanned tags where present.
+#must_use
+fn jlw_scanner_scanned_to_media_item(scanned) {
+    var info = JlwScannedFile_info(scanned);
+    var path = JlwScannedFile_path(scanned);
+    var media_type = JLW_MEDIA_AUDIO;
+    if (JlwMediaInfo_has_video(info) == 1) { media_type = JLW_MEDIA_VIDEO; }
+    var item = jlw_media_item_new(path, jlw_path_stem(path), media_type, JlwMediaInfo_format(info));
+    JlwMediaItem_set_artist(item, JlwMediaInfo_artist(info));
+    JlwMediaItem_set_album(item, JlwMediaInfo_album(info));
+    JlwMediaItem_set_duration(item, JlwMediaInfo_duration(info));
+    JlwMediaItem_set_audio_codec(item, JlwMediaInfo_audio_codec(info));
+    JlwMediaItem_set_video_codec(item, JlwMediaInfo_video_codec(info));
+    var t = JlwScannedFile_title(scanned);
+    if (t != 0) { JlwMediaItem_set_title(item, t); }
+    var ar = JlwScannedFile_artist(scanned);
+    if (ar != 0) { JlwMediaItem_set_artist(item, ar); }
+    var al = JlwScannedFile_album(scanned);
+    if (al != 0) { JlwMediaItem_set_album(item, al); }
+    JlwMediaItem_set_art_mime(item, JlwScannedFile_art_mime(scanned));
+    JlwMediaItem_set_art_data(item, JlwScannedFile_art_data(scanned));
+    return item;
+}

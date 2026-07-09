@@ -1,0 +1,102 @@
+# scanner.tcyr -- parity tests for src/core/scanner.cyr.
+# Ports the scanner #[test]s from rust-old/crates/jalwa-core/src/scanner.rs.
+# DROPPED: scan_directory_with_wav + scan_file_and_convert (need a shravan WAV
+# duration probe; the tarang probe + shravan tag path are stubbed).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/scanner.cyr"
+
+fn mkdir(p) { syscall(83, p, 493); return 0; }             # 493 = 0755
+fn writef(p, c) { file_write_all(p, c, strlen(c)); return 0; }
+
+alloc_init();
+
+# ---- supported_extensions ----
+test_group("supported extensions");
+assert_eq(jlw_scanner_is_supported_extension("mp3"),  1, "mp3");
+assert_eq(jlw_scanner_is_supported_extension("FLAC"), 1, "FLAC (case-insensitive)");
+assert_eq(jlw_scanner_is_supported_extension("wav"),  1, "wav");
+assert_eq(jlw_scanner_is_supported_extension("ogg"),  1, "ogg");
+assert_eq(jlw_scanner_is_supported_extension("m4a"),  1, "m4a");
+assert_eq(jlw_scanner_is_supported_extension("opus"), 1, "opus");
+assert_eq(jlw_scanner_is_supported_extension("txt"),  0, "txt");
+assert_eq(jlw_scanner_is_supported_extension("pdf"),  0, "pdf");
+assert_eq(jlw_scanner_is_supported_extension("rs"),   0, "rs");
+
+# ---- scan_not_a_directory -> Err (0) ----
+test_group("scan not a directory");
+assert_eq(jlw_scanner_scan_directory("/nonexistent/path"), 0, "None on missing dir");
+
+# ---- scan_empty_directory ----
+test_group("scan empty directory");
+mkdir("/tmp/jalwa_scan_empty");
+var r1 = jlw_scanner_scan_directory("/tmp/jalwa_scan_empty");
+assert_eq(vec_len(JlwScanResult_files(r1)), 0, "no files");
+assert_eq(vec_len(JlwScanResult_errors(r1)), 0, "no errors");
+assert_eq(JlwScanResult_dirs_walked(r1) > 0, 1, "dirs_walked > 0");
+
+# ---- scan_skips_non_media ----
+test_group("scan skips non-media");
+mkdir("/tmp/jalwa_scan_skips");
+writef("/tmp/jalwa_scan_skips/readme.txt", "hello");
+writef("/tmp/jalwa_scan_skips/code.rs", "fn main() {}");
+var r2 = jlw_scanner_scan_directory("/tmp/jalwa_scan_skips");
+assert_eq(vec_len(JlwScanResult_files(r2)), 0, "no media files");
+
+# ---- extract_art_empty ----
+test_group("extract art empty");
+var om = alloc(8);
+var od = alloc(8);
+jlw_scanner_extract_art(0, om, od);
+assert_eq(load64(om), 0, "mime None");
+assert_eq(load64(od), 0, "data None");
+
+# ---- scanned_to_media_item_applies_tags ----
+test_group("scanned_to_media_item applies tags");
+var infoA = jlw_media_info_new(JLW_FMT_MP3, f64_from(200), JLW_ACODEC_MP3, (0 - 1), 0, 0, 0);
+var dummy_art = alloc(3);
+var sfA = jlw_scanned_file_new("/music/track.mp3", infoA, "My Song", "My Artist", "My Album", "image/jpeg", dummy_art);
+var itemA = jlw_scanner_scanned_to_media_item(sfA);
+assert_streq(JlwMediaItem_title(itemA), "My Song", "title override");
+assert_streq(JlwMediaItem_artist(itemA), "My Artist", "artist override");
+assert_streq(JlwMediaItem_album(itemA), "My Album", "album override");
+assert_streq(JlwMediaItem_art_mime(itemA), "image/jpeg", "art mime");
+assert_eq(JlwMediaItem_art_data(itemA) != 0, 1, "art data is_some");
+
+# ---- scanned_to_media_item_no_tags (title falls back to filename stem) ----
+test_group("scanned_to_media_item no tags");
+var infoB = jlw_media_info_new(JLW_FMT_FLAC, f64_from(180), JLW_ACODEC_FLAC, (0 - 1), 0, "Probe Artist", 0);
+var sfB = jlw_scanned_file_new("/music/song.flac", infoB, 0, 0, 0, 0, 0);
+var itemB = jlw_scanner_scanned_to_media_item(sfB);
+assert_streq(JlwMediaItem_title(itemB), "song", "title = filename stem");
+assert_eq(JlwMediaItem_art_data(itemB), 0, "art data None");
+
+# ---- scan_result_struct_fields ----
+test_group("scan result struct fields");
+var r3 = jlw_scan_result_new();
+vec_push(JlwScanResult_errors(r3), jlw_scan_error_new("/bad/file.mp3", "corrupt header"));
+JlwScanResult_set_dirs_walked(r3, 3);
+assert_eq(vec_len(JlwScanResult_files(r3)), 0, "files empty");
+assert_eq(vec_len(JlwScanResult_errors(r3)), 1, "1 error");
+var e0 = vec_get(JlwScanResult_errors(r3), 0);
+assert_streq(JlwScanError_path(e0), "/bad/file.mp3", "error path");
+assert_streq(JlwScanError_error(e0), "corrupt header", "error message");
+assert_eq(JlwScanResult_dirs_walked(r3), 3, "dirs_walked 3");
+
+# ---- scan_error_stores_path_and_message ----
+test_group("scan error fields");
+var err = jlw_scan_error_new("/music/broken.flac", "unexpected EOF");
+assert_streq(JlwScanError_path(err), "/music/broken.flac", "path");
+assert_streq(JlwScanError_error(err), "unexpected EOF", "message");
+
+# ---- scan_result_dirs_walked_counts_correctly (root + a + a/b >= 3) ----
+test_group("dirs_walked counts nested");
+mkdir("/tmp/jalwa_scan_dirs");
+mkdir("/tmp/jalwa_scan_dirs/a");
+mkdir("/tmp/jalwa_scan_dirs/a/b");
+var r4 = jlw_scanner_scan_directory("/tmp/jalwa_scan_dirs");
+assert_eq(JlwScanResult_dirs_walked(r4) >= 3, 1, "dirs_walked >= 3");
+
+var rc = assert_summary();
+syscall(60, rc);
