@@ -1,0 +1,128 @@
+# playback/dsp.cyr -- audio DSP: 10-band EQ + volume normalization, dhvani-backed.
+# Ports rust-old/crates/jalwa-playback/src/dsp.rs. L2: depends on error.cyr and
+# the dhvani dist ([deps.dhvani]). The whole Rust module is #[cfg(feature =
+# "tarang")]-gated on tarang's AudioBuffer; here AudioBuffer is STUBBED as
+# JlwAudioBuffer.
+#
+# REPRESENTATION: tarang's AudioBuffer stored f32 samples as raw Bytes; dhvani
+# stores f64 sample vecs (its own f32<->f64 convert is a plain vec copy). The
+# port carries a f64 sample vec directly -- no bytemuck f32-byte cast. So the
+# three buf_to_f32 byte-alignment/truncation tests (which exercised the tarang
+# Bytes cast layer) are DROPPED; buf_to_f32 here just returns the sample vec.
+# The EQ + loudness DSP is REAL (dhvani); EqSettings/presets/GainSmoother are
+# dhvani's re-exported API.
+
+# Target RMS for normalization (~-18 dBFS ReplayGain reference).
+var JLW_TARGET_RMS = 0x3FC0000000000000;   # 0.125
+
+# ---- AudioBuffer stub (was tarang::core::AudioBuffer) ----
+#derive(accessors)
+struct JlwAudioBuffer { samples; channels; sample_rate; num_frames; }
+#must_use
+fn jlw_audio_buffer_new(samples, channels, sample_rate) {
+    var b = alloc(sizeof(JlwAudioBuffer));
+    JlwAudioBuffer_set_samples(b, samples);
+    JlwAudioBuffer_set_channels(b, channels);
+    JlwAudioBuffer_set_sample_rate(b, sample_rate);
+    if (channels > 0) { JlwAudioBuffer_set_num_frames(b, vec_len(samples) / channels); }
+    else { JlwAudioBuffer_set_num_frames(b, 0); }
+    return b;
+}
+
+# ---- LoudnessInfo ----
+#derive(accessors)
+struct JlwLoudnessInfo { rms; peak; gain; }
+#must_use
+fn jlw_loudness_new(rms, peak, gain) {
+    var l = alloc(sizeof(JlwLoudnessInfo));
+    JlwLoudnessInfo_set_rms(l, rms);
+    JlwLoudnessInfo_set_peak(l, peak);
+    JlwLoudnessInfo_set_gain(l, gain);
+    return l;
+}
+
+# buf_to_f32: the sample vec (f64). The Bytes/bytemuck f32-cast layer is dropped.
+#inline
+#must_use
+fn jlw_dsp_buf_to_f32(buf) { return JlwAudioBuffer_samples(buf); }
+
+# to_dhvani: f64 samples + metadata -> a dhvani AudioBuffer (silence on bad input).
+# COPIES the samples (Rust `samples.to_vec()`) -- dhvani_buffer_from_interleaved
+# shares the vec, and geq_process mutates in place, so without a copy the source
+# buffer would be clobbered. (A real render loop should reuse a scratch buffer to
+# stay alloc-free; parity with the Rust copy is the bar here.)
+#must_use
+fn jlw_dsp_to_dhvani(samples, channels, sample_rate) {
+    var copy = vec_new();
+    var n = vec_len(samples);
+    for (var i = 0; i < n; i = i + 1) { vec_push(copy, vec_get(samples, i)); }
+    var b = dhvani_buffer_from_interleaved(copy, channels, sample_rate);
+    if (b == 0) { return dhvani_buffer_silence(channels, 0, sample_rate); }
+    return b;
+}
+
+# f32_to_buf: wrap a sample vec into a JlwAudioBuffer with a template's metadata.
+#must_use
+fn jlw_dsp_f32_to_buf(samples, template) {
+    return jlw_audio_buffer_new(samples, JlwAudioBuffer_channels(template), JlwAudioBuffer_sample_rate(template));
+}
+
+# analyze_loudness: rms/peak + normalization gain (dhvani-backed).
+#must_use
+fn jlw_dsp_analyze_loudness(buf) {
+    var samples = jlw_dsp_buf_to_f32(buf);
+    if (vec_len(samples) == 0) { return jlw_loudness_new(0, 0, 1.0); }
+    var dbuf = jlw_dsp_to_dhvani(samples, JlwAudioBuffer_channels(buf), JlwAudioBuffer_sample_rate(buf));
+    return jlw_loudness_new(dhvani_buffer_rms(dbuf), dhvani_buffer_peak(dbuf), dhvani_analysis_suggest_gain(dbuf, JLW_TARGET_RMS));
+}
+
+# normalize: apply gain with peak-limiting to prevent clipping.
+#must_use
+fn jlw_dsp_normalize(buf, gain) {
+    var samples = jlw_dsp_buf_to_f32(buf);
+    var n = vec_len(samples);
+    var limited = gain;
+    if (f64_gt(gain, 1.0) == 1) {
+        var maxa = 0;
+        for (var i = 0; i < n; i = i + 1) {
+            var a = f64_abs(f64_mul(vec_get(samples, i), gain));
+            if (f64_gt(a, maxa) == 1) { maxa = a; }
+        }
+        if (f64_gt(maxa, 1.0) == 1) { limited = f64_div(gain, maxa); }
+    }
+    var scaled = vec_new();
+    for (var i = 0; i < n; i = i + 1) { vec_push(scaled, f64_mul(vec_get(samples, i), limited)); }
+    return jlw_dsp_f32_to_buf(scaled, buf);
+}
+
+# ---- 10-band graphic equalizer (dhvani GraphicEq) ----
+#derive(accessors)
+struct JlwEqualizer { inner; settings; }
+#must_use
+fn jlw_dsp_eq_new(sample_rate) {
+    var eq = alloc(sizeof(JlwEqualizer));
+    JlwEqualizer_set_inner(eq, dhvani_geq_new(sample_rate, 2));
+    JlwEqualizer_set_settings(eq, dhvani_geq_settings_default());
+    return eq;
+}
+#inline
+#must_use
+fn jlw_dsp_eq_settings(eq) { return JlwEqualizer_settings(eq); }
+fn jlw_dsp_eq_update_coefficients(eq) {
+    dhvani_geq_set_settings(JlwEqualizer_inner(eq), JlwEqualizer_settings(eq));
+    return 0;
+}
+fn jlw_dsp_eq_reset(eq) { dhvani_geq_reset(JlwEqualizer_inner(eq)); return 0; }
+
+# process: passthrough when disabled or flat; else run the dhvani EQ.
+#must_use
+fn jlw_dsp_eq_process(eq, buf) {
+    var s = JlwEqualizer_settings(eq);
+    if (dhvani_geq_settings_enabled(s) == 0) { return buf; }
+    if (dhvani_geq_settings_is_flat(s) == 1) { return buf; }
+    var samples = jlw_dsp_buf_to_f32(buf);
+    var dbuf = jlw_dsp_to_dhvani(samples, JlwAudioBuffer_channels(buf), JlwAudioBuffer_sample_rate(buf));
+    dhvani_geq_set_enabled(JlwEqualizer_inner(eq), 1);
+    dhvani_geq_process(JlwEqualizer_inner(eq), dbuf);
+    return jlw_dsp_f32_to_buf(dhvani_buffer_samples(dbuf), buf);
+}

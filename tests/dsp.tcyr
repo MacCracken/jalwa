@@ -1,0 +1,210 @@
+# dsp.tcyr -- parity tests for src/playback/dsp.cyr.
+# Ports the dsp #[test]s from rust-old/crates/jalwa-playback/src/dsp.rs.
+# DROPPED: buf_to_f32_aligned/unaligned/empty (they test the tarang Bytes /
+# bytemuck f32-byte cast layer; the port carries an f64 sample vec directly).
+# EqSettings/preset/GainSmoother assert against dhvani's re-exported API.
+
+include "src/error.cyr"
+include "src/playback/dsp.cyr"
+
+# make_buf(samples_vec, channels, sr).
+fn make_buf(samples, channels, sr) { return jlw_audio_buffer_new(samples, channels, sr); }
+
+# make_sine(freq, sr, n): vec of f64 sine samples.
+fn make_sine(freq, sr, n) {
+    var two_pi = 6.283185307179586;
+    var v = vec_new();
+    for (var i = 0; i < n; i = i + 1) {
+        var t = f64_div(f64_from(i), f64_from(sr));
+        vec_push(v, f64_sin(f64_mul(f64_mul(t, freq), two_pi)));
+    }
+    return v;
+}
+fn zeros(n) { var v = vec_new(); for (var i = 0; i < n; i = i + 1) { vec_push(v, 0); } return v; }
+fn consts(n, val) { var v = vec_new(); for (var i = 0; i < n; i = i + 1) { vec_push(v, val); } return v; }
+fn rms(samples) {
+    var n = vec_len(samples);
+    if (n == 0) { return 0; }
+    var sum = 0;
+    for (var i = 0; i < n; i = i + 1) { var s = vec_get(samples, i); sum = f64_add(sum, f64_mul(s, s)); }
+    return f64_sqrt(f64_div(sum, f64_from(n)));
+}
+fn vecs_eq(a, b) {
+    if (vec_len(a) != vec_len(b)) { return 0; }
+    for (var i = 0; i < vec_len(a); i = i + 1) { if (vec_get(a, i) != vec_get(b, i)) { return 0; } }
+    return 1;
+}
+
+alloc_init();
+
+# ---- normalization / loudness ----
+test_group("loudness silent buffer");
+var lb = make_buf(zeros(1000), 1, 44100);
+var li = jlw_dsp_analyze_loudness(lb);
+assert_eq(JlwLoudnessInfo_rms(li), 0, "rms 0");
+assert_eq(JlwLoudnessInfo_peak(li), 0, "peak 0");
+assert_eq(JlwLoudnessInfo_gain(li), 1.0, "gain 1.0");
+
+test_group("loudness full-scale sine");
+var fi = jlw_dsp_analyze_loudness(make_buf(make_sine(440.0, 44100, 44100), 1, 44100));
+assert_eq(f64_gt(JlwLoudnessInfo_rms(fi), 0.5), 1, "rms > 0.5");
+assert_eq(f64_lt(JlwLoudnessInfo_rms(fi), 0.8), 1, "rms < 0.8");
+assert_eq(f64_gt(JlwLoudnessInfo_peak(fi), 0.99), 1, "peak > 0.99");
+assert_eq(f64_lt(JlwLoudnessInfo_gain(fi), 1.0), 1, "gain < 1.0");
+
+test_group("loudness quiet signal");
+var qv = vec_new();
+for (var i = 0; i < 1000; i = i + 1) { vec_push(qv, f64_mul(f64_sin(f64_mul(f64_from(i), 0.01)), 0.01)); }
+var qi = jlw_dsp_analyze_loudness(make_buf(qv, 1, 44100));
+assert_eq(f64_gt(JlwLoudnessInfo_gain(qi), 1.0), 1, "quiet -> positive gain");
+assert_eq(f64_lt(JlwLoudnessInfo_gain(qi), 10.001), 1, "gain clamped <= 10");
+
+test_group("normalize prevents clipping");
+var nc = jlw_dsp_normalize(make_buf(consts(100, 0.5), 1, 44100), 3.0);
+var ncs = jlw_dsp_buf_to_f32(nc);
+var clip_ok = 1;
+for (var i = 0; i < vec_len(ncs); i = i + 1) { if (f64_gt(f64_abs(vec_get(ncs, i)), 1.0) == 1) { clip_ok = 0; } }
+assert_eq(clip_ok, 1, "no sample exceeds 1.0");
+
+test_group("normalize attenuate");
+var na = jlw_dsp_normalize(make_buf(consts(100, 0.8), 1, 44100), 0.5);
+var nas = jlw_dsp_buf_to_f32(na);
+assert_eq(f64_lt(f64_abs(f64_sub(vec_get(nas, 0), 0.4)), 0.001), 1, "0.8*0.5 = 0.4");
+
+test_group("loudness empty buffer");
+assert_eq(JlwLoudnessInfo_gain(jlw_dsp_analyze_loudness(make_buf(vec_new(), 1, 44100))), 1.0, "empty -> gain 1.0");
+
+# ---- EqSettings (dhvani GraphicEqSettings) ----
+test_group("EqSettings default is flat");
+var ds = dhvani_geq_settings_default();
+assert_eq(dhvani_geq_settings_enabled(ds), 0, "disabled by default");
+assert_eq(dhvani_geq_settings_is_flat(ds), 1, "flat");
+
+test_group("EqSettings set_band");
+var sb = dhvani_geq_settings_default();
+DhGraphicEqSettings_set_enabled(sb, 1);
+dhvani_geq_settings_set_band(sb, 0, 6.0);
+assert_eq(dhvani_geq_settings_band(sb, 0), 6.0, "band 0 = 6.0");
+assert_eq(dhvani_geq_settings_is_flat(sb), 0, "not flat");
+
+test_group("EqSettings clamp");
+var cs = dhvani_geq_settings_default();
+dhvani_geq_settings_set_band(cs, 0, 20.0);
+assert_eq(dhvani_geq_settings_band(cs, 0), 12.0, "clamped to +12");
+dhvani_geq_settings_set_band(cs, 0, f64_neg(20.0));
+assert_eq(dhvani_geq_settings_band(cs, 0), f64_neg(12.0), "clamped to -12");
+
+test_group("EqSettings out-of-range band");
+var os = dhvani_geq_settings_default();
+dhvani_geq_settings_set_band(os, 99, 6.0);
+assert_eq(dhvani_geq_settings_is_flat(os), 1, "still flat (99 ignored)");
+
+test_group("Eq band names");
+assert_streq(dhvani_geq_band_name(0), "31 Hz", "band 0");
+assert_streq(dhvani_geq_band_name(5), "1 kHz", "band 5");
+assert_streq(dhvani_geq_band_name(9), "16 kHz", "band 9");
+assert_streq(dhvani_geq_band_name(10), "?", "band 10 -> ?");
+
+# ---- Equalizer process ----
+test_group("EQ flat passthrough");
+var buf1 = make_buf(make_sine(1000.0, 48000, 4800), 1, 48000);
+var eq1 = jlw_dsp_eq_new(48000);
+DhGraphicEqSettings_set_enabled(jlw_dsp_eq_settings(eq1), 1);
+assert_eq(vecs_eq(jlw_dsp_buf_to_f32(jlw_dsp_eq_process(eq1, buf1)), jlw_dsp_buf_to_f32(buf1)), 1, "flat -> passthrough");
+
+test_group("EQ disabled passthrough");
+var buf2 = make_buf(make_sine(1000.0, 48000, 4800), 1, 48000);
+var eq2 = jlw_dsp_eq_new(48000);
+dhvani_geq_settings_set_band(jlw_dsp_eq_settings(eq2), 5, 12.0);
+assert_eq(vecs_eq(jlw_dsp_buf_to_f32(jlw_dsp_eq_process(eq2, buf2)), jlw_dsp_buf_to_f32(buf2)), 1, "disabled -> passthrough");
+
+test_group("EQ boost changes signal");
+var buf3 = make_buf(make_sine(1000.0, 48000, 4800), 1, 48000);
+var eq3 = jlw_dsp_eq_new(48000);
+DhGraphicEqSettings_set_enabled(jlw_dsp_eq_settings(eq3), 1);
+dhvani_geq_settings_set_band(jlw_dsp_eq_settings(eq3), 5, 12.0);
+jlw_dsp_eq_update_coefficients(eq3);
+var out3 = jlw_dsp_eq_process(eq3, buf3);
+assert_eq(vecs_eq(jlw_dsp_buf_to_f32(out3), jlw_dsp_buf_to_f32(buf3)), 0, "signal changed");
+assert_eq(f64_gt(rms(jlw_dsp_buf_to_f32(out3)), rms(jlw_dsp_buf_to_f32(buf3))), 1, "boost raises RMS");
+
+test_group("EQ cut changes signal");
+var buf4 = make_buf(make_sine(1000.0, 48000, 4800), 1, 48000);
+var eq4 = jlw_dsp_eq_new(48000);
+DhGraphicEqSettings_set_enabled(jlw_dsp_eq_settings(eq4), 1);
+dhvani_geq_settings_set_band(jlw_dsp_eq_settings(eq4), 5, f64_neg(12.0));
+jlw_dsp_eq_update_coefficients(eq4);
+assert_eq(f64_lt(rms(jlw_dsp_buf_to_f32(jlw_dsp_eq_process(eq4, buf4))), rms(jlw_dsp_buf_to_f32(buf4))), 1, "cut lowers RMS");
+
+test_group("EQ reset");
+jlw_dsp_eq_reset(jlw_dsp_eq_new(48000));
+assert_eq(1, 1, "reset does not crash");
+
+test_group("EQ stereo");
+var st = vec_new();
+for (var i = 0; i < 4800; i = i + 1) {
+    var s = f64_sin(f64_mul(f64_mul(f64_div(f64_from(i), 48000.0), 1000.0), 6.283185307179586));
+    vec_push(st, s); vec_push(st, s);
+}
+var bufs = make_buf(st, 2, 48000);
+var eqs = jlw_dsp_eq_new(48000);
+DhGraphicEqSettings_set_enabled(jlw_dsp_eq_settings(eqs), 1);
+dhvani_geq_settings_set_band(jlw_dsp_eq_settings(eqs), 5, 6.0);
+jlw_dsp_eq_update_coefficients(eqs);
+var outs = jlw_dsp_eq_process(eqs, bufs);
+assert_eq(JlwAudioBuffer_channels(outs), 2, "stereo channels");
+assert_eq(JlwAudioBuffer_num_frames(outs), 4800, "4800 frames");
+
+# ---- presets ----
+test_group("preset names list");
+var pcount = dhvani_geq_preset_count();
+assert_eq(pcount >= 9, 1, "at least 9 presets");
+var has_rock = 0; var has_jazz = 0; var has_flat = 0;
+for (var i = 0; i < pcount; i = i + 1) {
+    var nm = dhvani_geq_preset_name(i);
+    if (streq(nm, "rock") == 1) { has_rock = 1; }
+    if (streq(nm, "jazz") == 1) { has_jazz = 1; }
+    if (streq(nm, "flat") == 1) { has_flat = 1; }
+}
+assert_eq(has_rock, 1, "has rock");
+assert_eq(has_jazz, 1, "has jazz");
+assert_eq(has_flat, 1, "has flat");
+
+test_group("preset rock");
+var pr = dhvani_geq_settings_preset("rock");
+assert_eq(dhvani_geq_settings_enabled(pr), 1, "enabled");
+assert_eq(dhvani_geq_settings_is_flat(pr), 0, "not flat");
+assert_eq(f64_gt(dhvani_geq_settings_band(pr, 0), 0), 1, "band 0 boosted");
+
+test_group("preset flat is default");
+var pf = dhvani_geq_settings_preset("flat");
+var flat_ok = 1;
+for (var i = 0; i < 10; i = i + 1) { if (dhvani_geq_settings_band(pf, i) != 0) { flat_ok = 0; } }
+assert_eq(flat_ok, 1, "all bands 0");
+
+test_group("preset unknown returns flat");
+var pu = dhvani_geq_settings_preset("nonexistent");
+var unk_ok = 1;
+for (var i = 0; i < 10; i = i + 1) { if (dhvani_geq_settings_band(pu, i) != 0) { unk_ok = 0; } }
+assert_eq(unk_ok, 1, "unknown -> all bands 0");
+
+test_group("all presets valid range");
+var range_ok = 1;
+for (var p = 0; p < pcount; p = p + 1) {
+    var ps = dhvani_geq_settings_preset(dhvani_geq_preset_name(p));
+    for (var b = 0; b < 10; b = b + 1) {
+        var v = dhvani_geq_settings_band(ps, b);
+        if (f64_gt(v, 12.0) == 1) { range_ok = 0; }
+        if (f64_lt(v, f64_neg(12.0)) == 1) { range_ok = 0; }
+    }
+}
+assert_eq(range_ok, 1, "all preset bands in [-12, 12]");
+
+# ---- GainSmoother ----
+test_group("gain smoother converges");
+var gs = dhvani_gs_new(0.3, 0.05);
+for (var i = 0; i < 50; i = i + 1) { dhvani_gs_smooth(gs, 0.5); }
+assert_eq(f64_lt(f64_abs(f64_sub(dhvani_gs_current(gs), 0.5)), 0.01), 1, "converges to 0.5");
+
+var rc = assert_summary();
+syscall(60, rc);
