@@ -1,0 +1,125 @@
+# engine.tcyr -- parity tests for src/playback/engine.cyr (PlaybackEngine facade).
+# Ports the state-management #[test]s from jalwa-playback/src/lib.rs. DROPPED:
+# take_video_frame_drains_to_latest (needs a video channel + DisplayFrame,
+# backlogged). play/open error paths port; real decode/probe is stubbed.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+
+alloc_init();
+
+# ---- engine_config_default ----
+test_group("EngineConfig default");
+var cfg = jlw_engine_config_default();
+assert_eq(JlwEngineConfig_buffer_size(cfg), 4096, "buffer_size");
+assert_eq(JlwEngineConfig_sample_rate(cfg), 48000, "sample_rate");
+assert_eq(JlwEngineConfig_channels(cfg), 2, "channels");
+
+# ---- engine_new ----
+test_group("engine new");
+var e = jlw_engine_new(jlw_engine_config_default());
+assert_eq(jlw_engine_state(e), JLW_STATE_STOPPED, "state Stopped");
+assert_eq(jlw_engine_volume(e), 1.0, "volume 1.0");
+assert_eq(jlw_engine_muted(e), 0, "not muted");
+assert_eq(jlw_engine_position(e), 0, "position 0");
+assert_eq(jlw_engine_current_path(e), 0, "no current path");
+
+# ---- play_without_file / open_nonexistent / toggle_without_file ----
+test_group("play/open/toggle without file");
+assert_eq(jlw_is_err(jlw_engine_play(jlw_engine_new(jlw_engine_config_default()))), 1, "play errors");
+assert_eq(jlw_is_err(jlw_engine_open(jlw_engine_new(jlw_engine_config_default()), "/nonexistent/file.mp3")), 1, "open missing errors");
+assert_eq(jlw_is_err(jlw_engine_toggle(jlw_engine_new(jlw_engine_config_default()))), 1, "toggle errors");
+
+# ---- volume_clamp ----
+test_group("volume clamp");
+var ev = jlw_engine_new(jlw_engine_config_default());
+jlw_engine_set_volume(ev, 1.5);
+assert_eq(jlw_engine_volume(ev), 1.0, "clamp high -> 1.0");
+jlw_engine_set_volume(ev, f64_neg(0.5));
+assert_eq(jlw_engine_volume(ev), 0, "clamp low -> 0.0");
+jlw_engine_set_volume(ev, 0.7);
+assert_eq(jlw_engine_volume(ev), 0.7, "0.7 kept");
+
+# ---- mute_toggle ----
+test_group("mute toggle");
+var em = jlw_engine_new(jlw_engine_config_default());
+assert_eq(jlw_engine_muted(em), 0, "starts unmuted");
+jlw_engine_toggle_mute(em);
+assert_eq(jlw_engine_muted(em), 1, "muted");
+jlw_engine_toggle_mute(em);
+assert_eq(jlw_engine_muted(em), 0, "unmuted");
+
+# ---- status_stopped ----
+test_group("status stopped");
+var st = jlw_engine_status(jlw_engine_new(jlw_engine_config_default()));
+assert_eq(JlwPlaybackStatus_state(st), JLW_STATE_STOPPED, "state Stopped");
+assert_eq(JlwPlaybackStatus_volume(st), 1.0, "volume 1.0");
+assert_eq(jlw_is_finite(jlw_pb_status_progress(st)), 0, "progress None");
+
+# ---- format_duration ----
+test_group("format_duration minutes");
+assert_streq(jlw_format_duration(0), "0:00", "0 -> 0:00");
+assert_streq(jlw_format_duration(65), "1:05", "65 -> 1:05");
+assert_streq(jlw_format_duration(599), "9:59", "599 -> 9:59");
+test_group("format_duration hours");
+assert_streq(jlw_format_duration(3600), "1:00:00", "3600 -> 1:00:00");
+assert_streq(jlw_format_duration(3661), "1:01:01", "3661 -> 1:01:01");
+assert_streq(jlw_format_duration(7200), "2:00:00", "7200 -> 2:00:00");
+
+# ---- pause/stop idempotent when stopped ----
+test_group("pause/stop when stopped");
+var ep = jlw_engine_new(jlw_engine_config_default());
+jlw_engine_pause(ep);
+assert_eq(jlw_engine_state(ep), JLW_STATE_STOPPED, "pause no-op when stopped");
+jlw_engine_stop(ep);
+assert_eq(jlw_engine_state(ep), JLW_STATE_STOPPED, "stop idempotent");
+
+# ---- events/poll/prepare_next/config/duration accessors ----
+test_group("accessors without thread");
+var ea = jlw_engine_new(jlw_engine_config_default());
+assert_eq(jlw_engine_events(ea), 0, "events None");
+assert_eq(vec_len(jlw_engine_poll_events(ea)), 0, "poll empty");
+jlw_engine_prepare_next(ea, "/some/file.mp3");
+assert_eq(JlwEngineConfig_sample_rate(jlw_engine_config(ea)), 48000, "config accessor");
+assert_eq(jlw_is_finite(jlw_engine_duration(ea)), 0, "duration None before open");
+
+# ---- eq defaults / toggle / set_band / normalize / set_eq_settings ----
+test_group("eq + normalize");
+var eq = jlw_engine_new(jlw_engine_config_default());
+assert_eq(dhvani_geq_settings_enabled(jlw_engine_eq_settings(eq)), 0, "eq disabled default");
+assert_eq(dhvani_geq_settings_is_flat(jlw_engine_eq_settings(eq)), 1, "eq flat default");
+assert_eq(jlw_engine_normalize_enabled(eq), 0, "normalize off default");
+jlw_engine_toggle_eq(eq);
+assert_eq(dhvani_geq_settings_enabled(jlw_engine_eq_settings(eq)), 1, "eq enabled after toggle");
+jlw_engine_toggle_eq(eq);
+assert_eq(dhvani_geq_settings_enabled(jlw_engine_eq_settings(eq)), 0, "eq disabled after toggle");
+jlw_engine_set_eq_band(eq, 5, 6.0);
+assert_eq(dhvani_geq_settings_band(jlw_engine_eq_settings(eq), 5), 6.0, "band 5 = 6.0");
+jlw_engine_toggle_normalize(eq);
+assert_eq(jlw_engine_normalize_enabled(eq), 1, "normalize on");
+jlw_engine_toggle_normalize(eq);
+assert_eq(jlw_engine_normalize_enabled(eq), 0, "normalize off");
+# set_eq_settings
+var settings = dhvani_geq_settings_default();
+DhGraphicEqSettings_set_enabled(settings, 1);
+dhvani_geq_settings_set_band(settings, 0, 3.0);
+jlw_engine_set_eq_settings(eq, settings);
+assert_eq(dhvani_geq_settings_enabled(jlw_engine_eq_settings(eq)), 1, "settings applied enabled");
+assert_eq(dhvani_geq_settings_band(jlw_engine_eq_settings(eq), 0), 3.0, "settings applied band 0");
+
+# ---- video defaults ----
+test_group("video defaults");
+var evd = jlw_engine_new(jlw_engine_config_default());
+assert_eq(jlw_engine_is_video(evd), 0, "not video");
+assert_eq(jlw_engine_take_video_frame(evd), 0, "no frame");
+JlwPlaybackEngine_set_is_video(evd, 1);
+JlwPlaybackEngine_set_video_frame_rx(evd, 999);
+jlw_engine_stop(evd);
+assert_eq(jlw_engine_is_video(evd), 0, "stop clears is_video");
+assert_eq(JlwPlaybackEngine_video_frame_rx(evd), 0, "stop clears video rx");
+
+var rc = assert_summary();
+syscall(60, rc);

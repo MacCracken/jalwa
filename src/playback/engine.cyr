@@ -1,0 +1,192 @@
+# playback/engine.cyr -- the PlaybackEngine facade (was jalwa-playback/src/lib.rs).
+# L2: depends on error.cyr + core/types.cyr (PlaybackState/Status) + the dhvani
+# dist (EqSettings). Orchestrates the decode thread + tarang probe.
+#
+# The decode thread is STUBBED (see decode_thread.cyr), so the channel handles
+# (cmd_tx/decode_status/event_rx/video_frame_rx) are always 0 (None) and the
+# command sends are no-ops -- exactly the Rust `if let Some(tx)` guards. The
+# state-management surface (config/volume/mute/EQ/normalize/state/status/
+# format_duration) ports faithfully; play/open are stubbed to their error paths.
+
+# ---- EngineConfig ----
+#derive(accessors)
+struct JlwEngineConfig { buffer_size; sample_rate; channels; }
+#must_use
+fn jlw_engine_config_default() {
+    var c = alloc(sizeof(JlwEngineConfig));
+    JlwEngineConfig_set_buffer_size(c, 4096);
+    JlwEngineConfig_set_sample_rate(c, 48000);
+    JlwEngineConfig_set_channels(c, 2);
+    return c;
+}
+
+# ---- PlaybackEngine ----
+#derive(accessors)
+struct JlwPlaybackEngine {
+    config; state; current_path; position; duration; volume; muted;
+    eq_settings; normalize_enabled; cmd_tx; decode_status; event_rx;
+    is_video; video_frame_rx;
+}
+
+#must_use
+fn jlw_engine_new(config) {
+    var e = alloc(sizeof(JlwPlaybackEngine));
+    JlwPlaybackEngine_set_config(e, config);
+    JlwPlaybackEngine_set_state(e, JLW_STATE_STOPPED);
+    JlwPlaybackEngine_set_current_path(e, 0);      # None
+    JlwPlaybackEngine_set_position(e, 0);          # 0.0 s
+    JlwPlaybackEngine_set_duration(e, JLW_NAN);    # None
+    JlwPlaybackEngine_set_volume(e, 1.0);
+    JlwPlaybackEngine_set_muted(e, 0);
+    JlwPlaybackEngine_set_eq_settings(e, dhvani_geq_settings_default());
+    JlwPlaybackEngine_set_normalize_enabled(e, 0);
+    JlwPlaybackEngine_set_cmd_tx(e, 0);
+    JlwPlaybackEngine_set_decode_status(e, 0);
+    JlwPlaybackEngine_set_event_rx(e, 0);
+    JlwPlaybackEngine_set_is_video(e, 0);
+    JlwPlaybackEngine_set_video_frame_rx(e, 0);
+    return e;
+}
+
+# ---- simple accessors ----
+#inline
+#must_use
+fn jlw_engine_config(e) { return JlwPlaybackEngine_config(e); }
+#must_use
+fn jlw_engine_volume(e) { return JlwPlaybackEngine_volume(e); }
+#must_use
+fn jlw_engine_muted(e) { return JlwPlaybackEngine_muted(e); }
+#must_use
+fn jlw_engine_duration(e) { return JlwPlaybackEngine_duration(e); }   # JLW_NAN = None
+#must_use
+fn jlw_engine_current_path(e) { return JlwPlaybackEngine_current_path(e); }
+#must_use
+fn jlw_engine_is_video(e) { return JlwPlaybackEngine_is_video(e); }
+#must_use
+fn jlw_engine_eq_settings(e) { return JlwPlaybackEngine_eq_settings(e); }
+#must_use
+fn jlw_engine_normalize_enabled(e) { return JlwPlaybackEngine_normalize_enabled(e); }
+#must_use
+fn jlw_engine_events(e) { return JlwPlaybackEngine_event_rx(e); }   # None (0) without a thread
+
+# state()/position(): read the decode status if a thread is running, else self.
+#must_use
+fn jlw_engine_state(e) {
+    if (JlwPlaybackEngine_decode_status(e) != 0) { return JlwDecodeStatus_state(JlwPlaybackEngine_decode_status(e)); }
+    return JlwPlaybackEngine_state(e);
+}
+#must_use
+fn jlw_engine_position(e) {
+    if (JlwPlaybackEngine_decode_status(e) != 0) { return JlwDecodeStatus_position(JlwPlaybackEngine_decode_status(e)); }
+    return JlwPlaybackEngine_position(e);
+}
+
+# ---- volume / mute ----
+fn jlw_engine_set_volume(e, vol) {
+    var v = vol;
+    if (f64_lt(v, 0) == 1)   { v = 0; }
+    if (f64_gt(v, 1.0) == 1) { v = 1.0; }
+    JlwPlaybackEngine_set_volume(e, v);
+    return 0;   # (Volume command send is a no-op without a decode thread)
+}
+fn jlw_engine_toggle_mute(e) {
+    JlwPlaybackEngine_set_muted(e, 1 - JlwPlaybackEngine_muted(e));
+    return 0;
+}
+
+# ---- EQ / normalize ----
+fn jlw_engine_set_eq_settings(e, settings) { JlwPlaybackEngine_set_eq_settings(e, settings); return 0; }
+fn jlw_engine_set_eq_band(e, band, gain_db) {
+    dhvani_geq_settings_set_band(JlwPlaybackEngine_eq_settings(e), band, gain_db);
+    return 0;
+}
+fn jlw_engine_toggle_eq(e) {
+    var s = JlwPlaybackEngine_eq_settings(e);
+    if (dhvani_geq_settings_enabled(s) == 0) { DhGraphicEqSettings_set_enabled(s, 1); }
+    else { DhGraphicEqSettings_set_enabled(s, 0); }
+    return 0;
+}
+fn jlw_engine_toggle_normalize(e) {
+    JlwPlaybackEngine_set_normalize_enabled(e, 1 - JlwPlaybackEngine_normalize_enabled(e));
+    return 0;
+}
+
+# ---- transport ----
+fn jlw_engine_pause(e) {
+    if (JlwPlaybackEngine_state(e) == JLW_STATE_PLAYING) { JlwPlaybackEngine_set_state(e, JLW_STATE_PAUSED); }
+    return 0;
+}
+fn jlw_engine_stop(e) {
+    JlwPlaybackEngine_set_cmd_tx(e, 0);
+    JlwPlaybackEngine_set_decode_status(e, 0);
+    JlwPlaybackEngine_set_event_rx(e, 0);
+    JlwPlaybackEngine_set_video_frame_rx(e, 0);
+    JlwPlaybackEngine_set_is_video(e, 0);
+    JlwPlaybackEngine_set_state(e, JLW_STATE_STOPPED);
+    JlwPlaybackEngine_set_position(e, 0);
+    return 0;
+}
+# seek(pos_secs): error past the end; else set position.
+fn jlw_engine_seek(e, position) {
+    var d = JlwPlaybackEngine_duration(e);
+    if (jlw_is_finite(d) == 1) {
+        if (f64_gt(position, d) == 1) { return JLW_ERR_PLAYBACK; }
+    }
+    JlwPlaybackEngine_set_position(e, position);
+    return JLW_ERR_NONE;
+}
+# play(): errors without a loaded file (the tested path). Real decode is stubbed.
+fn jlw_engine_play(e) {
+    if (JlwPlaybackEngine_current_path(e) == 0) { return JLW_ERR_PLAYBACK; }
+    return JLW_ERR_NONE;   # (decode spawn stubbed)
+}
+# open(path): probe. Errors on a missing file; real probe (duration/codec) stubbed.
+fn jlw_engine_open(e, path) {
+    if (file_exists(path) == 0) { return JLW_ERR_NOT_FOUND; }
+    JlwPlaybackEngine_set_current_path(e, path);
+    return JLW_ERR_NONE;
+}
+fn jlw_engine_toggle(e) {
+    var st = JlwPlaybackEngine_state(e);
+    if (st == JLW_STATE_PLAYING) { jlw_engine_pause(e); return JLW_ERR_NONE; }
+    if (st == JLW_STATE_BUFFERING) { return JLW_ERR_NONE; }
+    return jlw_engine_play(e);   # Paused / Stopped
+}
+
+# status(): full snapshot (current_item is caller-mapped, so 0/None here).
+#must_use
+fn jlw_engine_status(e) {
+    return jlw_pb_status_new(jlw_engine_state(e), 0, jlw_engine_position(e),
+                             JlwPlaybackEngine_duration(e), JlwPlaybackEngine_volume(e), JlwPlaybackEngine_muted(e));
+}
+
+# prepare_next / poll_events / take_video_frame -- no-ops without a decode thread.
+fn jlw_engine_prepare_next(e, path) { return 0; }
+#must_use
+fn jlw_engine_poll_events(e) { return vec_new(); }
+#must_use
+fn jlw_engine_take_video_frame(e) { return 0; }   # None without a video channel
+
+# format_duration(total_secs): "H:MM:SS" if hours, else "M:SS".
+#must_use
+fn jlw_format_duration(total_secs) {
+    var hours = total_secs / 3600;
+    var mins = (total_secs % 3600) / 60;
+    var secs = total_secs % 60;
+    var sb = str_builder_new();
+    if (hours > 0) {
+        str_builder_add_int(sb, hours);
+        str_builder_putc(sb, 58);                       # ':'
+        if (mins < 10) { str_builder_putc(sb, 48); }    # zero-pad
+        str_builder_add_int(sb, mins);
+        str_builder_putc(sb, 58);
+        if (secs < 10) { str_builder_putc(sb, 48); }
+        str_builder_add_int(sb, secs);
+    } else {
+        str_builder_add_int(sb, mins);
+        str_builder_putc(sb, 58);
+        if (secs < 10) { str_builder_putc(sb, 48); }
+        str_builder_add_int(sb, secs);
+    }
+    return str_cstr(str_builder_build(sb));
+}
