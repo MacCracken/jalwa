@@ -1,0 +1,243 @@
+# hardware.tcyr -- parity tests for src/core/hardware.cyr.
+# Ports all 31 unit #[test]s from rust-old/crates/jalwa-core/src/hardware.rs.
+# (The #[cfg(target_os="linux")] HW methods have no unit tests; they're stubbed.)
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/hardware.cyr"
+
+fn catp(a, b) {
+    var la = strlen(a); var lb = strlen(b);
+    var d = alloc(la + lb + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); store8(d + la + lb, 0);
+    return d;
+}
+fn make_usb_device(id, mounted) {
+    var info = device_info_new(device_id_new(id), catp("/dev/", id), DC_USB_STORAGE);
+    if (mounted == 1) {
+        di_set_state(info, DS_MOUNTED);
+        di_set_mount_point(info, catp("/mnt/", id));
+    }
+    di_set_label(info, "Test USB");
+    return info;
+}
+fn make_optical_device(id, has_media) {
+    var info = device_info_new(device_id_new(id), catp("/dev/", id), DC_OPTICAL);
+    if (has_media == 1) {
+        di_set_state(info, DS_READY);
+        di_set_fs_type(info, "iso9660");
+    } else {
+        di_set_state(info, DS_NO_MEDIA);
+    }
+    return info;
+}
+
+alloc_init();
+
+# 1. new_creates_empty_manager
+test_group("new empty manager");
+var m1 = jlw_hw_manager_new();
+assert_eq(jlw_hw_dev_len(m1), 0, "no devices");
+assert_eq(jlw_hw_paths_len(m1), 0, "no paths");
+
+# 2. register_and_unregister_playback_path
+test_group("register/unregister path");
+var m2 = jlw_hw_manager_new();
+jlw_hw_register_playback_path(m2, "/mnt/usb/music/song.flac");
+assert_eq(jlw_hw_paths_len(m2), 1, "1 path");
+jlw_hw_register_playback_path(m2, "/mnt/usb/music/song.flac");
+assert_eq(jlw_hw_paths_len(m2), 1, "dup not added");
+jlw_hw_unregister_playback_path(m2, "/mnt/usb/music/song.flac");
+assert_eq(jlw_hw_paths_len(m2), 0, "removed");
+
+# 3. handle_device_info_usb_mounted
+test_group("device_info usb mounted");
+var m3 = jlw_hw_manager_new();
+jlw_hw_handle_device_info(m3, make_usb_device("sdb1", 1));
+assert_eq(jlw_hw_dev_contains(m3, "sdb1"), 1, "device stored");
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m3)), JLW_HW_EVT_USB_MOUNTED, "UsbMounted");
+
+# 4. handle_device_info_usb_not_mounted
+test_group("device_info usb not mounted");
+var m4 = jlw_hw_manager_new();
+jlw_hw_handle_device_info(m4, make_usb_device("sdb1", 0));
+assert_eq(jlw_hw_dev_len(m4), 1, "stored");
+assert_eq(jlw_hw_evt_pop(m4), 0, "no event");
+
+# 5. handle_device_info_optical_with_media
+test_group("device_info optical with media");
+var m5 = jlw_hw_manager_new();
+jlw_hw_handle_device_info(m5, make_optical_device("sr0", 1));
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m5)), JLW_HW_EVT_DISC_INSERTED, "DiscInserted");
+
+# 6. handle_device_info_optical_no_media
+test_group("device_info optical no media");
+var m6 = jlw_hw_manager_new();
+jlw_hw_handle_device_info(m6, make_optical_device("sr0", 0));
+assert_eq(jlw_hw_dev_len(m6), 1, "stored");
+assert_eq(jlw_hw_evt_pop(m6), 0, "no event");
+
+# 7. handle_detach_usb
+test_group("detach usb");
+var m7 = jlw_hw_manager_new();
+var i7 = make_usb_device("sdb1", 1);
+jlw_hw_dev_insert(m7, i7);
+jlw_hw_handle_detach(m7, di_id(i7), DC_USB_STORAGE);
+assert_eq(jlw_hw_dev_contains(m7, "sdb1"), 0, "device gone");
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m7)), JLW_HW_EVT_USB_REMOVED, "UsbRemoved");
+
+# 8. handle_detach_optical
+test_group("detach optical");
+var m8 = jlw_hw_manager_new();
+var i8 = make_optical_device("sr0", 1);
+jlw_hw_dev_insert(m8, i8);
+jlw_hw_handle_detach(m8, di_id(i8), DC_OPTICAL);
+assert_eq(jlw_hw_dev_contains(m8, "sr0"), 0, "device gone");
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m8)), JLW_HW_EVT_DISC_EJECTED, "DiscEjected");
+
+# 9. handle_detach_during_playback (PlaybackDeviceRemoved then UsbRemoved)
+test_group("detach during playback");
+var m9 = jlw_hw_manager_new();
+var i9 = make_usb_device("sdb1", 1);
+jlw_hw_dev_insert(m9, i9);
+jlw_hw_register_playback_path(m9, "/mnt/sdb1/music/song.flac");
+jlw_hw_handle_detach(m9, di_id(i9), DC_USB_STORAGE);
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m9)), JLW_HW_EVT_PLAYBACK_DEVICE_REMOVED, "PlaybackDeviceRemoved");
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m9)), JLW_HW_EVT_USB_REMOVED, "then UsbRemoved");
+
+# 10. handle_mount_updates_state
+test_group("handle_mount updates state");
+var m10 = jlw_hw_manager_new();
+var i10 = make_usb_device("sdb1", 0);
+jlw_hw_dev_insert(m10, i10);
+jlw_hw_handle_mount(m10, di_id(i10), "/mnt/usb");
+var d10 = jlw_hw_dev_find(m10, "sdb1");
+assert_eq(di_state(d10), DS_MOUNTED, "state MOUNTED");
+assert_streq(di_mount_point(d10), "/mnt/usb", "mount point set");
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m10)), JLW_HW_EVT_USB_MOUNTED, "UsbMounted");
+
+# 11. mounted_usb_devices_filter
+test_group("mounted_usb filter");
+var m11 = jlw_hw_manager_new();
+jlw_hw_dev_insert(m11, make_usb_device("a", 1));
+jlw_hw_dev_insert(m11, make_usb_device("b", 0));
+jlw_hw_dev_insert(m11, make_optical_device("c", 1));
+assert_eq(vec_len(jlw_hw_mounted_usb_devices(m11)), 1, "one mounted usb");
+
+# 12. optical_drives_filter
+test_group("optical filter");
+var m12 = jlw_hw_manager_new();
+jlw_hw_dev_insert(m12, make_usb_device("a", 1));
+jlw_hw_dev_insert(m12, make_optical_device("sr0", 1));
+jlw_hw_dev_insert(m12, make_optical_device("sr1", 0));
+assert_eq(vec_len(jlw_hw_optical_drives(m12)), 2, "two optical");
+
+# 13/14. is_class_relevant
+test_group("is_class_relevant");
+assert_eq(jlw_hw_is_class_relevant(DC_USB_STORAGE), 1, "usb");
+assert_eq(jlw_hw_is_class_relevant(DC_OPTICAL), 1, "optical");
+assert_eq(jlw_hw_is_class_relevant(DC_SD_CARD), 1, "sdcard");
+assert_eq(jlw_hw_is_class_relevant(DC_BLOCK_INTERNAL), 0, "internal not");
+assert_eq(jlw_hw_is_class_relevant(DC_NETWORK), 0, "network not");
+assert_eq(jlw_hw_is_class_relevant(DC_LOOP), 0, "loop not");
+assert_eq(jlw_hw_is_class_relevant(DC_DEVICE_MAPPER), 0, "dm not");
+assert_eq(jlw_hw_is_class_relevant(DC_UNKNOWN), 0, "unknown not");
+
+# 15/16. is_media_relevant
+test_group("is_media_relevant");
+assert_eq(jlw_hw_is_media_relevant(make_usb_device("sdb1", 1)), 1, "usb relevant");
+assert_eq(jlw_hw_is_media_relevant(device_info_new(device_id_new("sda"), "/dev/sda", DC_BLOCK_INTERNAL)), 0, "internal not");
+
+# 17-20. detect_optical_type
+test_group("detect_optical_type");
+var od = make_optical_device("sr0", 1);
+di_set_fs_type(od, "iso9660");
+assert_eq(jlw_hw_detect_optical_type(od), DT_CD_DATA, "iso9660 -> CdData");
+di_set_fs_type(od, "udf");
+assert_eq(jlw_hw_detect_optical_type(od), DT_DVD_ROM, "udf -> DvdRom");
+di_set_fs_type(od, "ntfs");
+assert_eq(jlw_hw_detect_optical_type(od), DT_UNKNOWN, "ntfs -> Unknown");
+di_set_fs_type(od, 0);
+assert_eq(jlw_hw_detect_optical_type(od), DT_UNKNOWN, "no fs -> Unknown");
+
+# 21-23. is_on_removable_device
+test_group("is_on_removable_device");
+var devs = vec_new();
+vec_push(devs, make_usb_device("sdb1", 1));
+var found = jlw_hw_is_on_removable_device("/mnt/sdb1/music/song.flac", devs);
+assert_eq(found != 0, 1, "found removable");
+assert_streq(device_id_str(found), "sdb1", "correct device id");
+assert_eq(jlw_hw_is_on_removable_device("/home/user/music/song.flac", devs), 0, "not found");
+assert_eq(jlw_hw_is_on_removable_device("/mnt/usb/song.flac", vec_new()), 0, "empty");
+
+# 24. handle_yukti_event_attach
+test_group("yukti event attach");
+var m24 = jlw_hw_manager_new();
+var ev24 = device_event_new(device_id_new("sdb1"), DC_USB_STORAGE, EK_ATTACHED, "/dev/sdb1");
+de_set_device_info(ev24, make_usb_device("sdb1", 1));
+jlw_hw_handle_yukti_event(m24, ev24);
+assert_eq(jlw_hw_dev_len(m24), 1, "device added");
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m24)), JLW_HW_EVT_USB_MOUNTED, "UsbMounted");
+
+# 25. handle_yukti_event_detach
+test_group("yukti event detach");
+var m25 = jlw_hw_manager_new();
+jlw_hw_dev_insert(m25, make_usb_device("sdb1", 1));
+var ev25 = device_event_new(device_id_new("sdb1"), DC_USB_STORAGE, EK_DETACHED, "/dev/sdb1");
+jlw_hw_handle_yukti_event(m25, ev25);
+assert_eq(jlw_hw_dev_len(m25), 0, "device removed");
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m25)), JLW_HW_EVT_USB_REMOVED, "UsbRemoved");
+
+# 26. handle_yukti_event_mounted
+test_group("yukti event mounted");
+var m26 = jlw_hw_manager_new();
+jlw_hw_dev_insert(m26, make_usb_device("sdb1", 0));
+var ev26 = device_event_new(device_id_new("sdb1"), DC_USB_STORAGE, EK_MOUNTED, "/dev/sdb1");
+de_set_extra(ev26, "/mnt/usb");
+jlw_hw_handle_yukti_event(m26, ev26);
+assert_eq(device_info_is_mounted(jlw_hw_dev_find(m26, "sdb1")), 1, "now mounted");
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m26)), JLW_HW_EVT_USB_MOUNTED, "UsbMounted");
+
+# 27. handle_yukti_event_media_changed_optical
+test_group("yukti event media changed");
+var m27 = jlw_hw_manager_new();
+jlw_hw_dev_insert(m27, make_optical_device("sr0", 1));
+var ev27 = device_event_new(device_id_new("sr0"), DC_OPTICAL, EK_MEDIA_CHANGED, "/dev/sr0");
+jlw_hw_handle_yukti_event(m27, ev27);
+assert_eq(JlwHwEvent_code(jlw_hw_evt_pop(m27)), JLW_HW_EVT_DISC_INSERTED, "DiscInserted");
+
+# 28. handle_yukti_event_error (message carried)
+test_group("yukti event error");
+var m28 = jlw_hw_manager_new();
+var ev28 = device_event_new(device_id_new("sdb1"), DC_USB_STORAGE, EK_ERROR, "/dev/sdb1");
+de_set_extra(ev28, "IO fault");
+jlw_hw_handle_yukti_event(m28, ev28);
+var e28 = jlw_hw_evt_pop(m28);
+assert_eq(JlwHwEvent_code(e28), JLW_HW_EVT_DEVICE_ERROR, "DeviceError");
+assert_streq(JlwHwEvent_sa(e28), "IO fault", "message carried");
+
+# 29. handle_yukti_event_irrelevant_class_ignored
+test_group("yukti event irrelevant ignored");
+var m29 = jlw_hw_manager_new();
+var ev29 = device_event_new(device_id_new("nvme0n1"), DC_BLOCK_INTERNAL, EK_ATTACHED, "/dev/nvme0n1");
+jlw_hw_handle_yukti_event(m29, ev29);
+assert_eq(jlw_hw_dev_len(m29), 0, "ignored");
+assert_eq(jlw_hw_evt_pop(m29), 0, "no event");
+
+# 30. handle_yukti_event_unmounted
+test_group("yukti event unmounted");
+var m30 = jlw_hw_manager_new();
+jlw_hw_dev_insert(m30, make_usb_device("sdb1", 1));
+var ev30 = device_event_new(device_id_new("sdb1"), DC_USB_STORAGE, EK_UNMOUNTED, "/dev/sdb1");
+jlw_hw_handle_yukti_event(m30, ev30);
+var d30 = jlw_hw_dev_find(m30, "sdb1");
+assert_eq(di_state(d30), DS_READY, "state READY");
+assert_eq(di_mount_point(d30), 0, "mount None");
+
+# 31. safe_eject_unknown_device
+test_group("safe_eject unknown");
+var m31 = jlw_hw_manager_new();
+assert_eq(jlw_is_err(jlw_hw_safe_eject(m31, device_id_new("nonexistent"))), 1, "Err on unknown");
+
+var rc = assert_summary();
+syscall(60, rc);

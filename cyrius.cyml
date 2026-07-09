@@ -11,4 +11,4 @@ entry = "src/main.cyr"
 output = "jalwa"
 
 [deps]
-stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert", "math", "random", "chrono", "patra", "fs"]
+stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert", "math", "random", "chrono", "patra", "fs", "yukti", "hashmap", "tagged", "process"]

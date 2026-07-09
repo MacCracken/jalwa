@@ -14,7 +14,7 @@
 ## Source / oracle
 
 - **Rust oracle**: 15,355 LOC (40 `.rs` files, full 5-crate workspace) frozen at `rust-old/`. Do not edit.
-- **Cyrius port**: `src/error.cyr` + `src/core/types.cyr` + `src/core/{playlist_io,db,scanner,watcher}.cyr` — green. `src/main.cyr` still the smoke stub.
+- **Cyrius port**: `src/error.cyr` + `src/core/{types,playlist_io,db,scanner,watcher,hardware}.cyr` — **all of jalwa-core**, green. `src/main.cyr` still the smoke stub.
 
 ## Port progress
 
@@ -22,20 +22,20 @@
 |---|---|
 | 0 — scaffold + oracle freeze + `error.cyr` | ✅ done |
 | A — core types | ✅ done — all 7 types (6 enums, PlaybackStatus, Uuid, Playlist, PlayQueue, MediaItem, Library); 72 tests. ADR 0001 (linear-scan indexes) |
-| B — core services | ⏳ in progress — `playlist_io` ✅, `db` ✅, `scanner` ✅, `watcher` ✅ (inotify); `hardware` (yukti) last |
-| C — playback + DSP | ☐ |
+| B — core services | ✅ done — `playlist_io`, `db`, `scanner`, `watcher`, `hardware` (yukti). **jalwa-core fully ported.** |
+| C — playback + DSP | ⏳ next — dsp→dhvani (clean win), decode_thread (tarang stub), engine facade; mpris shape-only |
 | D — AI | ☐ |
 | E — terminal UI | ☐ |
 | F — desktop GUI | ☐ |
 | G — binary + MCP | ☐ |
 
-**Modules: `error.cyr` ✅, `core/types.cyr` ✅ (= `jalwa-core/lib.rs`), `core/{playlist_io,db,scanner,watcher}.cyr` ✅. 5 / 33 rust modules fully ported.**
+**Modules: `error.cyr` + `core/{types,playlist_io,db,scanner,watcher,hardware}.cyr` ✅ = all 6 jalwa-core rust modules. 6 / 33 rust modules fully ported.**
 Backlogged (blocked): `video_decode_thread`, `view_video` (tarang+aethersafta); real playback (tarang stub);
 MPRIS export (samvada client-only).
 
 ## Tests
 
-- `error` 19 · `core_types` 72 · `playlist_io` 17 · `db_helpers` 34 · `db` 27 · `scanner` 31 · `watcher` 20 — all green (220). Bare `cyrius test` all green.
+- `error` 19 · `core_types` 72 · `playlist_io` 17 · `db_helpers` 34 · `db` 27 · `scanner` 31 · `watcher` 20 · `hardware` 55 — all green (275). Bare `cyrius test` all green.
 
 > Toolchain drift: `cyrius.cyml` pins 6.4.29; cycc is now 6.4.32. Builds pass against the 6.4.29-vendored `lib/`; benign pin-drift warning. Bump the pin + `cyrius lib sync` when convenient.
 - Per-module `.tcyr` suites land with each ported module, cross-checked against `rust-old/` `#[test]` blocks.

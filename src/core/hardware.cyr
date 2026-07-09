@@ -1,0 +1,320 @@
+# core/hardware.cyr -- USB/optical/hotplug device management over yukti.
+# Ports rust-old/crates/jalwa-core/src/hardware.rs. L1: depends on error.cyr +
+# core/types.cyr + the yukti stdlib distlib (device/optical/event API reused
+# DIRECTLY, not re-ported).
+#
+# The devices HashMap + mpsc channel become a vec-based store + a cursor-read
+# event queue (behavior-equivalent for the ported tests; see the Library
+# linear-scan ADR for the same rationale). The real-hardware methods
+# (start_monitoring/enumerate/poll/read_disc_toc/tray control + the actual
+# eject) are STUBBED here -- they drive LinuxDeviceManager/optical ioctls and
+# have no unit tests (their #[cfg(target_os="linux")] bodies need real /dev).
+
+# ---- HardwareEvent -> codes ----
+var JLW_HW_EVT_USB_MOUNTED             = 0;
+var JLW_HW_EVT_USB_REMOVED             = 1;
+var JLW_HW_EVT_DISC_INSERTED           = 2;
+var JLW_HW_EVT_DISC_EJECTED            = 3;
+var JLW_HW_EVT_PLAYBACK_DEVICE_REMOVED = 4;
+var JLW_HW_EVT_DEVICE_ERROR            = 5;
+
+# a media-player hardware event. sa/sb are per-code payload slots (label/mount/
+# disc_type/dev_path/message); only the code is asserted by most tests.
+#derive(accessors)
+struct JlwHwEvent { code; device_id; sa; sb; }
+#must_use
+fn jlw_hw_event_new(code, device_id, sa, sb) {
+    var e = alloc(sizeof(JlwHwEvent));
+    JlwHwEvent_set_code(e, code);
+    JlwHwEvent_set_device_id(e, device_id);
+    JlwHwEvent_set_sa(e, sa);
+    JlwHwEvent_set_sb(e, sb);
+    return e;
+}
+
+# HardwareManager: vec of yukti DeviceInfo, playback paths, event queue + cursor.
+#derive(accessors)
+struct JlwHwManager { devices; paths; events; evcursor; }
+#must_use
+fn jlw_hw_manager_new() {
+    var m = alloc(sizeof(JlwHwManager));
+    JlwHwManager_set_devices(m, vec_new());
+    JlwHwManager_set_paths(m, vec_new());
+    JlwHwManager_set_events(m, vec_new());
+    JlwHwManager_set_evcursor(m, 0);
+    return m;
+}
+
+# 1 if cstring `path` begins with cstring `prefix` (component-clean prefixes only).
+#must_use
+fn jlw_starts_with(path, prefix) {
+    var lp = strlen(prefix);
+    if (strlen(path) < lp) { return 0; }
+    return memeq(path, prefix, lp);
+}
+
+# event queue (event_tx.send / rx.try_recv).
+fn jlw_hw_emit(m, ev) { vec_push(JlwHwManager_events(m), ev); return 0; }
+#must_use
+fn jlw_hw_evt_pop(m) {
+    var evs = JlwHwManager_events(m);
+    var c = JlwHwManager_evcursor(m);
+    if (c < vec_len(evs)) {
+        JlwHwManager_set_evcursor(m, c + 1);
+        return vec_get(evs, c);
+    }
+    return 0;   # try_recv -> Err (nothing pending)
+}
+
+# device store (keyed by DeviceId string).
+#must_use
+fn jlw_hw_dev_find(m, idstr) {
+    var devs = JlwHwManager_devices(m);
+    var n = vec_len(devs);
+    for (var i = 0; i < n; i = i + 1) {
+        var info = vec_get(devs, i);
+        if (streq(device_id_str(di_id(info)), idstr) == 1) { return info; }
+    }
+    return 0;
+}
+fn jlw_hw_dev_remove(m, idstr) {
+    var devs = JlwHwManager_devices(m);
+    var n = vec_len(devs);
+    var kept = vec_new();
+    for (var i = 0; i < n; i = i + 1) {
+        var info = vec_get(devs, i);
+        if (streq(device_id_str(di_id(info)), idstr) == 0) { vec_push(kept, info); }
+    }
+    JlwHwManager_set_devices(m, kept);
+    return 0;
+}
+fn jlw_hw_dev_insert(m, info) {
+    var idstr = device_id_str(di_id(info));
+    jlw_hw_dev_remove(m, idstr);
+    vec_push(JlwHwManager_devices(m), info);
+    return 0;
+}
+#must_use
+fn jlw_hw_dev_contains(m, idstr) {
+    if (jlw_hw_dev_find(m, idstr) != 0) { return 1; }
+    return 0;
+}
+#inline
+#must_use
+fn jlw_hw_dev_len(m) { return vec_len(JlwHwManager_devices(m)); }
+
+# 1 if any active playback path is under `mount`.
+#must_use
+fn jlw_hw_any_playback_under(m, mount) {
+    var paths = JlwHwManager_paths(m);
+    var n = vec_len(paths);
+    for (var i = 0; i < n; i = i + 1) {
+        if (jlw_starts_with(vec_get(paths, i), mount) == 1) { return 1; }
+    }
+    return 0;
+}
+
+fn jlw_hw_register_playback_path(m, path) {
+    var paths = JlwHwManager_paths(m);
+    var n = vec_len(paths);
+    for (var i = 0; i < n; i = i + 1) { if (streq(vec_get(paths, i), path) == 1) { return 0; } }
+    vec_push(paths, path);
+    return 0;
+}
+fn jlw_hw_unregister_playback_path(m, path) {
+    var paths = JlwHwManager_paths(m);
+    var n = vec_len(paths);
+    var kept = vec_new();
+    for (var i = 0; i < n; i = i + 1) {
+        var p = vec_get(paths, i);
+        if (streq(p, path) == 0) { vec_push(kept, p); }
+    }
+    JlwHwManager_set_paths(m, kept);
+    return 0;
+}
+#inline
+#must_use
+fn jlw_hw_paths_len(m) { return vec_len(JlwHwManager_paths(m)); }
+
+# devices() / filtered views.
+#inline
+#must_use
+fn jlw_hw_devices(m) { return JlwHwManager_devices(m); }
+#must_use
+fn jlw_hw_mounted_usb_devices(m) {
+    var out = vec_new();
+    var devs = JlwHwManager_devices(m);
+    var n = vec_len(devs);
+    for (var i = 0; i < n; i = i + 1) {
+        var info = vec_get(devs, i);
+        if (di_class(info) == DC_USB_STORAGE) {
+            if (device_info_is_mounted(info) == 1) { vec_push(out, info); }
+        }
+    }
+    return out;
+}
+#must_use
+fn jlw_hw_optical_drives(m) {
+    var out = vec_new();
+    var devs = JlwHwManager_devices(m);
+    var n = vec_len(devs);
+    for (var i = 0; i < n; i = i + 1) {
+        var info = vec_get(devs, i);
+        if (di_class(info) == DC_OPTICAL) { vec_push(out, info); }
+    }
+    return out;
+}
+
+# ---- pure predicates ----
+#must_use
+fn jlw_hw_is_class_relevant(class) {
+    if (class == DC_USB_STORAGE) { return 1; }
+    if (class == DC_OPTICAL)     { return 1; }
+    if (class == DC_SD_CARD)     { return 1; }
+    return 0;
+}
+#inline
+#must_use
+fn jlw_hw_is_media_relevant(info) { return jlw_hw_is_class_relevant(di_class(info)); }
+
+# detect_optical_type: fs_type -> DiscType (iso9660->CdData, udf->DvdRom,
+# else yukti detect_disc_type(other, has_audio=0, has_data=1); None->Unknown).
+#must_use
+fn jlw_hw_detect_optical_type(info) {
+    var fs = di_fs_type(info);
+    if (fs == 0) { return DT_UNKNOWN; }
+    if (streq(fs, "iso9660") == 1) { return DT_CD_DATA; }
+    if (streq(fs, "udf") == 1)     { return DT_DVD_ROM; }
+    return detect_disc_type(fs, 0, 1);
+}
+
+# is_on_removable_device: DeviceId of the first device whose mount contains path,
+# or 0 (None).
+#must_use
+fn jlw_hw_is_on_removable_device(path, devices) {
+    var n = vec_len(devices);
+    for (var i = 0; i < n; i = i + 1) {
+        var info = vec_get(devices, i);
+        var mount = di_mount_point(info);
+        if (mount != 0) {
+            if (jlw_starts_with(path, mount) == 1) { return di_id(info); }
+        }
+    }
+    return 0;
+}
+
+# ---- event handlers ----
+fn jlw_hw_handle_device_info(m, info) {
+    var class = di_class(info);
+    if (class == DC_USB_STORAGE) {
+        if (device_info_is_mounted(info) == 1) {
+            var mount = di_mount_point(info);
+            if (mount != 0) {
+                jlw_hw_emit(m, jlw_hw_event_new(JLW_HW_EVT_USB_MOUNTED, di_id(info), device_info_display_name(info), mount));
+            }
+        }
+    }
+    if (class == DC_OPTICAL) {
+        if (di_state(info) != DS_NO_MEDIA) {
+            jlw_hw_emit(m, jlw_hw_event_new(JLW_HW_EVT_DISC_INSERTED, di_id(info), jlw_hw_detect_optical_type(info), di_dev_path(info)));
+        }
+    }
+    jlw_hw_dev_insert(m, info);
+    return 0;
+}
+
+fn jlw_hw_handle_mount(m, id, mount_point) {
+    var info = jlw_hw_dev_find(m, device_id_str(id));
+    if (info != 0) {
+        di_set_state(info, DS_MOUNTED);
+        di_set_mount_point(info, mount_point);
+        if (di_class(info) == DC_USB_STORAGE) {
+            jlw_hw_emit(m, jlw_hw_event_new(JLW_HW_EVT_USB_MOUNTED, id, device_info_display_name(info), mount_point));
+        }
+    }
+    return 0;
+}
+
+fn jlw_hw_handle_detach(m, id, class) {
+    var idstr = device_id_str(id);
+    var info = jlw_hw_dev_find(m, idstr);
+    if (info != 0) {
+        var mount = di_mount_point(info);
+        if (mount != 0) {
+            if (jlw_hw_any_playback_under(m, mount) == 1) {
+                jlw_hw_emit(m, jlw_hw_event_new(JLW_HW_EVT_PLAYBACK_DEVICE_REMOVED, id, 0, mount));
+            }
+        }
+    }
+    if (class == DC_USB_STORAGE) {
+        var label = device_id_str(id);
+        if (info != 0) { label = device_info_display_name(info); }
+        jlw_hw_emit(m, jlw_hw_event_new(JLW_HW_EVT_USB_REMOVED, id, label, 0));
+    }
+    if (class == DC_OPTICAL) {
+        jlw_hw_emit(m, jlw_hw_event_new(JLW_HW_EVT_DISC_EJECTED, id, 0, 0));
+    }
+    jlw_hw_dev_remove(m, idstr);
+    return 0;
+}
+
+fn jlw_hw_handle_optical_change(m, id) {
+    var info = jlw_hw_dev_find(m, device_id_str(id));
+    if (info != 0) {
+        jlw_hw_emit(m, jlw_hw_event_new(JLW_HW_EVT_DISC_INSERTED, id, jlw_hw_detect_optical_type(info), di_dev_path(info)));
+    }
+    return 0;
+}
+
+# handle_yukti_event: translate a yukti DeviceEvent into HardwareEvents.
+fn jlw_hw_handle_yukti_event(m, event) {
+    var id = de_device_id(event);
+    var class = de_device_class(event);
+    if (jlw_hw_is_class_relevant(class) == 0) { return 0; }
+    var kind = de_kind(event);
+    if (kind == EK_ATTACHED) {
+        var info = de_device_info(event);
+        if (info != 0) { jlw_hw_handle_device_info(m, info); }
+    }
+    if (kind == EK_DETACHED) { jlw_hw_handle_detach(m, id, class); }
+    if (kind == EK_MOUNTED)  { jlw_hw_handle_mount(m, id, de_extra(event)); }
+    if (kind == EK_UNMOUNTED) {
+        var info = jlw_hw_dev_find(m, device_id_str(id));
+        if (info != 0) { di_set_state(info, DS_READY); di_set_mount_point(info, 0); }
+    }
+    if (kind == EK_MEDIA_CHANGED) {
+        if (class == DC_OPTICAL) { jlw_hw_handle_optical_change(m, id); }
+    }
+    if (kind == EK_ERROR) {
+        jlw_hw_emit(m, jlw_hw_event_new(JLW_HW_EVT_DEVICE_ERROR, id, de_extra(event), 0));
+    }
+    return 0;
+}
+
+# safe_eject: stop playback (emit PlaybackDeviceRemoved) then eject. The actual
+# yukti eject is STUBBED (HW-only). Returns JLW_ERR_NOT_FOUND for an unknown id.
+fn jlw_hw_safe_eject(m, id) {
+    var info = jlw_hw_dev_find(m, device_id_str(id));
+    if (info == 0) { return JLW_ERR_NOT_FOUND; }
+    var mount = di_mount_point(info);
+    if (mount != 0) {
+        if (jlw_hw_any_playback_under(m, mount) == 1) {
+            jlw_hw_emit(m, jlw_hw_event_new(JLW_HW_EVT_PLAYBACK_DEVICE_REMOVED, id, 0, mount));
+        }
+    }
+    # yukti eject (storage_eject) -- HW-only, stubbed.
+    return JLW_ERR_NONE;
+}
+
+# ---- HW-only methods (need real /dev + LinuxDeviceManager) -- STUBBED ----
+fn jlw_hw_start_monitoring(m) { return JLW_ERR_NONE; }
+fn jlw_hw_stop_monitoring(m)  { return 0; }
+fn jlw_hw_enumerate(m)        { return JLW_ERR_NONE; }
+#must_use
+fn jlw_hw_poll(m)             { return 0; }
+#must_use
+fn jlw_hw_read_disc_toc(m, dev_path) { return 0; }
+fn jlw_hw_open_tray(m, dev_path)     { return JLW_ERR_NONE; }
+fn jlw_hw_close_tray(m, dev_path)    { return JLW_ERR_NONE; }
+#must_use
+fn jlw_hw_tray_state(m, dev_path)    { return TS_CLOSED; }
