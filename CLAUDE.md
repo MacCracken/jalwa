@@ -43,10 +43,15 @@ as the reference oracle — do not modify it; cross-check the port against it.
 ## Quick Start
 
 ```sh
-cyrius deps                              # resolve deps into lib/, write cyrius.lock
+cyrius lib sync                          # vendor declared [deps].stdlib into lib/ from the pin
+cyrius deps                              # resolve [deps.X] repo deps (dhvani/bote/…) into lib/, write cyrius.lock
 cyrius build src/main.cyr build/jalwa    # compile
-cyrius test                              # run tests/*.tcyr (CI does this)
+cyrius test tests/error.tcyr             # run one suite (bare `cyrius test` runs all tests/*.tcyr — what CI does)
 ```
+
+> **Vendoring**: `cyrius lib sync` vendors stdlib modules (adding one to `cyrius.cyml [deps].stdlib`
+> then running `cyrius deps` fails — `deps` is only for repo `[deps.X]`). Basic `f64_*` ops are
+> compiler builtins; `math`/`ganita` are for higher-level math.
 
 ## Key Principles
 

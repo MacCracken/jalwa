@@ -1,0 +1,68 @@
+# core_types.tcyr -- parity tests for src/core/types.cyr (enums + PlaybackStatus).
+# Ported one-for-one from the #[test] blocks in
+# rust-old/crates/jalwa-core/src/lib.rs:
+#   media_type_display, repeat_mode_cycle, repeat_mode_display,
+#   playback_state_display, playback_status_stopped, playback_status_progress,
+#   playback_status_progress_zero_duration.
+# The *_serialization tests (serde round-trip) are DROPPED (no serde; the integer
+# code IS the identity). Playlist/PlayQueue/MediaItem/Library tests land with
+# those types.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+
+alloc_init();
+
+# ---- media_type_display ----
+test_group("MediaType display");
+assert_streq(jlw_media_type_name(JLW_MEDIA_AUDIO), "audio", "Audio");
+assert_streq(jlw_media_type_name(JLW_MEDIA_VIDEO), "video", "Video");
+
+# ---- ContainerFormat / AudioCodec / VideoCodec names (Debug-derived) ----
+test_group("format/codec names");
+assert_streq(jlw_container_format_name(JLW_FMT_FLAC), "Flac", "Flac");
+assert_streq(jlw_container_format_name(JLW_FMT_WEBM), "WebM", "WebM");
+assert_streq(jlw_audio_codec_name(JLW_ACODEC_VORBIS), "Vorbis", "Vorbis");
+assert_streq(jlw_video_codec_name(JLW_VCODEC_H264), "H264", "H264");
+
+# ---- repeat_mode_cycle ----
+test_group("RepeatMode cycle");
+assert_eq(jlw_repeat_mode_cycle(JLW_REPEAT_OFF), JLW_REPEAT_ONE, "Off->One");
+assert_eq(jlw_repeat_mode_cycle(JLW_REPEAT_ONE), JLW_REPEAT_ALL, "One->All");
+assert_eq(jlw_repeat_mode_cycle(JLW_REPEAT_ALL), JLW_REPEAT_OFF, "All->Off");
+
+# ---- repeat_mode_display ----
+test_group("RepeatMode display");
+assert_streq(jlw_repeat_mode_name(JLW_REPEAT_OFF), "off", "off");
+assert_streq(jlw_repeat_mode_name(JLW_REPEAT_ONE), "one", "one");
+assert_streq(jlw_repeat_mode_name(JLW_REPEAT_ALL), "all", "all");
+
+# ---- playback_state_display ----
+test_group("PlaybackState display");
+assert_streq(jlw_playback_state_name(JLW_STATE_STOPPED),   "stopped",   "stopped");
+assert_streq(jlw_playback_state_name(JLW_STATE_PLAYING),   "playing",   "playing");
+assert_streq(jlw_playback_state_name(JLW_STATE_PAUSED),    "paused",    "paused");
+assert_streq(jlw_playback_state_name(JLW_STATE_BUFFERING), "buffering", "buffering");
+
+# ---- playback_status_stopped ----
+test_group("PlaybackStatus stopped");
+var st = jlw_pb_status_stopped();
+assert_eq(JlwPlaybackStatus_state(st), JLW_STATE_STOPPED, "state stopped");
+assert_eq(JlwPlaybackStatus_volume(st), 1.0, "volume 1.0");
+assert_eq(JlwPlaybackStatus_muted(st), 0, "not muted");
+assert_eq(jlw_is_finite(jlw_pb_status_progress(st)), 0, "progress is None");
+
+# ---- playback_status_progress: pos 60s / dur 240s -> ~0.25 ----
+test_group("PlaybackStatus progress");
+var pr = jlw_pb_status_new(JLW_STATE_PLAYING, 0, f64_from(60), f64_from(240), 0.8, 0);
+var p = jlw_pb_status_progress(pr);
+assert_eq(jlw_is_finite(p), 1, "progress present");
+assert_eq(f64_lt(f64_abs(f64_sub(p, 0.25)), 0.001), 1, "progress ~0.25");
+
+# ---- playback_status_progress_zero_duration -> None ----
+test_group("PlaybackStatus progress zero duration");
+var zr = jlw_pb_status_new(JLW_STATE_PLAYING, 0, f64_from(10), 0, 1.0, 0);
+assert_eq(jlw_is_finite(jlw_pb_status_progress(zr)), 0, "zero duration -> None");
+
+var rc = assert_summary();
+syscall(60, rc);

@@ -1,0 +1,185 @@
+# core/types.cyr -- jalwa-core domain types (was crates/jalwa-core/src/lib.rs).
+# L0. Entry files include src/error.cyr FIRST, then this. Modules never `include`
+# each other.
+#
+# Ports the enums + core structs (MediaItem, Playlist, PlayQueue, PlaybackStatus,
+# Library). Rust `enum`s become integer `var` codes + if/elif dispatch; `Display`
+# impls become `_name(code)` fns returning the Rust string. serde derives and the
+# serde round-trip tests are dropped (integer codes carry the identity).
+#
+# PORT STATUS (incremental): enums + PlaybackStatus done. Playlist/PlayQueue/
+# MediaItem/Library land next (need the uuid + vec-of-struct + option idioms).
+
+# ================================================================
+# ContainerFormat  (was fallback_types::ContainerFormat; Display = Debug name)
+# ================================================================
+var JLW_FMT_MP4  = 0;
+var JLW_FMT_MKV  = 1;
+var JLW_FMT_WEBM = 2;
+var JLW_FMT_OGG  = 3;
+var JLW_FMT_WAV  = 4;
+var JLW_FMT_FLAC = 5;
+var JLW_FMT_MP3  = 6;
+var JLW_FMT_AVI  = 7;
+
+#must_use
+fn jlw_container_format_name(code) {
+    if (code == JLW_FMT_MP4)  { return "Mp4"; }
+    if (code == JLW_FMT_MKV)  { return "Mkv"; }
+    if (code == JLW_FMT_WEBM) { return "WebM"; }
+    if (code == JLW_FMT_OGG)  { return "Ogg"; }
+    if (code == JLW_FMT_WAV)  { return "Wav"; }
+    if (code == JLW_FMT_FLAC) { return "Flac"; }
+    if (code == JLW_FMT_MP3)  { return "Mp3"; }
+    if (code == JLW_FMT_AVI)  { return "Avi"; }
+    return "Unknown";
+}
+
+# ================================================================
+# AudioCodec  (Display = Debug name)
+# ================================================================
+var JLW_ACODEC_PCM    = 0;
+var JLW_ACODEC_MP3    = 1;
+var JLW_ACODEC_AAC    = 2;
+var JLW_ACODEC_FLAC   = 3;
+var JLW_ACODEC_VORBIS = 4;
+var JLW_ACODEC_OPUS   = 5;
+var JLW_ACODEC_ALAC   = 6;
+var JLW_ACODEC_WMA    = 7;
+
+#must_use
+fn jlw_audio_codec_name(code) {
+    if (code == JLW_ACODEC_PCM)    { return "Pcm"; }
+    if (code == JLW_ACODEC_MP3)    { return "Mp3"; }
+    if (code == JLW_ACODEC_AAC)    { return "Aac"; }
+    if (code == JLW_ACODEC_FLAC)   { return "Flac"; }
+    if (code == JLW_ACODEC_VORBIS) { return "Vorbis"; }
+    if (code == JLW_ACODEC_OPUS)   { return "Opus"; }
+    if (code == JLW_ACODEC_ALAC)   { return "Alac"; }
+    if (code == JLW_ACODEC_WMA)    { return "Wma"; }
+    return "Unknown";
+}
+
+# ================================================================
+# VideoCodec  (Display = Debug name)
+# ================================================================
+var JLW_VCODEC_H264   = 0;
+var JLW_VCODEC_H265   = 1;
+var JLW_VCODEC_VP8    = 2;
+var JLW_VCODEC_VP9    = 3;
+var JLW_VCODEC_AV1    = 4;
+var JLW_VCODEC_THEORA = 5;
+
+#must_use
+fn jlw_video_codec_name(code) {
+    if (code == JLW_VCODEC_H264)   { return "H264"; }
+    if (code == JLW_VCODEC_H265)   { return "H265"; }
+    if (code == JLW_VCODEC_VP8)    { return "Vp8"; }
+    if (code == JLW_VCODEC_VP9)    { return "Vp9"; }
+    if (code == JLW_VCODEC_AV1)    { return "Av1"; }
+    if (code == JLW_VCODEC_THEORA) { return "Theora"; }
+    return "Unknown";
+}
+
+# ================================================================
+# MediaType  (Display = lowercase)
+# ================================================================
+var JLW_MEDIA_AUDIO = 0;
+var JLW_MEDIA_VIDEO = 1;
+
+#must_use
+fn jlw_media_type_name(code) {
+    if (code == JLW_MEDIA_AUDIO) { return "audio"; }
+    if (code == JLW_MEDIA_VIDEO) { return "video"; }
+    return "unknown";
+}
+
+# ================================================================
+# RepeatMode  (Display = lowercase; cycle Off->One->All->Off)
+# ================================================================
+var JLW_REPEAT_OFF = 0;
+var JLW_REPEAT_ONE = 1;
+var JLW_REPEAT_ALL = 2;
+
+#must_use
+fn jlw_repeat_mode_name(code) {
+    if (code == JLW_REPEAT_OFF) { return "off"; }
+    if (code == JLW_REPEAT_ONE) { return "one"; }
+    if (code == JLW_REPEAT_ALL) { return "all"; }
+    return "unknown";
+}
+
+# cycle(self): Off->One, One->All, All->Off.
+#must_use
+fn jlw_repeat_mode_cycle(code) {
+    if (code == JLW_REPEAT_OFF) { return JLW_REPEAT_ONE; }
+    if (code == JLW_REPEAT_ONE) { return JLW_REPEAT_ALL; }
+    return JLW_REPEAT_OFF;
+}
+
+# ================================================================
+# PlaybackState  (Display = lowercase)
+# ================================================================
+var JLW_STATE_STOPPED   = 0;
+var JLW_STATE_PLAYING   = 1;
+var JLW_STATE_PAUSED    = 2;
+var JLW_STATE_BUFFERING = 3;
+
+#must_use
+fn jlw_playback_state_name(code) {
+    if (code == JLW_STATE_STOPPED)   { return "stopped"; }
+    if (code == JLW_STATE_PLAYING)   { return "playing"; }
+    if (code == JLW_STATE_PAUSED)    { return "paused"; }
+    if (code == JLW_STATE_BUFFERING) { return "buffering"; }
+    return "unknown";
+}
+
+# ================================================================
+# PlaybackStatus  (was struct PlaybackStatus + impl)
+# Fields:
+#   state         -- PlaybackState code
+#   current_item  -- Option<Uuid>: pointer to 16 bytes, or 0 (None)
+#   position      -- Duration as f64 seconds
+#   duration      -- Option<Duration> as f64 seconds, or JLW_NAN (None)
+#   volume        -- f32 -> f64
+#   muted         -- bool as 0/1
+# ================================================================
+#derive(accessors)
+struct JlwPlaybackStatus { state; current_item; position; duration; volume; muted; }
+
+# stopped(): the default idle snapshot (volume 1.0, not muted, no duration).
+#must_use
+fn jlw_pb_status_stopped() {
+    var s = alloc(sizeof(JlwPlaybackStatus));
+    JlwPlaybackStatus_set_state(s, JLW_STATE_STOPPED);
+    JlwPlaybackStatus_set_current_item(s, 0);       # None
+    JlwPlaybackStatus_set_position(s, 0);           # 0.0 s (0 == +0.0 bit pattern)
+    JlwPlaybackStatus_set_duration(s, JLW_NAN);     # None
+    JlwPlaybackStatus_set_volume(s, 1.0);
+    JlwPlaybackStatus_set_muted(s, 0);
+    return s;
+}
+
+# new(state, current_item, position_secs, duration_secs, volume, muted).
+# position_secs / duration_secs are f64 seconds; pass JLW_NAN for a None duration.
+#must_use
+fn jlw_pb_status_new(state, current_item, position, duration, volume, muted) {
+    var s = alloc(sizeof(JlwPlaybackStatus));
+    JlwPlaybackStatus_set_state(s, state);
+    JlwPlaybackStatus_set_current_item(s, current_item);
+    JlwPlaybackStatus_set_position(s, position);
+    JlwPlaybackStatus_set_duration(s, duration);
+    JlwPlaybackStatus_set_volume(s, volume);
+    JlwPlaybackStatus_set_muted(s, muted);
+    return s;
+}
+
+# progress(): position/duration in [0,1], or JLW_NAN (None) when duration is
+# absent (NaN) or zero. Mirrors Rust `duration.filter(|d| !d.is_zero()).map(...)`.
+#must_use
+fn jlw_pb_status_progress(self) {
+    var d = JlwPlaybackStatus_duration(self);
+    if (jlw_is_finite(d) == 0)  { return JLW_NAN; }   # None
+    if (f64_gt(d, 0) == 0)      { return JLW_NAN; }   # zero (or negative) -> None
+    return f64_div(JlwPlaybackStatus_position(self), d);
+}

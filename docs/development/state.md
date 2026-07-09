@@ -14,14 +14,14 @@
 ## Source / oracle
 
 - **Rust oracle**: 15,355 LOC (40 `.rs` files, full 5-crate workspace) frozen at `rust-old/`. Do not edit.
-- **Cyrius port**: skeleton only — `src/main.cyr` stub (builds + runs: prints `jalwa ready`).
+- **Cyrius port**: `src/error.cyr` (green) + `src/core/types.cyr` (enums + PlaybackStatus, green). `src/main.cyr` still the smoke stub.
 
 ## Port progress
 
 | Wave | Status |
 |---|---|
-| 0 — scaffold + oracle freeze | ✅ done (deps wiring + `error.cyr` pending) |
-| A — core types | ⏳ next |
+| 0 — scaffold + oracle freeze + `error.cyr` | ✅ done |
+| A — core types | ~in progress — enums + PlaybackStatus green; Playlist/PlayQueue/MediaItem/Library next (uuid+vec+option idiom) |
 | B — core services | ☐ |
 | C — playback + DSP | ☐ |
 | D — AI | ☐ |
@@ -29,17 +29,19 @@
 | F — desktop GUI | ☐ |
 | G — binary + MCP | ☐ |
 
-**Modules ported: 0 / 33.** Backlogged (blocked): `video_decode_thread`, `view_video` (tarang+aethersafta);
-real playback (tarang stub); MPRIS export (samvada client-only).
+**Modules: `error.cyr` ✅, `core/types.cyr` partial. 0 / 33 rust modules fully ported.**
+Backlogged (blocked): `video_decode_thread`, `view_video` (tarang+aethersafta); real playback (tarang stub);
+MPRIS export (samvada client-only).
 
 ## Tests
 
-- `tests/jalwa.tcyr` — scaffold placeholder. Per-module `.tcyr` suites land with each ported module.
+- `tests/error.tcyr` — 19/19 green. `tests/core_types.tcyr` — 23/23 green. `tests/jalwa.tcyr` — scaffold placeholder.
+- Per-module `.tcyr` suites land with each ported module, cross-checked against `rust-old/` `#[test]` blocks.
 
 ## Dependencies
 
-- **stdlib** (via `cyrius.cyml`): string, fmt, alloc, vec, str, syscalls, io, args, assert
-  (to grow: fs, thread, net, http, chrono, random, hashmap, tagged, result, fnptr, bayan, patra, vani, yukti, sakshi, mabda, math, simd)
+- **stdlib** (via `cyrius lib sync`): string, fmt, alloc, vec, str, syscalls, io, args, assert, **math**
+  (to grow: fs, thread, net, http, chrono, random, hashmap, tagged, result, fnptr, bayan, patra, vani, yukti, sakshi, mabda, simd)
 - **dist repos** (to wire in Wave 0): dhvani, ai-hwaccel, bote, shravan, chitra, dhancha, darshana, abaco
 - **Blocked (still Rust)**: tarang, aethersafta
 

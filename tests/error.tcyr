@@ -1,0 +1,46 @@
+# error.tcyr -- parity tests for src/error.cyr
+# Ported from the JalwaError coverage in rust-old/crates/jalwa-core (the Rust
+# `#[derive(thiserror::Error)]` Display strings). Serde/Debug-format tests have
+# no Cyrius analogue and are dropped; this covers the code<->name mapping and
+# the jlw_is_err predicate.
+
+include "src/error.cyr"
+
+alloc_init();
+
+# ================================================================
+# err_name parity: each variant maps to its Rust `#[error("...")]` text.
+# ================================================================
+test_group("error names");
+assert_streq(jlw_err_name(JLW_ERR_NONE), "none", "NONE");
+assert_streq(jlw_err_name(JLW_ERR_NOT_FOUND), "media not found", "NotFound");
+assert_streq(jlw_err_name(JLW_ERR_PLAYBACK), "playback error", "Playback");
+assert_streq(jlw_err_name(JLW_ERR_LIBRARY), "library error", "Library");
+assert_streq(jlw_err_name(JLW_ERR_UNSUPPORTED_FORMAT), "unsupported format", "UnsupportedFormat");
+assert_streq(jlw_err_name(JLW_ERR_DATABASE), "database error", "Database");
+assert_streq(jlw_err_name(JLW_ERR_SCANNER), "scanner error", "Scanner");
+assert_streq(jlw_err_name(JLW_ERR_IO), "I/O error", "Io");
+assert_streq(jlw_err_name(JLW_ERR_TARANG), "tarang error", "Tarang");
+assert_streq(jlw_err_name(99), "unknown error", "out-of-range code");
+
+# ================================================================
+# is_err: 0 is success, every negative variant is an error.
+# ================================================================
+test_group("jlw_is_err");
+assert_eq(jlw_is_err(JLW_ERR_NONE), 0, "NONE is not an error");
+assert_eq(jlw_is_err(JLW_ERR_NOT_FOUND), 1, "NotFound is an error");
+assert_eq(jlw_is_err(JLW_ERR_IO), 1, "Io is an error");
+assert_eq(jlw_is_err(JLW_ERR_TARANG), 1, "Tarang is an error");
+
+# ================================================================
+# is_finite: the JLW_NAN "None" sentinel is not finite; real values are.
+# ================================================================
+test_group("jlw_is_finite");
+assert_eq(jlw_is_finite(f64_from(440)), 1, "440.0 is finite");
+assert_eq(jlw_is_finite(0), 1, "0.0 is finite");
+assert_eq(jlw_is_finite(JLW_NAN), 0, "NaN not finite");
+assert_eq(jlw_is_finite(JLW_POS_INF), 0, "+inf not finite");
+assert_eq(jlw_is_finite(JLW_NEG_INF), 0, "-inf not finite");
+
+var rc = assert_summary();
+syscall(60, rc);
