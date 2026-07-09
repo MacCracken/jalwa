@@ -1,0 +1,97 @@
+# watcher.tcyr -- parity tests for src/core/watcher.cyr.
+# Ports the watcher #[test]s from rust-old/crates/jalwa-core/src/watcher.rs.
+# The real-fs create/modify tests are ported via the PARSE CORE (synthetic
+# inotify_event buffers) so they need no fs races. watcher_with_temp_dir DROPS
+# (it only asserted "no panic" on a 200ms inotify race).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/watcher.cyr"
+
+# build one inotify_event record at buf+off; returns the next offset.
+# layout: wd i32@0, mask u32@4, cookie u32@8, len u32@12, name@16.
+fn put_event(buf, off, wd, mask, name) {
+    var nl = strlen(name) + 1;             # include NUL (namelen counts padding)
+    store32(buf + off, wd);
+    store32(buf + off + 4, mask);
+    store32(buf + off + 8, 0);
+    store32(buf + off + 12, nl);
+    memcpy(buf + off + 16, name, nl);
+    return off + 16 + nl;
+}
+
+alloc_init();
+
+# ---- is_media_file_checks ----
+test_group("is_media_file");
+assert_eq(jlw_is_media_file("/music/song.mp3"),  1, "mp3");
+assert_eq(jlw_is_media_file("/music/a.FLAC"),    1, "FLAC case-insensitive");
+assert_eq(jlw_is_media_file("/music/x.opus"),    1, "opus");
+assert_eq(jlw_is_media_file("/music/notes.txt"), 0, "txt");
+assert_eq(jlw_is_media_file("/music/noext"),     0, "no extension");
+
+# ---- library_event_debug (names) ----
+test_group("event names");
+assert_streq(jlw_watch_event_name(JLW_WATCH_CREATED),  "FileCreated",  "created");
+assert_streq(jlw_watch_event_name(JLW_WATCH_MODIFIED), "FileModified", "modified");
+assert_streq(jlw_watch_event_name(JLW_WATCH_REMOVED),  "FileRemoved",  "removed");
+
+# ---- watcher_empty_paths (constructs; poll drains empty) ----
+test_group("watcher empty paths");
+var we = jlw_watcher_new(vec_new());
+assert_eq(we != 0, 1, "watcher non-null");
+assert_eq(vec_len(jlw_watcher_poll(we)), 0, "poll empty");
+
+# ---- recv_timeout_no_events ----
+test_group("recv_timeout no events");
+assert_eq(vec_len(jlw_watcher_recv_timeout(we, 40)), 0, "empty after timeout");
+
+# ---- watcher_ignores_non_media (parse core) ----
+test_group("ignores non-media");
+var w1 = jlw_watcher_new(vec_new());
+jlw_watcher_add(w1, 1, "/music");
+var b1 = alloc(256);
+var e1 = put_event(b1, 0, 1, 256, "notes.txt");     # IN_CREATE
+var res1 = vec_new();
+jlw_watcher_parse_buf(b1, e1, w1, res1);
+assert_eq(vec_len(res1), 0, "non-media filtered out");
+
+# ---- watcher_detects_file_creation (parse core) ----
+test_group("detects creation");
+var w2 = jlw_watcher_new(vec_new());
+jlw_watcher_add(w2, 1, "/music");
+var b2 = alloc(256);
+var e2 = put_event(b2, 0, 1, 256, "new_song.mp3");   # IN_CREATE
+var res2 = vec_new();
+jlw_watcher_parse_buf(b2, e2, w2, res2);
+assert_eq(vec_len(res2), 1, "one event");
+assert_eq(JlwWatchEvent_code(vec_get(res2, 0)), JLW_WATCH_CREATED, "code created");
+assert_streq(JlwWatchEvent_path(vec_get(res2, 0)), "/music/new_song.mp3", "abs path");
+
+# ---- watcher_detects_file_removal (parse core) ----
+test_group("detects removal");
+var w3 = jlw_watcher_new(vec_new());
+jlw_watcher_add(w3, 1, "/music");
+var b3 = alloc(256);
+var e3 = put_event(b3, 0, 1, 512, "to_delete.mp3");  # IN_DELETE
+var res3 = vec_new();
+jlw_watcher_parse_buf(b3, e3, w3, res3);
+assert_eq(vec_len(res3), 1, "one event");
+assert_eq(JlwWatchEvent_code(vec_get(res3, 0)), JLW_WATCH_REMOVED, "code removed");
+
+# ---- watcher_multiple_paths (parse core, two wds) ----
+test_group("multiple paths");
+var w4 = jlw_watcher_new(vec_new());
+jlw_watcher_add(w4, 1, "/dir1");
+jlw_watcher_add(w4, 2, "/dir2");
+var b4 = alloc(256);
+var o4 = put_event(b4, 0, 1, 256, "song1.mp3");      # IN_CREATE in /dir1
+o4 = put_event(b4, o4, 2, 256, "song2.flac");        # IN_CREATE in /dir2
+var res4 = vec_new();
+jlw_watcher_parse_buf(b4, o4, w4, res4);
+assert_eq(vec_len(res4), 2, "two events");
+assert_streq(JlwWatchEvent_path(vec_get(res4, 0)), "/dir1/song1.mp3", "path 0");
+assert_streq(JlwWatchEvent_path(vec_get(res4, 1)), "/dir2/song2.flac", "path 1");
+
+var rc = assert_summary();
+syscall(60, rc);

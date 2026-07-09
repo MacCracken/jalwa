@@ -1,0 +1,184 @@
+# core/watcher.cyr -- filesystem watcher (notify crate -> raw Linux inotify).
+# Ports rust-old/crates/jalwa-core/src/watcher.rs. L1: depends on error.cyr +
+# core/types.cyr. The notify callback thread + mpsc channel are ELIDED -- raw
+# inotify is read inline in poll(), so no thread/channel needed.
+#
+# LINUX-ONLY: inotify syscalls are absent on AGNOS (sys_inotify_* = 0 hits in
+# syscalls_x86_64_agnos.cyr). On AGNOS this degrades to a periodic dir_walk diff
+# (not implemented here; new() returns a watcher whose poll() is a no-op if the
+# inotify fd is < 0). The event-PARSE core (jlw_watcher_parse_buf) is
+# platform-independent and fully tested via synthetic inotify_event buffers.
+
+# ---- LibraryEvent -> codes (was enum {FileCreated, FileModified, FileRemoved}) ----
+var JLW_WATCH_CREATED  = 0;
+var JLW_WATCH_MODIFIED = 1;
+var JLW_WATCH_REMOVED  = 2;
+
+#must_use
+fn jlw_watch_event_name(code) {
+    if (code == JLW_WATCH_CREATED)  { return "FileCreated"; }
+    if (code == JLW_WATCH_MODIFIED) { return "FileModified"; }
+    if (code == JLW_WATCH_REMOVED)  { return "FileRemoved"; }
+    return "Unknown";
+}
+
+# a single emitted event: a JLW_WATCH_* code + the absolute path.
+#derive(accessors)
+struct JlwWatchEvent { code; path; }
+#must_use
+fn jlw_watch_event_new(code, path) {
+    var e = alloc(sizeof(JlwWatchEvent));
+    JlwWatchEvent_set_code(e, code);
+    JlwWatchEvent_set_path(e, path);
+    return e;
+}
+
+# is_media_file: extension in the 10 media exts (case-insensitive). Mirrors
+# watcher.rs's own MEDIA_EXTENSIONS list (faithfully duplicated from scanner's).
+#must_use
+fn jlw_is_media_file(path) {
+    var n = strlen(path);
+    var base = 0;
+    for (var i = 0; i < n; i = i + 1) { if (load8(path + i) == 47) { base = i + 1; } }
+    var dot = (0 - 1);
+    for (var j = base; j < n; j = j + 1) { if (load8(path + j) == 46) { dot = j; } }
+    if (dot == (0 - 1)) { return 0; }
+    var elen = n - dot - 1;
+    if (elen == 0) { return 0; }
+    var ext = alloc(elen + 1);
+    memcpy(ext, path + dot + 1, elen);
+    store8(ext + elen, 0);
+    var e = str_lower_cstr(ext);
+    if (streq(e, "mp3")  == 1) { return 1; }
+    if (streq(e, "flac") == 1) { return 1; }
+    if (streq(e, "wav")  == 1) { return 1; }
+    if (streq(e, "ogg")  == 1) { return 1; }
+    if (streq(e, "m4a")  == 1) { return 1; }
+    if (streq(e, "mp4")  == 1) { return 1; }
+    if (streq(e, "mkv")  == 1) { return 1; }
+    if (streq(e, "webm") == 1) { return 1; }
+    if (streq(e, "aac")  == 1) { return 1; }
+    if (streq(e, "opus") == 1) { return 1; }
+    return 0;
+}
+
+# join dir + "/" + name into a fresh cstring.
+#must_use
+fn jlw_path_join_cstr(dir, name) {
+    var ld = strlen(dir);
+    var ln = strlen(name);
+    var dst = alloc(ld + 1 + ln + 1);
+    memcpy(dst, dir, ld);
+    store8(dst + ld, 47);
+    memcpy(dst + ld + 1, name, ln);
+    store8(dst + ld + 1 + ln, 0);
+    return dst;
+}
+
+# ---- LibraryWatcher (was RecommendedWatcher + mpsc::Receiver) ----
+# fd = inotify instance (or <0 if unavailable); wds/dirs = parallel wd->dir map.
+#derive(accessors)
+struct JlwWatcher { fd; wds; dirs; }
+
+fn jlw_watcher_add(w, wd, dir) {
+    vec_push(JlwWatcher_wds(w), wd);
+    vec_push(JlwWatcher_dirs(w), dir);
+    return 0;
+}
+
+#must_use
+fn jlw_watcher_lookup_dir(w, wd) {
+    var wds = JlwWatcher_wds(w);
+    var dirs = JlwWatcher_dirs(w);
+    var n = vec_len(wds);
+    for (var i = 0; i < n; i = i + 1) {
+        if (vec_get(wds, i) == wd) { return vec_get(dirs, i); }
+    }
+    return 0;
+}
+
+# new(paths): create a non-blocking inotify instance and add a watch per path.
+# Returns a JlwWatcher (never null; fd < 0 if inotify is unavailable).
+#must_use
+fn jlw_watcher_new(paths) {
+    var w = alloc(sizeof(JlwWatcher));
+    JlwWatcher_set_fd(w, syscall(294, 2048));   # inotify_init1(IN_NONBLOCK)
+    JlwWatcher_set_wds(w, vec_new());
+    JlwWatcher_set_dirs(w, vec_new());
+    var fd = JlwWatcher_fd(w);
+    if (fd >= 0) {
+        var n = vec_len(paths);
+        for (var i = 0; i < n; i = i + 1) {
+            var d = vec_get(paths, i);
+            var wd = sys_inotify_add_watch(fd, d, 962);   # CREATE|MODIFY|DELETE|MOVED_FROM|MOVED_TO
+            if (wd >= 0) { jlw_watcher_add(w, wd, d); }
+        }
+    }
+    return w;
+}
+
+# parse_buf: walk a raw inotify read buffer, mapping each event to a JlwWatchEvent
+# (media files only, absolute path reconstructed from the wd->dir map). Platform-
+# independent -- the tested core.
+fn jlw_watcher_parse_buf(buf, n, w, results) {
+    var off = 0;
+    while (off < n) {
+        var wd = load32(buf + off);
+        var mask = load32(buf + off + 4);
+        var namelen = load32(buf + off + 12);
+        var name = buf + off + 16;
+        var code = (0 - 1);
+        if ((mask & 256) != 0) { code = JLW_WATCH_CREATED; }          # IN_CREATE
+        if (code == (0 - 1)) { if ((mask & 128) != 0) { code = JLW_WATCH_CREATED; } }   # IN_MOVED_TO
+        if (code == (0 - 1)) { if ((mask & 512) != 0) { code = JLW_WATCH_REMOVED; } }   # IN_DELETE
+        if (code == (0 - 1)) { if ((mask & 64) != 0)  { code = JLW_WATCH_REMOVED; } }   # IN_MOVED_FROM
+        if (code == (0 - 1)) { if ((mask & 2) != 0)   { code = JLW_WATCH_MODIFIED; } }  # IN_MODIFY
+        if (code == (0 - 1)) { if ((mask & 8) != 0)   { code = JLW_WATCH_MODIFIED; } }  # IN_CLOSE_WRITE
+        var dir = jlw_watcher_lookup_dir(w, wd);
+        if (dir != 0) {
+            if (code != (0 - 1)) {
+                var full = jlw_path_join_cstr(dir, name);
+                if (jlw_is_media_file(full) == 1) {
+                    vec_push(results, jlw_watch_event_new(code, full));
+                }
+            }
+        }
+        off = off + 16 + namelen;
+    }
+    return 0;
+}
+
+# poll(): drain the inotify fd once (non-blocking). Returns a vec of JlwWatchEvent
+# (empty when there's nothing to read / fd unavailable).
+#must_use
+fn jlw_watcher_poll(w) {
+    var results = vec_new();
+    var fd = JlwWatcher_fd(w);
+    if (fd < 0) { return results; }
+    var buf = alloc(4096);
+    var n = file_read(fd, buf, 4096);
+    if (n <= 0) { return results; }   # EAGAIN / no data
+    jlw_watcher_parse_buf(buf, n, w, results);
+    return results;
+}
+
+# recv_timeout(ms): poll until an event arrives or the deadline passes.
+#must_use
+fn jlw_watcher_recv_timeout(w, timeout_ms) {
+    var deadline = clock_now_ms() + timeout_ms;
+    var rgo = 1;
+    while (rgo == 1) {
+        var evs = jlw_watcher_poll(w);
+        if (vec_len(evs) > 0) { return evs; }
+        if (clock_now_ms() >= deadline) { rgo = 0; }
+        else { sleep_ms(5); }
+    }
+    return vec_new();
+}
+
+# free(): close the inotify fd.
+fn jlw_watcher_free(w) {
+    var fd = JlwWatcher_fd(w);
+    if (fd >= 0) { file_close(fd); }
+    return 0;
+}
