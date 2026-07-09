@@ -1,0 +1,118 @@
+# playback/decode_thread.cyr -- decode-thread command/event protocol + volume.
+# Ports rust-old/crates/jalwa-playback/src/decode_thread.rs. L2: depends on
+# error.cyr + core/types.cyr (PlaybackState) + playback/dsp.cyr (JlwAudioBuffer).
+#
+# The decode_loop itself is tarang-gated (FileDecoder/AudioOutput/resample/mix)
+# and is STUBBED -- real decode/playback unblocks when a Cyrius tarang lands.
+# The tarang-independent protocol (EngineCommand/EngineEvent/DecodeStatus) +
+# apply_volume port faithfully and are fully tested.
+
+# ---- EngineCommand -> codes (payloads threaded via the command struct) ----
+var JLW_CMD_PLAY         = 0;
+var JLW_CMD_PAUSE        = 1;
+var JLW_CMD_RESUME       = 2;
+var JLW_CMD_STOP         = 3;
+var JLW_CMD_SEEK         = 4;   # payload: position (f64 secs)
+var JLW_CMD_VOLUME       = 5;   # payload: gain (f64)
+var JLW_CMD_MUTE         = 6;   # payload: 0/1
+var JLW_CMD_PREPARE_NEXT = 7;   # payload: path (ptr)
+var JLW_CMD_EQ_UPDATE    = 8;   # payload: settings (ptr)
+var JLW_CMD_NORMALIZE    = 9;   # payload: 0/1
+
+#must_use
+fn jlw_engine_command_name(code) {
+    if (code == JLW_CMD_PLAY)         { return "Play"; }
+    if (code == JLW_CMD_PAUSE)        { return "Pause"; }
+    if (code == JLW_CMD_RESUME)       { return "Resume"; }
+    if (code == JLW_CMD_STOP)         { return "Stop"; }
+    if (code == JLW_CMD_SEEK)         { return "Seek"; }
+    if (code == JLW_CMD_VOLUME)       { return "Volume"; }
+    if (code == JLW_CMD_MUTE)         { return "Mute"; }
+    if (code == JLW_CMD_PREPARE_NEXT) { return "PrepareNext"; }
+    if (code == JLW_CMD_EQ_UPDATE)    { return "EqUpdate"; }
+    if (code == JLW_CMD_NORMALIZE)    { return "Normalize"; }
+    return "Unknown";
+}
+
+# a command with a generic payload slot (int for Mute/Normalize, f64 for
+# Seek/Volume, ptr for PrepareNext path / EqUpdate settings).
+#derive(accessors)
+struct JlwEngineCommand { code; payload; }
+#must_use
+fn jlw_engine_command_new(code, payload) {
+    var c = alloc(sizeof(JlwEngineCommand));
+    JlwEngineCommand_set_code(c, code);
+    JlwEngineCommand_set_payload(c, payload);
+    return c;
+}
+
+# ---- EngineEvent -> codes (msg = payload string for Error/PrepareNextFailed) ----
+var JLW_EVT_STATE_CHANGED       = 0;
+var JLW_EVT_POSITION_UPDATE     = 1;
+var JLW_EVT_TRACK_FINISHED      = 2;
+var JLW_EVT_TRACK_CHANGED       = 3;
+var JLW_EVT_NEAR_END            = 4;
+var JLW_EVT_ERROR               = 5;   # msg: error string
+var JLW_EVT_PREPARE_NEXT_FAILED = 6;   # msg: reason string
+
+#must_use
+fn jlw_engine_event_name(code) {
+    if (code == JLW_EVT_STATE_CHANGED)       { return "StateChanged"; }
+    if (code == JLW_EVT_POSITION_UPDATE)     { return "PositionUpdate"; }
+    if (code == JLW_EVT_TRACK_FINISHED)      { return "TrackFinished"; }
+    if (code == JLW_EVT_TRACK_CHANGED)       { return "TrackChanged"; }
+    if (code == JLW_EVT_NEAR_END)            { return "NearEnd"; }
+    if (code == JLW_EVT_ERROR)               { return "Error"; }
+    if (code == JLW_EVT_PREPARE_NEXT_FAILED) { return "PrepareNextFailed"; }
+    return "Unknown";
+}
+
+# an event with an optional message/payload (msg for Error/PrepareNextFailed;
+# for StateChanged/PositionUpdate the payload carries state code / position).
+#derive(accessors)
+struct JlwEngineEvent { code; msg; }
+#must_use
+fn jlw_engine_event_new(code, msg) {
+    var e = alloc(sizeof(JlwEngineEvent));
+    JlwEngineEvent_set_code(e, code);
+    JlwEngineEvent_set_msg(e, msg);
+    return e;
+}
+
+# ---- DecodeStatus ----
+#derive(accessors)
+struct JlwDecodeStatus { state; position; volume; muted; }
+#must_use
+fn jlw_decode_status_default() {
+    var s = alloc(sizeof(JlwDecodeStatus));
+    JlwDecodeStatus_set_state(s, JLW_STATE_STOPPED);
+    JlwDecodeStatus_set_position(s, 0);      # 0.0 s
+    JlwDecodeStatus_set_volume(s, 1.0);
+    JlwDecodeStatus_set_muted(s, 0);
+    return s;
+}
+
+# apply_volume_in_place: scale samples by gain (no-op within 1e-6 of unity).
+fn jlw_dt_apply_volume_in_place(buf, gain) {
+    if (f64_lt(f64_abs(f64_sub(gain, 1.0)), 0.000001) == 1) { return 0; }
+    var samples = JlwAudioBuffer_samples(buf);
+    var n = vec_len(samples);
+    for (var i = 0; i < n; i = i + 1) { vec_set(samples, i, f64_mul(vec_get(samples, i), gain)); }
+    return 0;
+}
+
+# apply_volume: return a new buffer with samples scaled by gain.
+#must_use
+fn jlw_dt_apply_volume(buf, gain) {
+    var samples = JlwAudioBuffer_samples(buf);
+    var n = vec_len(samples);
+    var scaled = vec_new();
+    for (var i = 0; i < n; i = i + 1) { vec_push(scaled, f64_mul(vec_get(samples, i), gain)); }
+    return jlw_audio_buffer_new(scaled, JlwAudioBuffer_channels(buf), JlwAudioBuffer_sample_rate(buf));
+}
+
+# decode_loop: STUB (tarang FileDecoder/AudioOutput). Real decode unblocks with
+# a Cyrius tarang. Signature preserved for the engine facade to call.
+fn jlw_dt_decode_loop(path, cmd_chan, status, event_chan, config, near_end_ms) {
+    return 0;   # no-op until tarang lands
+}

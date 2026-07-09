@@ -14,7 +14,7 @@
 ## Source / oracle
 
 - **Rust oracle**: 15,355 LOC (40 `.rs` files, full 5-crate workspace) frozen at `rust-old/`. Do not edit.
-- **Cyrius port**: `src/error.cyr` + `src/core/{types,playlist_io,db,scanner,watcher,hardware}.cyr` (all jalwa-core) + `src/playback/dsp.cyr` — green. `src/main.cyr` still the smoke stub.
+- **Cyrius port**: `src/error.cyr` + `src/core/{types,playlist_io,db,scanner,watcher,hardware}.cyr` (all jalwa-core) + `src/playback/{dsp,decode_thread}.cyr` — green. `src/main.cyr` still the smoke stub.
 
 ## Port progress
 
@@ -23,19 +23,19 @@
 | 0 — scaffold + oracle freeze + `error.cyr` | ✅ done |
 | A — core types | ✅ done — all 7 types (6 enums, PlaybackStatus, Uuid, Playlist, PlayQueue, MediaItem, Library); 72 tests. ADR 0001 (linear-scan indexes) |
 | B — core services | ✅ done — `playlist_io`, `db`, `scanner`, `watcher`, `hardware` (yukti). **jalwa-core fully ported.** |
-| C — playback + DSP | ⏳ in progress — **dhvani wired**; `dsp` ✅ (EQ/loudness/normalize, 23 tests; 3 byte-cast tests dropped); decode_thread (tarang stub), engine facade, mpris shape-only next |
+| C — playback + DSP | ⏳ in progress — `dsp` ✅, `decode_thread` ✅ (protocol/status/volume; decode_loop tarang-stubbed); engine facade + mpris shape next; video_decode_thread backlogged |
 | D — AI | ☐ |
 | E — terminal UI | ☐ |
 | F — desktop GUI | ☐ |
 | G — binary + MCP | ☐ |
 
-**Modules: all 6 jalwa-core + `playback/dsp.cyr` ✅. 7 / 33 rust modules fully ported.**
+**Modules: all 6 jalwa-core + `playback/{dsp,decode_thread}.cyr` ✅ (decode_thread's decode_loop tarang-stubbed). 8 / 33 rust modules ported.**
 Backlogged (blocked): `video_decode_thread`, `view_video` (tarang+aethersafta); real playback (tarang stub);
 MPRIS export (samvada client-only).
 
 ## Tests
 
-- `error` 19 · `core_types` 72 · `playlist_io` 17 · `db_helpers` 34 · `db` 27 · `scanner` 31 · `watcher` 20 · `hardware` 55 · `dsp` 42 — all green (317). Bare `cyrius test` all green.
+- `error` 19 · `core_types` 72 · `playlist_io` 17 · `db_helpers` 34 · `db` 27 · `scanner` 31 · `watcher` 20 · `hardware` 55 · `dsp` 42 · `decode_thread` 15 — all green (332). Bare `cyrius test` all green.
 
 > Toolchain drift: `cyrius.cyml` pins 6.4.29; cycc is now 6.4.32. Builds pass against the 6.4.29-vendored `lib/`; benign pin-drift warning. Bump the pin + `cyrius lib sync` when convenient.
 - Per-module `.tcyr` suites land with each ported module, cross-checked against `rust-old/` `#[test]` blocks.

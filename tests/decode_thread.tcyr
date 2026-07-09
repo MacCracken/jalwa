@@ -1,0 +1,61 @@
+# decode_thread.tcyr -- parity tests for src/playback/decode_thread.cyr.
+# Ports the tarang-independent #[test]s from decode_thread.rs. The decode_loop-
+# driven tests (plays_to_end/stop/volume/pause_resume/prepare_next_on_nonexistent)
+# DROP -- they need a real tarang FileDecoder + audio output (stubbed).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+
+alloc_init();
+
+# ---- decode_status_default_values ----
+test_group("DecodeStatus default");
+var s = jlw_decode_status_default();
+assert_eq(JlwDecodeStatus_state(s), JLW_STATE_STOPPED, "state Stopped");
+assert_eq(JlwDecodeStatus_position(s), 0, "position 0");
+assert_eq(JlwDecodeStatus_volume(s), 1.0, "volume 1.0");
+assert_eq(JlwDecodeStatus_muted(s), 0, "not muted");
+
+# ---- engine_command_debug (names) ----
+test_group("EngineCommand names");
+assert_streq(jlw_engine_command_name(JLW_CMD_PLAY), "Play", "Play");
+assert_streq(jlw_engine_command_name(JLW_CMD_SEEK), "Seek", "Seek");
+assert_streq(jlw_engine_command_name(JLW_CMD_NORMALIZE), "Normalize", "Normalize");
+
+# ---- engine_event_clone (adapted: code identity) ----
+test_group("EngineEvent identity");
+var ev = jlw_engine_event_new(JLW_EVT_TRACK_FINISHED, 0);
+assert_eq(JlwEngineEvent_code(ev), JLW_EVT_TRACK_FINISHED, "TrackFinished code");
+
+# ---- prepare_next_failed_event_variant (code + message) ----
+test_group("PrepareNextFailed variant");
+var pf = jlw_engine_event_new(JLW_EVT_PREPARE_NEXT_FAILED, "file not found");
+assert_eq(JlwEngineEvent_code(pf), JLW_EVT_PREPARE_NEXT_FAILED, "code");
+assert_streq(JlwEngineEvent_msg(pf), "file not found", "message carried");
+
+# ---- prepare_next_failed_debug (name + message) ----
+test_group("PrepareNextFailed name");
+assert_streq(jlw_engine_event_name(JLW_EVT_PREPARE_NEXT_FAILED), "PrepareNextFailed", "name");
+
+# ---- apply_volume (in-place + new buffer) ----
+test_group("apply_volume");
+var v1 = vec_new(); vec_push(v1, 0.5); vec_push(v1, 0.5);
+var buf = jlw_audio_buffer_new(v1, 1, 44100);
+jlw_dt_apply_volume_in_place(buf, 2.0);
+assert_eq(vec_get(JlwAudioBuffer_samples(buf), 0), 1.0, "in-place *2 -> 1.0");
+# unity gain is a no-op
+var v2 = vec_new(); vec_push(v2, 0.3);
+var buf2 = jlw_audio_buffer_new(v2, 1, 44100);
+jlw_dt_apply_volume_in_place(buf2, 1.0);
+assert_eq(vec_get(JlwAudioBuffer_samples(buf2), 0), 0.3, "unity gain no-op");
+# apply_volume returns a new buffer, source unchanged
+var v3 = vec_new(); vec_push(v3, 0.4);
+var src = jlw_audio_buffer_new(v3, 1, 44100);
+var out = jlw_dt_apply_volume(src, 0.5);
+assert_eq(vec_get(JlwAudioBuffer_samples(out), 0), 0.2, "new buffer 0.4*0.5=0.2");
+assert_eq(vec_get(JlwAudioBuffer_samples(src), 0), 0.4, "source unchanged");
+
+var rc = assert_summary();
+syscall(60, rc);
