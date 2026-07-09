@@ -1,0 +1,136 @@
+# daimon.tcyr -- parity tests for src/ai/daimon.cyr.
+# Ports the non-network #[test]s from jalwa-ai/src/daimon.rs. DROPPED: the three
+# serde *_serialization round-trip tests (no serde). The network methods are
+# stubbed, so their tests (none exist as unit tests) don't apply.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/ai/daimon.cyr"
+
+fn cstr3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var d = alloc(la + lb + lc + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); memcpy(d + la + lb, c, lc);
+    store8(d + la + lb + lc, 0);
+    return d;
+}
+fn make_item(title, artist, dur_secs) {
+    var it = jlw_media_item_new(cstr3("/music/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    JlwMediaItem_set_album(it, "Album");
+    JlwMediaItem_set_duration(it, f64_from(dur_secs));
+    JlwMediaItem_set_audio_codec(it, JLW_ACODEC_FLAC);
+    return it;
+}
+fn contains(hay, needle) { if (strstr(hay, needle) >= 0) { return 1; } return 0; }
+fn tags2(a, b) { var v = vec_new(); vec_push(v, a); vec_push(v, b); return v; }
+
+alloc_init();
+args_init();
+
+# ---- config defaults ----
+test_group("config defaults");
+assert_eq(contains(JlwDaimonConfig_endpoint(jlw_daimon_config_default()), "8090"), 1, "daimon endpoint 8090");
+assert_eq(contains(JlwHooshConfig_endpoint(jlw_hoosh_config_default()), "8088"), 1, "hoosh endpoint 8088");
+
+# ---- format_item_for_rag ----
+test_group("format_item_for_rag metadata");
+var it1 = make_item("Test Song", "Artist X", 240);
+JlwMediaItem_set_tags(it1, tags2("rock", "indie"));
+JlwMediaItem_set_play_count(it1, 5);
+JlwMediaItem_set_rating(it1, 4);
+var t1 = jlw_daimon_format_item_for_rag(it1);
+assert_eq(contains(t1, "Test Song"), 1, "title");
+assert_eq(contains(t1, "Artist X"), 1, "artist");
+assert_eq(contains(t1, "4:00"), 1, "duration 4:00");
+assert_eq(contains(t1, "rock"), 1, "tag rock");
+assert_eq(contains(t1, "Play count: 5"), 1, "play count");
+assert_eq(contains(t1, "Rating: 4/5"), 1, "rating");
+
+test_group("format_item_for_rag minimal");
+var t2 = jlw_daimon_format_item_for_rag(make_item("Minimal", "Nobody", 60));
+assert_eq(contains(t2, "Minimal"), 1, "title");
+assert_eq(contains(t2, "1:00"), 1, "1:00");
+assert_eq(contains(t2, "Tags:"), 0, "no Tags line");
+
+test_group("format_item_for_rag tags+rating / video");
+var it3 = make_item("Groovy Tune", "DJ Cool", 300);
+JlwMediaItem_set_tags(it3, tags2("electronic", "chill"));
+JlwMediaItem_set_rating(it3, 5);
+JlwMediaItem_set_play_count(it3, 42);
+var t3 = jlw_daimon_format_item_for_rag(it3);
+assert_eq(contains(t3, "Tags: electronic, chill"), 1, "joined tags");
+assert_eq(contains(t3, "Rating: 5/5"), 1, "rating 5");
+assert_eq(contains(t3, "5:00"), 1, "5:00");
+var itv = make_item("Music Video", "Director", 200);
+JlwMediaItem_set_media_type(itv, JLW_MEDIA_VIDEO);
+assert_eq(contains(jlw_daimon_format_item_for_rag(itv), "Type: Video"), 1, "video type");
+
+# ---- build_library_context ----
+test_group("build_library_context");
+var lib = jlw_library_new();
+var la = make_item("Song A", "Band X", 180);
+var jt = vec_new(); vec_push(jt, "jazz");
+JlwMediaItem_set_tags(la, jt);
+jlw_library_add_item(lib, la);
+jlw_library_add_item(lib, make_item("Song B", "Band Y", 240));
+var ctx = jlw_daimon_build_library_context(lib);
+assert_eq(contains(ctx, "Song A — Band X"), 1, "line A");
+assert_eq(contains(ctx, "[jazz]"), 1, "tag jazz");
+assert_eq(contains(ctx, "Song B — Band Y"), 1, "line B");
+assert_streq(jlw_daimon_build_library_context(jlw_library_new()), "", "empty lib -> empty");
+
+# ---- parse_llm_recommendation ----
+test_group("parse_llm valid json");
+var r1 = jlw_daimon_parse_llm("{\"suggestions\":[{\"title\":\"Song A\",\"artist\":\"Band\",\"reason\":\"matches mood\"}],\"mood\":\"chill\"}");
+assert_eq(vec_len(JlwLlmRecommendation_suggestions(r1)), 1, "1 suggestion");
+assert_streq(JlwLlmSuggestion_title(vec_get(JlwLlmRecommendation_suggestions(r1), 0)), "Song A", "title Song A");
+assert_streq(JlwLlmRecommendation_mood(r1), "chill", "mood chill");
+
+test_group("parse_llm markdown");
+var r2 = jlw_daimon_parse_llm("Here are my picks:\n```json\n{\"suggestions\":[{\"title\":\"X\",\"artist\":null,\"reason\":\"great\"}],\"mood\":\"upbeat\"}\n```");
+assert_streq(JlwLlmSuggestion_title(vec_get(JlwLlmRecommendation_suggestions(r2), 0)), "X", "title X");
+
+test_group("parse_llm fallback + empty + null");
+var r3 = jlw_daimon_parse_llm("I couldn't find any matching songs.");
+assert_eq(vec_len(JlwLlmRecommendation_suggestions(r3)), 1, "1 fallback");
+assert_eq(contains(JlwLlmSuggestion_title(vec_get(JlwLlmRecommendation_suggestions(r3), 0)), "couldn't find"), 1, "raw text");
+assert_eq(vec_len(JlwLlmRecommendation_suggestions(jlw_daimon_parse_llm("{}"))) > 0, 1, "empty json -> fallback");
+var r5 = jlw_daimon_parse_llm("");
+assert_eq(vec_len(JlwLlmRecommendation_suggestions(r5)), 1, "null input -> 1");
+assert_eq(JlwLlmRecommendation_mood(r5), 0, "mood None");
+
+# ---- auth_header ----
+test_group("auth_header");
+var ck = jlw_daimon_client_new(jlw_daimon_config_new("http://localhost:8090", "secret-key-123"));
+assert_streq(jlw_daimon_auth_header(ck), "Bearer secret-key-123", "with key");
+var cn = jlw_daimon_client_new(jlw_daimon_config_new("http://localhost:8090", 0));
+assert_eq(jlw_daimon_auth_header(cn), 0, "without key -> None");
+
+# ---- debug redaction ----
+test_group("debug redacts key");
+var dbg = jlw_daimon_config_debug(jlw_daimon_config_new("http://localhost:8090", "super-secret-key"));
+assert_eq(contains(dbg, "[REDACTED]"), 1, "redacted");
+assert_eq(contains(dbg, "super-secret-key"), 0, "key hidden");
+var hdbg = jlw_hoosh_config_debug(jlw_hoosh_config_new("http://localhost:8088", "hoosh-secret-key", "llama3"));
+assert_eq(contains(hdbg, "[REDACTED]"), 1, "hoosh redacted");
+assert_eq(contains(hdbg, "hoosh-secret-key"), 0, "hoosh key hidden");
+assert_eq(contains(hdbg, "llama3"), 1, "model shown");
+
+# ---- struct fields ----
+test_group("struct fields");
+var sm = jlw_similar_media_new("/music/track.mp3", 0.75, "{\"genre\":\"rock\",\"bpm\":120}");
+assert_streq(JlwSimilarMedia_path(sm), "/music/track.mp3", "path");
+assert_eq(f64_lt(f64_abs(f64_sub(JlwSimilarMedia_score(sm), 0.75)), 0.0001), 1, "score 0.75");
+assert_eq(contains(JlwSimilarMedia_metadata(sm), "rock"), 1, "metadata has genre rock");
+var seg0 = jlw_transcription_segment_new(0, 1.2, "Hello world.");
+var seg1 = jlw_transcription_segment_new(1.5, 2.8, "How are you?");
+var segs = vec_new(); vec_push(segs, seg0); vec_push(segs, seg1);
+var tr = jlw_transcription_result_new("Hello world. How are you?", "en", segs);
+assert_eq(vec_len(JlwTranscriptionResult_segments(tr)), 2, "2 segments");
+assert_eq(f64_lt(JlwTranscriptionSegment_end(seg0), JlwTranscriptionSegment_start(seg1)), 1, "seg0 ends before seg1");
+assert_streq(JlwTranscriptionSegment_text(seg1), "How are you?", "seg1 text");
+assert_streq(JlwTranscriptionResult_language(tr), "en", "language en");
+
+var rc = assert_summary();
+syscall(60, rc);
