@@ -376,3 +376,223 @@ fn jlw_queue_is_empty(q) {
     if (vec_len(JlwPlayQueue_items(q)) == 0) { return 1; }
     return 0;
 }
+
+# ================================================================
+# MediaItem  (was struct MediaItem + impl). Strings (path/title/artist/album/
+# tags/art_mime) are cstrings. Options: cstr fields use 0 = None; numeric
+# Options (audio_codec/video_codec/rating/last_played) use -1 = None; duration
+# uses JLW_NAN = None (f64 seconds otherwise). Timestamps are epoch seconds.
+# `from_probe` (tarang) is stubbed -- construct via jlw_media_item_new instead.
+# ================================================================
+#derive(accessors)
+struct JlwMediaItem {
+    id; path; title; artist; album; duration; format; audio_codec; video_codec;
+    media_type; added_at; last_played; play_count; rating; tags; art_mime; art_data;
+}
+
+# new(path, title, media_type, format): fresh v4 id, epoch added_at, everything
+# else at its Rust default (None / empty / 0). Callers set optional fields via
+# the derived JlwMediaItem_set_* accessors.
+#must_use
+fn jlw_media_item_new(path, title, media_type, format) {
+    var it = alloc(sizeof(JlwMediaItem));
+    JlwMediaItem_set_id(it, jlw_uuid_v4());
+    JlwMediaItem_set_path(it, path);
+    JlwMediaItem_set_title(it, title);
+    JlwMediaItem_set_artist(it, 0);            # None
+    JlwMediaItem_set_album(it, 0);             # None
+    JlwMediaItem_set_duration(it, JLW_NAN);    # None
+    JlwMediaItem_set_format(it, format);
+    JlwMediaItem_set_audio_codec(it, (0 - 1)); # None
+    JlwMediaItem_set_video_codec(it, (0 - 1)); # None
+    JlwMediaItem_set_media_type(it, media_type);
+    JlwMediaItem_set_added_at(it, clock_epoch_secs());
+    JlwMediaItem_set_last_played(it, (0 - 1)); # None
+    JlwMediaItem_set_play_count(it, 0);
+    JlwMediaItem_set_rating(it, (0 - 1));      # None
+    JlwMediaItem_set_tags(it, vec_new());
+    JlwMediaItem_set_art_mime(it, 0);          # None
+    JlwMediaItem_set_art_data(it, 0);          # None
+    return it;
+}
+
+#inline
+#must_use
+fn jlw_media_item_is_audio(it) {
+    if (JlwMediaItem_media_type(it) == JLW_MEDIA_AUDIO) { return 1; }
+    return 0;
+}
+#inline
+#must_use
+fn jlw_media_item_is_video(it) {
+    if (JlwMediaItem_media_type(it) == JLW_MEDIA_VIDEO) { return 1; }
+    return 0;
+}
+
+# Case-insensitive substring: does cstr `haystack` contain `needle_lower`
+# (already lowercased by the caller)? ASCII lowercase, mirrors Rust
+# `haystack.to_lowercase().contains(&q)`.
+#must_use
+fn jlw_str_contains_ci(haystack, needle_lower) {
+    if (strstr(str_lower_cstr(haystack), needle_lower) >= 0) { return 1; }
+    return 0;
+}
+
+# Does an item match a lowercased query across title/artist/album/tags?
+#must_use
+fn jlw_media_item_matches(it, q_lower) {
+    if (jlw_str_contains_ci(JlwMediaItem_title(it), q_lower) == 1) { return 1; }
+    var artist = JlwMediaItem_artist(it);
+    if (artist != 0) { if (jlw_str_contains_ci(artist, q_lower) == 1) { return 1; } }
+    var album = JlwMediaItem_album(it);
+    if (album != 0) { if (jlw_str_contains_ci(album, q_lower) == 1) { return 1; } }
+    var tags = JlwMediaItem_tags(it);
+    var tn = vec_len(tags);
+    for (var j = 0; j < tn; j = j + 1) {
+        if (jlw_str_contains_ci(vec_get(tags, j), q_lower) == 1) { return 1; }
+    }
+    return 0;
+}
+
+# ================================================================
+# Library  (was struct Library + impl). items/playlists/scan_paths are vecs.
+# PORT NOTE (ADR-worthy): the Rust id_index/path_index HashMaps were a private
+# perf optimisation with NO observable behavior beyond lookup -- the port drops
+# them and does linear scans in find_by_id/find_by_path, so reindex() is a no-op.
+# ================================================================
+#derive(accessors)
+struct JlwLibrary { items; playlists; scan_paths; }
+
+#must_use
+fn jlw_library_new() {
+    var lib = alloc(sizeof(JlwLibrary));
+    JlwLibrary_set_items(lib, vec_new());
+    JlwLibrary_set_playlists(lib, vec_new());
+    JlwLibrary_set_scan_paths(lib, vec_new());
+    return lib;
+}
+
+# add_item: append and return the item's uuid.
+fn jlw_library_add_item(lib, item) {
+    vec_push(JlwLibrary_items(lib), item);
+    return JlwMediaItem_id(item);
+}
+
+#must_use
+fn jlw_library_find_by_id(lib, id) {
+    var items = JlwLibrary_items(lib);
+    var n = vec_len(items);
+    for (var i = 0; i < n; i = i + 1) {
+        var it = vec_get(items, i);
+        if (jlw_uuid_eq(JlwMediaItem_id(it), id) == 1) { return it; }
+    }
+    return 0;
+}
+
+#must_use
+fn jlw_library_find_by_path(lib, path) {
+    var items = JlwLibrary_items(lib);
+    var n = vec_len(items);
+    for (var i = 0; i < n; i = i + 1) {
+        var it = vec_get(items, i);
+        if (streq(JlwMediaItem_path(it), path) == 1) { return it; }
+    }
+    return 0;
+}
+
+# remove(id): drop the matching item and purge it from every playlist. Returns
+# 1 if an item was removed, 0 if `id` was absent.
+fn jlw_library_remove(lib, id) {
+    var items = JlwLibrary_items(lib);
+    var before = vec_len(items);
+    var kept = vec_new();
+    for (var i = 0; i < before; i = i + 1) {
+        var it = vec_get(items, i);
+        if (jlw_uuid_eq(JlwMediaItem_id(it), id) == 0) { vec_push(kept, it); }
+    }
+    JlwLibrary_set_items(lib, kept);
+    if (vec_len(kept) == before) { return 0; }
+    var pls = JlwLibrary_playlists(lib);
+    var pn = vec_len(pls);
+    for (var k = 0; k < pn; k = k + 1) { jlw_playlist_remove(vec_get(pls, k), id); }
+    return 1;
+}
+
+# search(query): case-insensitive substring over title/artist/album/tags.
+# Returns a fresh vec of matching item ptrs (Rust returned Vec<&MediaItem>).
+#must_use
+fn jlw_library_search(lib, query) {
+    var q = str_lower_cstr(query);
+    var out = vec_new();
+    var items = JlwLibrary_items(lib);
+    var n = vec_len(items);
+    for (var i = 0; i < n; i = i + 1) {
+        var it = vec_get(items, i);
+        if (jlw_media_item_matches(it, q) == 1) { vec_push(out, it); }
+    }
+    return out;
+}
+
+# audio/video counts (Rust audio_items()/video_items() + .count()).
+#must_use
+fn jlw_library_audio_count(lib) {
+    var items = JlwLibrary_items(lib);
+    var n = vec_len(items);
+    var c = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        if (jlw_media_item_is_audio(vec_get(items, i)) == 1) { c = c + 1; }
+    }
+    return c;
+}
+#must_use
+fn jlw_library_video_count(lib) {
+    var items = JlwLibrary_items(lib);
+    var n = vec_len(items);
+    var c = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        if (jlw_media_item_is_video(vec_get(items, i)) == 1) { c = c + 1; }
+    }
+    return c;
+}
+
+# add_scan_path: append unless an equal path string is already present.
+fn jlw_library_add_scan_path(lib, path) {
+    var sp = JlwLibrary_scan_paths(lib);
+    var n = vec_len(sp);
+    for (var i = 0; i < n; i = i + 1) {
+        if (streq(vec_get(sp, i), path) == 1) { return 0; }
+    }
+    vec_push(sp, path);
+    return 0;
+}
+#inline
+#must_use
+fn jlw_library_scan_paths_len(lib) { return vec_len(JlwLibrary_scan_paths(lib)); }
+
+# create_playlist(name): make + append, return its uuid.
+fn jlw_library_create_playlist(lib, name) {
+    var pl = jlw_playlist_new(name);
+    vec_push(JlwLibrary_playlists(lib), pl);
+    return JlwPlaylist_id(pl);
+}
+
+#must_use
+fn jlw_library_find_playlist(lib, id) {
+    var pls = JlwLibrary_playlists(lib);
+    var n = vec_len(pls);
+    for (var i = 0; i < n; i = i + 1) {
+        var pl = vec_get(pls, i);
+        if (jlw_uuid_eq(JlwPlaylist_id(pl), id) == 1) { return pl; }
+    }
+    return 0;
+}
+
+# reindex(): no-op -- linear scans need no index (see port note above).
+fn jlw_library_reindex(lib) { return 0; }
+
+#inline
+#must_use
+fn jlw_library_items_len(lib) { return vec_len(JlwLibrary_items(lib)); }
+#inline
+#must_use
+fn jlw_library_playlists_len(lib) { return vec_len(JlwLibrary_playlists(lib)); }

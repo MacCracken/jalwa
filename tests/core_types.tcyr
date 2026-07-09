@@ -169,5 +169,87 @@ jlw_queue_clear(q8);
 assert_eq(jlw_queue_is_empty(q8), 1, "empty after clear");
 assert_eq(jlw_queue_current(q8), 0, "current None");
 
+# ---- media_item is_audio/is_video ----
+test_group("MediaItem is_audio/is_video");
+var mi = jlw_media_item_new("/music/song.flac", "song", JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+assert_eq(jlw_media_item_is_audio(mi), 1, "is_audio");
+assert_eq(jlw_media_item_is_video(mi), 0, "not video");
+assert_eq(JlwMediaItem_play_count(mi), 0, "play_count 0");
+
+# ---- library_new ----
+test_group("Library new");
+var lib = jlw_library_new();
+assert_eq(jlw_library_items_len(lib), 0, "no items");
+assert_eq(jlw_library_playlists_len(lib), 0, "no playlists");
+
+# ---- library_add_find ----
+test_group("Library add/find");
+var lib2 = jlw_library_new();
+var it2 = jlw_media_item_new("/music/song.flac", "song", JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+var id2 = jlw_library_add_item(lib2, it2);
+assert_eq(jlw_library_find_by_id(lib2, id2), it2, "find_by_id hits");
+assert_eq(jlw_library_find_by_path(lib2, "/music/song.flac"), it2, "find_by_path hits");
+assert_eq(jlw_library_find_by_id(lib2, jlw_uuid_v4()), 0, "find_by_id miss -> None");
+
+# ---- library_remove (also purges from playlists) ----
+test_group("Library remove");
+var lib3 = jlw_library_new();
+var it3 = jlw_media_item_new("/music/song.flac", "song", JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+var id3 = jlw_library_add_item(lib3, it3);
+var plid3 = jlw_library_create_playlist(lib3, "Test PL");
+jlw_playlist_add(jlw_library_find_playlist(lib3, plid3), id3);
+assert_eq(jlw_library_remove(lib3, id3), 1, "removed");
+assert_eq(jlw_library_find_by_id(lib3, id3), 0, "gone from items");
+assert_eq(jlw_playlist_is_empty(jlw_library_find_playlist(lib3, plid3)), 1, "gone from playlist");
+
+# ---- library_search (title/artist, case-insensitive) ----
+test_group("Library search");
+var lib4 = jlw_library_new();
+var it4 = jlw_media_item_new("/music/song.flac", "song", JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+JlwMediaItem_set_title(it4, "Bohemian Rhapsody");
+JlwMediaItem_set_artist(it4, "Queen");
+jlw_library_add_item(lib4, it4);
+assert_eq(vec_len(jlw_library_search(lib4, "bohemian")), 1, "title match");
+assert_eq(vec_len(jlw_library_search(lib4, "queen")), 1, "artist match");
+assert_eq(vec_len(jlw_library_search(lib4, "RHAPSODY")), 1, "case-insensitive");
+assert_eq(vec_len(jlw_library_search(lib4, "nonexistent")), 0, "no match");
+
+# ---- library_search_tags ----
+test_group("Library search tags");
+var lib5 = jlw_library_new();
+var it5 = jlw_media_item_new("/music/song.flac", "song", JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+var tags5 = vec_new();
+vec_push(tags5, "rock");
+vec_push(tags5, "classic");
+JlwMediaItem_set_tags(it5, tags5);
+jlw_library_add_item(lib5, it5);
+assert_eq(vec_len(jlw_library_search(lib5, "rock")), 1, "tag rock");
+assert_eq(vec_len(jlw_library_search(lib5, "classic")), 1, "tag classic");
+
+# ---- library_filter_by_type ----
+test_group("Library filter by type");
+var lib6 = jlw_library_new();
+jlw_library_add_item(lib6, jlw_media_item_new("/music/song.flac", "song", JLW_MEDIA_AUDIO, JLW_FMT_FLAC));
+jlw_library_add_item(lib6, jlw_media_item_new("/videos/movie.mp4", "movie", JLW_MEDIA_VIDEO, JLW_FMT_MP4));
+assert_eq(jlw_library_audio_count(lib6), 1, "one audio");
+assert_eq(jlw_library_video_count(lib6), 1, "one video");
+
+# ---- library_scan_paths (dedup) ----
+test_group("Library scan paths");
+var lib7 = jlw_library_new();
+jlw_library_add_scan_path(lib7, "/home/user/Music");
+jlw_library_add_scan_path(lib7, "/home/user/Music");
+assert_eq(jlw_library_scan_paths_len(lib7), 1, "dedup");
+jlw_library_add_scan_path(lib7, "/home/user/Videos");
+assert_eq(jlw_library_scan_paths_len(lib7), 2, "second path");
+
+# ---- library_playlists ----
+test_group("Library playlists");
+var lib8 = jlw_library_new();
+var plid8 = jlw_library_create_playlist(lib8, "Favorites");
+var pl8 = jlw_library_find_playlist(lib8, plid8);
+assert_streq(jlw_playlist_name(pl8), "Favorites", "name");
+assert_eq(jlw_playlist_is_empty(pl8), 1, "empty");
+
 var rc = assert_summary();
 syscall(60, rc);
