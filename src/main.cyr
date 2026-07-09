@@ -1,0 +1,13 @@
+# jalwa — Cyrius port
+# Ported from 2076 lines of Rust
+
+# Stdlib auto-included via cyrius.cyml
+
+fn main() {
+    alloc_init();
+    println("jalwa ready");
+    return 0;
+}
+
+var r = main();
+syscall(SYS_EXIT, r);
