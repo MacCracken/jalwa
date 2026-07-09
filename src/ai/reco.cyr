@@ -1,0 +1,362 @@
+# ai/reco.cyr -- recommendations, smart playlists, library insights.
+# Ports rust-old/crates/jalwa-ai/src/lib.rs (the recommendation core). L2:
+# depends on error.cyr + core/types.cyr (Library/MediaItem/Playlist). Pure
+# logic -- no tarang/reqwest/rayon (those live in daimon/fingerprint). serde
+# dropped. The AI safe path: a direct, faithful port.
+
+# case-insensitive cstring equality.
+#must_use
+fn jlw_ci_eq(a, b) {
+    if (streq(str_lower_cstr(a), str_lower_cstr(b)) == 1) { return 1; }
+    return 0;
+}
+
+# ---- RecommendationReason ----
+var JLW_REC_SAME_ARTIST       = 0;
+var JLW_REC_SAME_ALBUM        = 1;
+var JLW_REC_SAME_GENRE        = 2;
+var JLW_REC_SIMILAR_DURATION  = 3;
+var JLW_REC_FREQUENTLY_PLAYED = 4;
+var JLW_REC_RECENTLY_ADDED    = 5;
+var JLW_REC_TAGGED            = 6;   # carries a tag
+
+#derive(accessors)
+struct JlwRecReason { code; tag; }
+#must_use
+fn jlw_rec_reason_new(code, tag) {
+    var r = alloc(sizeof(JlwRecReason));
+    JlwRecReason_set_code(r, code);
+    JlwRecReason_set_tag(r, tag);
+    return r;
+}
+
+# Display: matches the Rust `Display` impl ("same artist" / "tagged 'rock'").
+#must_use
+fn jlw_rec_reason_display(r) {
+    var code = JlwRecReason_code(r);
+    if (code == JLW_REC_TAGGED) {
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "tagged '");
+        str_builder_add_cstr(sb, JlwRecReason_tag(r));
+        str_builder_putc(sb, 39);   # '
+        return str_cstr(str_builder_build(sb));
+    }
+    if (code == JLW_REC_SAME_ARTIST)       { return "same artist"; }
+    if (code == JLW_REC_SAME_ALBUM)        { return "same album"; }
+    if (code == JLW_REC_SAME_GENRE)        { return "same genre"; }
+    if (code == JLW_REC_SIMILAR_DURATION)  { return "similar duration"; }
+    if (code == JLW_REC_FREQUENTLY_PLAYED) { return "frequently played"; }
+    if (code == JLW_REC_RECENTLY_ADDED)    { return "recently added"; }
+    return "unknown";
+}
+
+# does a reasons vec contain a reason with the given code?
+#must_use
+fn jlw_reasons_has(reasons, code) {
+    var n = vec_len(reasons);
+    for (var i = 0; i < n; i = i + 1) {
+        if (JlwRecReason_code(vec_get(reasons, i)) == code) { return 1; }
+    }
+    return 0;
+}
+
+# ---- Recommendation ----
+#derive(accessors)
+struct JlwRecommendation { item_id; score; reasons; }
+#must_use
+fn jlw_recommendation_new(item_id, score, reasons) {
+    var r = alloc(sizeof(JlwRecommendation));
+    JlwRecommendation_set_item_id(r, item_id);
+    JlwRecommendation_set_score(r, score);
+    JlwRecommendation_set_reasons(r, reasons);
+    return r;
+}
+
+# insertion sort a recommendations vec by score descending.
+fn jlw_sort_recs_desc(recs) {
+    var n = vec_len(recs);
+    for (var i = 1; i < n; i = i + 1) {
+        var key = vec_get(recs, i);
+        var ks = JlwRecommendation_score(key);
+        var j = i - 1;
+        var scanning = 1;
+        while (scanning == 1) {
+            if (j < 0) { scanning = 0; }
+            else {
+                if (f64_lt(JlwRecommendation_score(vec_get(recs, j)), ks) == 1) {
+                    vec_set(recs, j + 1, vec_get(recs, j));
+                    j = j - 1;
+                } else { scanning = 0; }
+            }
+        }
+        vec_set(recs, j + 1, key);
+    }
+    return 0;
+}
+
+# recommend(library, seed_id, max_results): scored recommendations, sorted desc.
+#must_use
+fn jlw_ai_recommend(library, seed_id, max_results) {
+    var recs = vec_new();
+    var seed = jlw_library_find_by_id(library, seed_id);
+    if (seed == 0) { return recs; }
+    var items = JlwLibrary_items(library);
+    var n = vec_len(items);
+    for (var i = 0; i < n; i = i + 1) {
+        var item = vec_get(items, i);
+        if (jlw_uuid_eq(JlwMediaItem_id(item), seed_id) == 0) {
+            var score = 0;
+            var reasons = vec_new();
+            # same artist
+            var sa = JlwMediaItem_artist(seed);
+            var ia = JlwMediaItem_artist(item);
+            if (sa != 0) { if (ia != 0) { if (jlw_ci_eq(sa, ia) == 1) {
+                score = f64_add(score, 30.0);
+                vec_push(reasons, jlw_rec_reason_new(JLW_REC_SAME_ARTIST, 0));
+            } } }
+            # same album
+            var sal = JlwMediaItem_album(seed);
+            var ial = JlwMediaItem_album(item);
+            if (sal != 0) { if (ial != 0) { if (jlw_ci_eq(sal, ial) == 1) {
+                score = f64_add(score, 20.0);
+                vec_push(reasons, jlw_rec_reason_new(JLW_REC_SAME_ALBUM, 0));
+            } } }
+            # similar duration (ratio 0.7..=1.3)
+            var sd = JlwMediaItem_duration(seed);
+            var id = JlwMediaItem_duration(item);
+            if (jlw_is_finite(sd) == 1) { if (jlw_is_finite(id) == 1) {
+                var denom = sd;
+                if (f64_lt(denom, 1.0) == 1) { denom = 1.0; }
+                var ratio = f64_div(id, denom);
+                if (f64_lt(ratio, 0.7) == 0) { if (f64_gt(ratio, 1.3) == 0) {
+                    score = f64_add(score, 10.0);
+                    vec_push(reasons, jlw_rec_reason_new(JLW_REC_SIMILAR_DURATION, 0));
+                } }
+            } }
+            # same media type
+            if (JlwMediaItem_media_type(item) == JlwMediaItem_media_type(seed)) {
+                score = f64_add(score, 5.0);
+            }
+            # shared tags
+            var stags = JlwMediaItem_tags(seed);
+            var itags = JlwMediaItem_tags(item);
+            for (var st = 0; st < vec_len(stags); st = st + 1) {
+                var tag = vec_get(stags, st);
+                var matched = 0;
+                for (var it = 0; it < vec_len(itags); it = it + 1) {
+                    if (jlw_ci_eq(vec_get(itags, it), tag) == 1) { matched = 1; }
+                }
+                if (matched == 1) {
+                    score = f64_add(score, 15.0);
+                    vec_push(reasons, jlw_rec_reason_new(JLW_REC_TAGGED, tag));
+                }
+            }
+            # frequently played
+            if (JlwMediaItem_play_count(item) >= 5) {
+                score = f64_add(score, 5.0);
+                vec_push(reasons, jlw_rec_reason_new(JLW_REC_FREQUENTLY_PLAYED, 0));
+            }
+            if (f64_gt(score, 0) == 1) {
+                vec_push(recs, jlw_recommendation_new(JlwMediaItem_id(item), score, reasons));
+            }
+        }
+    }
+    jlw_sort_recs_desc(recs);
+    if (vec_len(recs) > max_results) { vec_truncate(recs, max_results); }
+    return recs;
+}
+
+# ---- SmartCriteria ----
+var JLW_CRIT_ARTIST          = 0;   # sval = substring (ci)
+var JLW_CRIT_ALBUM           = 1;
+var JLW_CRIT_TAG             = 2;   # sval = tag (ci equal)
+var JLW_CRIT_MEDIA_TYPE      = 3;   # ival = media_type code
+var JLW_CRIT_MIN_DURATION    = 4;   # ival = seconds
+var JLW_CRIT_MAX_DURATION    = 5;
+var JLW_CRIT_MIN_PLAY_COUNT  = 6;   # ival = count
+var JLW_CRIT_MIN_RATING      = 7;   # ival = rating
+var JLW_CRIT_RECENTLY_ADDED  = 8;   # ival = days
+var JLW_CRIT_RECENTLY_PLAYED = 9;
+
+#derive(accessors)
+struct JlwCriteria { code; sval; ival; }
+#must_use
+fn jlw_criteria_new(code, sval, ival) {
+    var c = alloc(sizeof(JlwCriteria));
+    JlwCriteria_set_code(c, code);
+    JlwCriteria_set_sval(c, sval);
+    JlwCriteria_set_ival(c, ival);
+    return c;
+}
+
+# does an item match one criterion? (`now` = current epoch for recency).
+#must_use
+fn jlw_criteria_matches(item, crit, now) {
+    var code = JlwCriteria_code(crit);
+    if (code == JLW_CRIT_ARTIST) {
+        var a = JlwMediaItem_artist(item);
+        if (a == 0) { return 0; }
+        return jlw_str_contains_ci(a, str_lower_cstr(JlwCriteria_sval(crit)));
+    }
+    if (code == JLW_CRIT_ALBUM) {
+        var a = JlwMediaItem_album(item);
+        if (a == 0) { return 0; }
+        return jlw_str_contains_ci(a, str_lower_cstr(JlwCriteria_sval(crit)));
+    }
+    if (code == JLW_CRIT_TAG) {
+        var tags = JlwMediaItem_tags(item);
+        for (var i = 0; i < vec_len(tags); i = i + 1) {
+            if (jlw_ci_eq(vec_get(tags, i), JlwCriteria_sval(crit)) == 1) { return 1; }
+        }
+        return 0;
+    }
+    if (code == JLW_CRIT_MEDIA_TYPE) {
+        if (JlwMediaItem_media_type(item) == JlwCriteria_ival(crit)) { return 1; }
+        return 0;
+    }
+    if (code == JLW_CRIT_MIN_DURATION) {
+        var d = JlwMediaItem_duration(item);
+        if (jlw_is_finite(d) == 0) { return 0; }
+        if (f64_lt(d, f64_from(JlwCriteria_ival(crit))) == 1) { return 0; }
+        return 1;
+    }
+    if (code == JLW_CRIT_MAX_DURATION) {
+        var d = JlwMediaItem_duration(item);
+        if (jlw_is_finite(d) == 0) { return 0; }
+        if (f64_gt(d, f64_from(JlwCriteria_ival(crit))) == 1) { return 0; }
+        return 1;
+    }
+    if (code == JLW_CRIT_MIN_PLAY_COUNT) {
+        if (JlwMediaItem_play_count(item) >= JlwCriteria_ival(crit)) { return 1; }
+        return 0;
+    }
+    if (code == JLW_CRIT_MIN_RATING) {
+        var r = JlwMediaItem_rating(item);
+        if (r == (0 - 1)) { return 0; }
+        if (r >= JlwCriteria_ival(crit)) { return 1; }
+        return 0;
+    }
+    if (code == JLW_CRIT_RECENTLY_ADDED) {
+        var cutoff = now - JlwCriteria_ival(crit) * 86400;
+        if (JlwMediaItem_added_at(item) >= cutoff) { return 1; }
+        return 0;
+    }
+    if (code == JLW_CRIT_RECENTLY_PLAYED) {
+        var lp = JlwMediaItem_last_played(item);
+        if (lp == (0 - 1)) { return 0; }
+        var cutoff = now - JlwCriteria_ival(crit) * 86400;
+        if (lp >= cutoff) { return 1; }
+        return 0;
+    }
+    return 0;
+}
+
+# generate_smart_playlist(library, name, criteria vec): items matching ALL criteria.
+#must_use
+fn jlw_ai_generate_smart_playlist(library, name, criteria) {
+    var pl = jlw_playlist_new(name);
+    JlwPlaylist_set_is_smart(pl, 1);
+    var now = clock_epoch_secs();
+    var items = JlwLibrary_items(library);
+    var n = vec_len(items);
+    var cn = vec_len(criteria);
+    for (var i = 0; i < n; i = i + 1) {
+        var item = vec_get(items, i);
+        var matches = 1;
+        for (var c = 0; c < cn; c = c + 1) {
+            if (jlw_criteria_matches(item, vec_get(criteria, c), now) == 0) { matches = 0; }
+        }
+        if (matches == 1) { jlw_playlist_add(pl, JlwMediaItem_id(item)); }
+    }
+    return pl;
+}
+
+# ---- LibraryInsights ----
+#derive(accessors)
+struct JlwCountPair { key; count; }
+#must_use
+fn jlw_count_pair_new(key, count) {
+    var p = alloc(sizeof(JlwCountPair));
+    JlwCountPair_set_key(p, key);
+    JlwCountPair_set_count(p, count);
+    return p;
+}
+
+# increment the count for a cstring key in a vec of (key, count) pairs.
+fn jlw_count_incr(pairs, key) {
+    var n = vec_len(pairs);
+    for (var i = 0; i < n; i = i + 1) {
+        var p = vec_get(pairs, i);
+        if (streq(JlwCountPair_key(p), key) == 1) {
+            JlwCountPair_set_count(p, JlwCountPair_count(p) + 1);
+            return 0;
+        }
+    }
+    vec_push(pairs, jlw_count_pair_new(key, 1));
+    return 0;
+}
+
+# insertion sort a count-pair vec by count descending.
+fn jlw_sort_pairs_desc(pairs) {
+    var n = vec_len(pairs);
+    for (var i = 1; i < n; i = i + 1) {
+        var key = vec_get(pairs, i);
+        var kc = JlwCountPair_count(key);
+        var j = i - 1;
+        var scanning = 1;
+        while (scanning == 1) {
+            if (j < 0) { scanning = 0; }
+            else {
+                if (JlwCountPair_count(vec_get(pairs, j)) < kc) {
+                    vec_set(pairs, j + 1, vec_get(pairs, j));
+                    j = j - 1;
+                } else { scanning = 0; }
+            }
+        }
+        vec_set(pairs, j + 1, key);
+    }
+    return 0;
+}
+
+#derive(accessors)
+struct JlwLibraryInsights { top_artists; most_played; total_listen_time; avg_track_duration; genre_distribution; }
+
+# analyze_library(library): artist/tag counts, listen time, averages.
+#must_use
+fn jlw_ai_analyze_library(library) {
+    var items = JlwLibrary_items(library);
+    var n = vec_len(items);
+    var artist_counts = vec_new();
+    var tag_counts = vec_new();
+    var total_dur = 0;
+    var total_listen = 0;
+    var play_counts = vec_new();
+    for (var i = 0; i < n; i = i + 1) {
+        var item = vec_get(items, i);
+        var artist = JlwMediaItem_artist(item);
+        if (artist != 0) { jlw_count_incr(artist_counts, artist); }
+        var tags = JlwMediaItem_tags(item);
+        for (var j = 0; j < vec_len(tags); j = j + 1) { jlw_count_incr(tag_counts, vec_get(tags, j)); }
+        var dur = JlwMediaItem_duration(item);
+        var pc = JlwMediaItem_play_count(item);
+        if (jlw_is_finite(dur) == 1) {
+            total_dur = f64_add(total_dur, dur);
+            total_listen = f64_add(total_listen, f64_mul(dur, f64_from(pc)));
+        }
+        if (pc > 0) { vec_push(play_counts, jlw_count_pair_new(JlwMediaItem_id(item), pc)); }
+    }
+    jlw_sort_pairs_desc(artist_counts);
+    if (vec_len(artist_counts) > 10) { vec_truncate(artist_counts, 10); }
+    jlw_sort_pairs_desc(play_counts);
+    if (vec_len(play_counts) > 10) { vec_truncate(play_counts, 10); }
+    jlw_sort_pairs_desc(tag_counts);
+    var avg = 0;
+    if (n > 0) { avg = f64_div(total_dur, f64_from(n)); }
+    var ins = alloc(sizeof(JlwLibraryInsights));
+    JlwLibraryInsights_set_top_artists(ins, artist_counts);
+    JlwLibraryInsights_set_most_played(ins, play_counts);
+    JlwLibraryInsights_set_total_listen_time(ins, total_listen);
+    JlwLibraryInsights_set_avg_track_duration(ins, avg);
+    JlwLibraryInsights_set_genre_distribution(ins, tag_counts);
+    return ins;
+}

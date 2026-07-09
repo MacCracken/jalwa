@@ -1,0 +1,140 @@
+# reco.tcyr -- parity tests for src/ai/reco.cyr.
+# Ports all 12 #[test]s from jalwa-ai/src/lib.rs (recommend / smart playlist /
+# analyze / reason display).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/ai/reco.cyr"
+
+fn cstr3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var d = alloc(la + lb + lc + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); memcpy(d + la + lb, c, lc);
+    store8(d + la + lb + lc, 0);
+    return d;
+}
+fn make_item(title, artist, dur_secs) {
+    var it = jlw_media_item_new(cstr3("/music/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    JlwMediaItem_set_album(it, "Album");
+    JlwMediaItem_set_duration(it, f64_from(dur_secs));
+    JlwMediaItem_set_audio_codec(it, JLW_ACODEC_FLAC);
+    return it;
+}
+fn tags1(t) { var v = vec_new(); vec_push(v, t); return v; }
+
+alloc_init();
+
+# ---- recommend_same_artist ----
+test_group("recommend same artist");
+var lib = jlw_library_new();
+var seed = make_item("Song A", "Artist 1", 200);
+var seed_id = jlw_library_add_item(lib, seed);
+jlw_library_add_item(lib, make_item("Song B", "Artist 1", 180));
+jlw_library_add_item(lib, make_item("Song C", "Artist 2", 200));
+var recs = jlw_ai_recommend(lib, seed_id, 10);
+assert_eq(vec_len(recs) > 0, 1, "recs not empty");
+assert_eq(jlw_reasons_has(JlwRecommendation_reasons(vec_get(recs, 0)), JLW_REC_SAME_ARTIST), 1, "top has SameArtist");
+
+# ---- recommend_empty_library ----
+test_group("recommend empty library");
+assert_eq(vec_len(jlw_ai_recommend(jlw_library_new(), jlw_uuid_v4(), 10)), 0, "empty");
+
+# ---- recommend_nonexistent_seed ----
+test_group("recommend nonexistent seed");
+var lib3 = jlw_library_new();
+jlw_library_add_item(lib3, make_item("Song", "Artist", 200));
+assert_eq(vec_len(jlw_ai_recommend(lib3, jlw_uuid_v4(), 10)), 0, "no seed -> empty");
+
+# ---- recommend_with_tags ----
+test_group("recommend with tags");
+var lib4 = jlw_library_new();
+var seed4 = make_item("Song A", "X", 200);
+JlwMediaItem_set_tags(seed4, tags1("rock"));
+var sid4 = jlw_library_add_item(lib4, seed4);
+var tagged = make_item("Song B", "Y", 180);
+JlwMediaItem_set_tags(tagged, tags1("rock"));
+jlw_library_add_item(lib4, tagged);
+var recs4 = jlw_ai_recommend(lib4, sid4, 10);
+assert_eq(jlw_reasons_has(JlwRecommendation_reasons(vec_get(recs4, 0)), JLW_REC_TAGGED), 1, "top has Tagged");
+
+# ---- recommend_max_results ----
+test_group("recommend max results");
+var lib5 = jlw_library_new();
+var sid5 = jlw_library_add_item(lib5, make_item("Seed", "Artist", 200));
+for (var i = 0; i < 20; i = i + 1) { jlw_library_add_item(lib5, make_item("Song", "Artist", 200)); }
+assert_eq(vec_len(jlw_ai_recommend(lib5, sid5, 5)), 5, "truncated to 5");
+
+# ---- smart_playlist_by_artist ----
+test_group("smart playlist by artist");
+var lib6 = jlw_library_new();
+jlw_library_add_item(lib6, make_item("Song 1", "Queen", 200));
+jlw_library_add_item(lib6, make_item("Song 2", "Queen", 180));
+jlw_library_add_item(lib6, make_item("Song 3", "Beatles", 200));
+var crit6 = vec_new(); vec_push(crit6, jlw_criteria_new(JLW_CRIT_ARTIST, "queen", 0));
+var pl6 = jlw_ai_generate_smart_playlist(lib6, "Queen Songs", crit6);
+assert_eq(jlw_playlist_len(pl6), 2, "2 Queen songs");
+assert_eq(JlwPlaylist_is_smart(pl6), 1, "is_smart");
+
+# ---- smart_playlist_by_tag ----
+test_group("smart playlist by tag");
+var lib7 = jlw_library_new();
+var it7 = make_item("Song", "A", 200);
+JlwMediaItem_set_tags(it7, tags1("jazz"));
+jlw_library_add_item(lib7, it7);
+jlw_library_add_item(lib7, make_item("Other", "B", 200));
+var crit7 = vec_new(); vec_push(crit7, jlw_criteria_new(JLW_CRIT_TAG, "jazz", 0));
+assert_eq(jlw_playlist_len(jlw_ai_generate_smart_playlist(lib7, "Jazz", crit7)), 1, "1 jazz");
+
+# ---- smart_playlist_by_duration ----
+test_group("smart playlist by duration");
+var lib8 = jlw_library_new();
+jlw_library_add_item(lib8, make_item("Short", "A", 60));
+jlw_library_add_item(lib8, make_item("Long", "B", 600));
+var crit8 = vec_new(); vec_push(crit8, jlw_criteria_new(JLW_CRIT_MIN_DURATION, 0, 300));
+assert_eq(jlw_playlist_len(jlw_ai_generate_smart_playlist(lib8, "Long Tracks", crit8)), 1, "1 long");
+
+# ---- smart_playlist_multiple_criteria ----
+test_group("smart playlist multiple criteria");
+var lib9 = jlw_library_new();
+var it9 = make_item("Song", "Queen", 200);
+JlwMediaItem_set_tags(it9, tags1("rock"));
+jlw_library_add_item(lib9, it9);
+jlw_library_add_item(lib9, make_item("Other", "Queen", 200));
+var crit9 = vec_new();
+vec_push(crit9, jlw_criteria_new(JLW_CRIT_ARTIST, "queen", 0));
+vec_push(crit9, jlw_criteria_new(JLW_CRIT_TAG, "rock", 0));
+assert_eq(jlw_playlist_len(jlw_ai_generate_smart_playlist(lib9, "Queen Rock", crit9)), 1, "only the one with both");
+
+# ---- analyze_empty_library ----
+test_group("analyze empty");
+var ie = jlw_ai_analyze_library(jlw_library_new());
+assert_eq(vec_len(JlwLibraryInsights_top_artists(ie)), 0, "no artists");
+assert_eq(vec_len(JlwLibraryInsights_most_played(ie)), 0, "no plays");
+assert_eq(JlwLibraryInsights_total_listen_time(ie), 0, "listen time 0");
+
+# ---- analyze_with_data ----
+test_group("analyze with data");
+var liba = jlw_library_new();
+var a1 = make_item("Song 1", "Queen", 200);
+JlwMediaItem_set_play_count(a1, 10);
+JlwMediaItem_set_tags(a1, tags1("rock"));
+jlw_library_add_item(liba, a1);
+var a2 = make_item("Song 2", "Queen", 300);
+JlwMediaItem_set_play_count(a2, 5);
+jlw_library_add_item(liba, a2);
+jlw_library_add_item(liba, make_item("Song 3", "Beatles", 180));
+var ia = jlw_ai_analyze_library(liba);
+assert_streq(JlwCountPair_key(vec_get(JlwLibraryInsights_top_artists(ia), 0)), "Queen", "top artist Queen");
+assert_eq(JlwCountPair_count(vec_get(JlwLibraryInsights_top_artists(ia), 0)), 2, "Queen count 2");
+assert_eq(vec_len(JlwLibraryInsights_most_played(ia)), 2, "2 played");
+assert_eq(f64_gt(JlwLibraryInsights_total_listen_time(ia), 0), 1, "listen time > 0");
+assert_eq(f64_gt(JlwLibraryInsights_avg_track_duration(ia), 0), 1, "avg > 0");
+
+# ---- recommendation_reason_display ----
+test_group("reason display");
+assert_streq(jlw_rec_reason_display(jlw_rec_reason_new(JLW_REC_SAME_ARTIST, 0)), "same artist", "same artist");
+assert_streq(jlw_rec_reason_display(jlw_rec_reason_new(JLW_REC_TAGGED, "rock")), "tagged 'rock'", "tagged 'rock'");
+
+var rc = assert_summary();
+syscall(60, rc);
