@@ -1,0 +1,109 @@
+# core/playlist_io.cyr -- M3U playlist import/export.
+# Ports rust-old/crates/jalwa-core/src/playlist_io.rs. L1: depends on error.cyr
+# + core/types.cyr (Playlist/Library/MediaItem). Entry orders those first.
+#
+# std::fs -> the io stdlib (file_open/file_write/file_read_all). Result<()> and
+# Result<Vec<PathBuf>> -> sentinel returns: save returns JLW_ERR_NONE/JLW_ERR_IO;
+# load returns a vec of path cstrings (possibly empty) on success, or 0 (None)
+# when the file can't be opened (mirrors the Rust `?` error path).
+
+# O_WRONLY|O_CREAT|O_TRUNC = 577, mode 0644 = 420. (Literals, not the io.cyr
+# O_* vars, to avoid any flat-namespace clash with the syscalls peer.)
+var JLW_M3U_MAXLEN = 65536;   # 64 KiB cap on a playlist file we read in one shot
+
+# ASCII whitespace test (space/tab/CR/LF) -- Rust str::trim on ASCII input.
+#must_use
+fn jlw_is_ws(c) {
+    if (c == 32) { return 1; }
+    if (c == 9)  { return 1; }
+    if (c == 13) { return 1; }
+    if (c == 10) { return 1; }
+    return 0;
+}
+
+# write a null-terminated cstring's bytes (sans terminator) to fd.
+fn jlw_write_cstr(fd, s) {
+    file_write(fd, s, strlen(s));
+    return 0;
+}
+
+# save_m3u(playlist, library, path): write an #EXTM3U file. Returns
+# JLW_ERR_NONE, or JLW_ERR_IO if the file can't be created.
+fn jlw_save_m3u(playlist, library, path) {
+    var fd = file_open(path, 577, 420);
+    if (fd < 0) { return JLW_ERR_IO; }
+    file_write(fd, "#EXTM3U\n", 8);
+    var items = JlwPlaylist_items(playlist);
+    var n = vec_len(items);
+    for (var i = 0; i < n; i = i + 1) {
+        var item = jlw_library_find_by_id(library, vec_get(items, i));
+        if (item != 0) {
+            # #EXTINF:{duration_secs},{title}
+            file_write(fd, "#EXTINF:", 8);
+            var dur = JlwMediaItem_duration(item);
+            var dsecs = (0 - 1);                          # unwrap_or(-1)
+            if (jlw_is_finite(dur) == 1) { dsecs = f64_to(dur); }   # as_secs
+            fmt_int_fd(fd, dsecs);
+            file_write(fd, ",", 1);
+            var artist = JlwMediaItem_artist(item);
+            if (artist != 0) {                            # "{artist} - {title}"
+                jlw_write_cstr(fd, artist);
+                file_write(fd, " - ", 3);
+            }
+            jlw_write_cstr(fd, JlwMediaItem_title(item));
+            file_write(fd, "\n", 1);
+            # the media path line
+            jlw_write_cstr(fd, JlwMediaItem_path(item));
+            file_write(fd, "\n", 1);
+        }
+    }
+    file_close(fd);
+    return JLW_ERR_NONE;
+}
+
+# load_m3u(path): return a vec of trimmed, non-comment, non-empty path cstrings,
+# or 0 (None) if the file can't be opened. Mirrors the Rust line filter.
+#must_use
+fn jlw_load_m3u(path) {
+    var buf = alloc(JLW_M3U_MAXLEN + 1);
+    var total = file_read_all(path, buf, JLW_M3U_MAXLEN);
+    if (total < 0) { return 0; }          # open failed -> Err
+    var paths = vec_new();
+    var i = 0;
+    while (i < total) {
+        # find end of this line (the next '\n' or EOF)
+        var eol = i;
+        var scanning = 1;
+        while (scanning == 1) {
+            if (eol >= total) { scanning = 0; }
+            else {
+                if (load8(buf + eol) == 10) { scanning = 0; }
+                else { eol = eol + 1; }
+            }
+        }
+        # trim leading/trailing whitespace over [s, e)
+        var s = i;
+        var e = eol;
+        var t1 = 1;
+        while (t1 == 1) {
+            if (s >= e) { t1 = 0; }
+            else { if (jlw_is_ws(load8(buf + s)) == 1) { s = s + 1; } else { t1 = 0; } }
+        }
+        var t2 = 1;
+        while (t2 == 1) {
+            if (e <= s) { t2 = 0; }
+            else { if (jlw_is_ws(load8(buf + e - 1)) == 1) { e = e - 1; } else { t2 = 0; } }
+        }
+        var len = e - s;
+        if (len > 0) {
+            if (load8(buf + s) != 35) {   # not a '#' comment
+                var line = alloc(len + 1);
+                memcpy(line, buf + s, len);
+                store8(line + len, 0);
+                vec_push(paths, line);
+            }
+        }
+        i = eol + 1;                      # step past the '\n' (or past EOF)
+    }
+    return paths;
+}

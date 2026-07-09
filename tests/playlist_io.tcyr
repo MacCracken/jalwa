@@ -1,0 +1,145 @@
+# playlist_io.tcyr -- parity tests for src/core/playlist_io.cyr.
+# Ported from the #[test] blocks in rust-old/crates/jalwa-core/src/playlist_io.rs:
+#   m3u_roundtrip, save_and_load_m3u_roundtrip, load_m3u_empty_file,
+#   load_m3u_with_comments, load_m3u_nonexistent_file, save_m3u_creates_file,
+#   save_m3u_empty_playlist.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/playlist_io.cyr"
+
+# ---- helpers (were test_fixtures::make_media_item + std::fs) ----
+
+# concat 3 cstrings into a fresh null-terminated cstring.
+fn cstr3(a, b, c) {
+    var la = strlen(a);
+    var lb = strlen(b);
+    var lc = strlen(c);
+    var total = la + lb + lc;
+    var dst = alloc(total + 1);
+    memcpy(dst, a, la);
+    memcpy(dst + la, b, lb);
+    memcpy(dst + la + lb, c, lc);
+    store8(dst + total, 0);
+    return dst;
+}
+
+# make_media_item(title, artist, dur_secs): path = "/music/{title}.flac",
+# audio/flac, with the given artist + duration. Mirrors the Rust fixture.
+fn make_media_item(title, artist, dur_secs) {
+    var path = cstr3("/music/", title, ".flac");
+    var it = jlw_media_item_new(path, title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    JlwMediaItem_set_duration(it, f64_from(dur_secs));
+    JlwMediaItem_set_audio_codec(it, JLW_ACODEC_FLAC);
+    return it;
+}
+
+# write a cstring's bytes to a path (std::fs::write).
+fn write_file(path, content) {
+    file_write_all(path, content, strlen(content));
+    return 0;
+}
+
+# remove a file if present (SYS_unlink = 87 on x86_64 Linux) so fixed temp
+# paths start fresh across runs.
+fn rm(path) {
+    syscall(87, path);
+    return 0;
+}
+
+alloc_init();
+
+# ---- m3u_roundtrip ----
+test_group("m3u roundtrip (2)");
+var lib = jlw_library_new();
+var a1 = make_media_item("Song A", "Artist 1", 200);
+var a2 = make_media_item("Song B", "Artist 2", 180);
+var aid1 = jlw_library_add_item(lib, a1);
+var aid2 = jlw_library_add_item(lib, a2);
+var pl = jlw_playlist_new("Test");
+jlw_playlist_add(pl, aid1);
+jlw_playlist_add(pl, aid2);
+var tmp1 = "/tmp/jalwa_pio_rt.m3u";
+rm(tmp1);
+assert_eq(jlw_save_m3u(pl, lib, tmp1), JLW_ERR_NONE, "save ok");
+var paths1 = jlw_load_m3u(tmp1);
+assert_eq(vec_len(paths1), 2, "2 paths");
+assert_streq(vec_get(paths1, 0), "/music/Song A.flac", "path 0");
+assert_streq(vec_get(paths1, 1), "/music/Song B.flac", "path 1");
+rm(tmp1);
+
+# ---- save_and_load_m3u_roundtrip (3) ----
+test_group("m3u roundtrip (3)");
+var lib2 = jlw_library_new();
+var b1 = jlw_library_add_item(lib2, make_media_item("Alpha", "Band X", 120));
+var b2 = jlw_library_add_item(lib2, make_media_item("Beta", "Band Y", 240));
+var b3 = jlw_library_add_item(lib2, make_media_item("Gamma", "Band Z", 300));
+var pl2 = jlw_playlist_new("Roundtrip");
+jlw_playlist_add(pl2, b1);
+jlw_playlist_add(pl2, b2);
+jlw_playlist_add(pl2, b3);
+var tmp2 = "/tmp/jalwa_pio_rt3.m3u";
+rm(tmp2);
+jlw_save_m3u(pl2, lib2, tmp2);
+var paths2 = jlw_load_m3u(tmp2);
+assert_eq(vec_len(paths2), 3, "3 paths");
+assert_streq(vec_get(paths2, 0), "/music/Alpha.flac", "path 0");
+assert_streq(vec_get(paths2, 1), "/music/Beta.flac", "path 1");
+assert_streq(vec_get(paths2, 2), "/music/Gamma.flac", "path 2");
+rm(tmp2);
+
+# ---- load_m3u_empty_file ----
+test_group("load empty file");
+var tmp3 = "/tmp/jalwa_pio_empty.m3u";
+write_file(tmp3, "");
+var paths3 = jlw_load_m3u(tmp3);
+assert_eq(vec_len(paths3), 0, "no paths");
+rm(tmp3);
+
+# ---- load_m3u_with_comments ----
+test_group("load with comments");
+var tmp4 = "/tmp/jalwa_pio_comments.m3u";
+write_file(tmp4, "#EXTM3U\n#EXTINF:120,Artist - Title\n/music/track1.flac\n# This is a comment\n/music/track2.flac\n\n/music/track3.flac\n");
+var paths4 = jlw_load_m3u(tmp4);
+assert_eq(vec_len(paths4), 3, "3 paths");
+assert_streq(vec_get(paths4, 0), "/music/track1.flac", "track1");
+assert_streq(vec_get(paths4, 1), "/music/track2.flac", "track2");
+assert_streq(vec_get(paths4, 2), "/music/track3.flac", "track3");
+rm(tmp4);
+
+# ---- load_m3u_nonexistent_file ----
+test_group("load nonexistent -> Err");
+var tmp5 = "/tmp/jalwa_pio_no_such_file.m3u";
+rm(tmp5);
+assert_eq(jlw_load_m3u(tmp5), 0, "None on missing file");
+
+# ---- save_m3u_creates_file ----
+test_group("save creates file");
+var tmp6 = "/tmp/jalwa_pio_create.m3u";
+rm(tmp6);
+assert_eq(file_exists(tmp6), 0, "absent before");
+jlw_save_m3u(jlw_playlist_new("Empty"), jlw_library_new(), tmp6);
+assert_eq(file_exists(tmp6), 1, "present after");
+rm(tmp6);
+
+# ---- save_m3u_empty_playlist -> content trims to "#EXTM3U" ----
+test_group("save empty playlist");
+var tmp7 = "/tmp/jalwa_pio_emptypl.m3u";
+rm(tmp7);
+jlw_save_m3u(jlw_playlist_new("Empty"), jlw_library_new(), tmp7);
+var rbuf = alloc(256);
+var rn = file_read_all(tmp7, rbuf, 255);
+# trim trailing whitespace and null-terminate for streq
+var re = rn;
+var tr = 1;
+while (tr == 1) {
+    if (re <= 0) { tr = 0; }
+    else { if (jlw_is_ws(load8(rbuf + re - 1)) == 1) { re = re - 1; } else { tr = 0; } }
+}
+store8(rbuf + re, 0);
+assert_streq(rbuf, "#EXTM3U", "content is #EXTM3U");
+rm(tmp7);
+
+var rc = assert_summary();
+syscall(60, rc);
