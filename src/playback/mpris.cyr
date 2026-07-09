@@ -1,0 +1,110 @@
+# playback/mpris.cyr -- MPRIS2 media-key command + interface surface.
+# Ports rust-old/crates/jalwa-playback/src/mpris.rs. L2: depends on error.cyr +
+# core/types.cyr (PlaybackState).
+#
+# BLOCKER: the D-Bus EXPORT (serving org.mpris.MediaPlayer2[.Player] via zbus)
+# has NO Cyrius equivalent -- samvada is D-Bus CLIENT-only, no object export /
+# property marshalling. So spawn_mpris_server is STUBBED (deferred; options:
+# extend samvada, or an AGNOS-native media-control channel via majra/setu).
+# The command protocol + interface property VALUES + the player's command-emit
+# path (modeled as an in-memory queue instead of an mpsc channel) port faithfully.
+
+# ---- MprisCommand -> codes ----
+var JLW_MPRIS_PLAY_PAUSE = 0;
+var JLW_MPRIS_PLAY       = 1;
+var JLW_MPRIS_PAUSE      = 2;
+var JLW_MPRIS_STOP       = 3;
+var JLW_MPRIS_NEXT       = 4;
+var JLW_MPRIS_PREVIOUS   = 5;
+var JLW_MPRIS_SEEK       = 6;   # payload: offset secs (f64)
+var JLW_MPRIS_SET_VOLUME = 7;   # payload: 0.0..1.0
+var JLW_MPRIS_NOOP       = 8;   # keep-alive probe
+
+#must_use
+fn jlw_mpris_command_name(code) {
+    if (code == JLW_MPRIS_PLAY_PAUSE) { return "PlayPause"; }
+    if (code == JLW_MPRIS_PLAY)       { return "Play"; }
+    if (code == JLW_MPRIS_PAUSE)      { return "Pause"; }
+    if (code == JLW_MPRIS_STOP)       { return "Stop"; }
+    if (code == JLW_MPRIS_NEXT)       { return "Next"; }
+    if (code == JLW_MPRIS_PREVIOUS)   { return "Previous"; }
+    if (code == JLW_MPRIS_SEEK)       { return "Seek"; }
+    if (code == JLW_MPRIS_SET_VOLUME) { return "SetVolume"; }
+    if (code == JLW_MPRIS_NOOP)       { return "Noop"; }
+    return "Unknown";
+}
+
+# ---- org.mpris.MediaPlayer2 root interface (constant properties) ----
+#must_use
+fn jlw_mpris_root_can_quit()       { return 1; }
+#must_use
+fn jlw_mpris_root_can_raise()      { return 0; }
+#must_use
+fn jlw_mpris_root_has_track_list() { return 0; }
+#must_use
+fn jlw_mpris_root_identity()       { return "Jalwa"; }
+#must_use
+fn jlw_mpris_root_desktop_entry()  { return "jalwa"; }
+#must_use
+fn jlw_mpris_root_supported_uri_schemes() {
+    var v = vec_new();
+    vec_push(v, "file");
+    return v;
+}
+#must_use
+fn jlw_mpris_root_supported_mime_types() {
+    var v = vec_new();
+    vec_push(v, "audio/mpeg");
+    vec_push(v, "audio/flac");
+    vec_push(v, "audio/ogg");
+    vec_push(v, "audio/wav");
+    vec_push(v, "audio/aac");
+    vec_push(v, "audio/opus");
+    vec_push(v, "audio/mp4");
+    return v;
+}
+
+# ---- org.mpris.MediaPlayer2.Player interface ----
+# cmd_queue models the mpsc Sender (media-key methods push a MprisCommand code);
+# state is a PlaybackState code driving playback_status.
+#derive(accessors)
+struct JlwMprisPlayer { cmd_queue; state; }
+#must_use
+fn jlw_mpris_player_new(state) {
+    var p = alloc(sizeof(JlwMprisPlayer));
+    JlwMprisPlayer_set_cmd_queue(p, vec_new());
+    JlwMprisPlayer_set_state(p, state);
+    return p;
+}
+
+fn jlw_mpris_player_play_pause(p) { vec_push(JlwMprisPlayer_cmd_queue(p), JLW_MPRIS_PLAY_PAUSE); return 0; }
+fn jlw_mpris_player_play(p)       { vec_push(JlwMprisPlayer_cmd_queue(p), JLW_MPRIS_PLAY); return 0; }
+fn jlw_mpris_player_pause(p)      { vec_push(JlwMprisPlayer_cmd_queue(p), JLW_MPRIS_PAUSE); return 0; }
+fn jlw_mpris_player_stop(p)       { vec_push(JlwMprisPlayer_cmd_queue(p), JLW_MPRIS_STOP); return 0; }
+fn jlw_mpris_player_next(p)       { vec_push(JlwMprisPlayer_cmd_queue(p), JLW_MPRIS_NEXT); return 0; }
+fn jlw_mpris_player_previous(p)   { vec_push(JlwMprisPlayer_cmd_queue(p), JLW_MPRIS_PREVIOUS); return 0; }
+
+#must_use
+fn jlw_mpris_player_can_play(p)        { return 1; }
+#must_use
+fn jlw_mpris_player_can_pause(p)       { return 1; }
+#must_use
+fn jlw_mpris_player_can_go_next(p)     { return 1; }
+#must_use
+fn jlw_mpris_player_can_go_previous(p) { return 1; }
+#must_use
+fn jlw_mpris_player_can_seek(p)        { return 1; }
+#must_use
+fn jlw_mpris_player_can_control(p)     { return 1; }
+
+# playback_status: PlaybackState -> the MPRIS status string.
+#must_use
+fn jlw_mpris_player_playback_status(p) {
+    var s = JlwMprisPlayer_state(p);
+    if (s == JLW_STATE_PLAYING) { return "Playing"; }
+    if (s == JLW_STATE_PAUSED)  { return "Paused"; }
+    return "Stopped";
+}
+
+# spawn_mpris_server: STUB -- D-Bus object export is a blocker (see header).
+fn jlw_mpris_spawn_server(state) { return 0; }

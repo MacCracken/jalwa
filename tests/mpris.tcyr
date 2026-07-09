@@ -1,0 +1,69 @@
+# mpris.tcyr -- parity tests for src/playback/mpris.cyr.
+# Ports the mpris #[test]s from jalwa-playback/src/mpris.rs. DROPPED:
+# spawn_mpris_returns_receiver (needs the D-Bus server export — blocked).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/playback/mpris.cyr"
+
+alloc_init();
+
+# ---- mpris_command_debug + variants + clone (names) ----
+test_group("MprisCommand names");
+assert_streq(jlw_mpris_command_name(JLW_MPRIS_PLAY_PAUSE), "PlayPause", "PlayPause");
+assert_streq(jlw_mpris_command_name(JLW_MPRIS_PLAY), "Play", "Play");
+assert_streq(jlw_mpris_command_name(JLW_MPRIS_PAUSE), "Pause", "Pause");
+assert_streq(jlw_mpris_command_name(JLW_MPRIS_STOP), "Stop", "Stop");
+assert_streq(jlw_mpris_command_name(JLW_MPRIS_NEXT), "Next", "Next");
+assert_streq(jlw_mpris_command_name(JLW_MPRIS_PREVIOUS), "Previous", "Previous");
+assert_streq(jlw_mpris_command_name(JLW_MPRIS_SEEK), "Seek", "Seek");
+assert_streq(jlw_mpris_command_name(JLW_MPRIS_SET_VOLUME), "SetVolume", "SetVolume");
+assert_streq(jlw_mpris_command_name(JLW_MPRIS_NOOP), "Noop", "Noop");
+
+# ---- mpris_root_properties ----
+test_group("MprisRoot properties");
+assert_eq(jlw_mpris_root_can_quit(), 1, "can_quit");
+assert_eq(jlw_mpris_root_can_raise(), 0, "can_raise false");
+assert_eq(jlw_mpris_root_has_track_list(), 0, "has_track_list false");
+assert_streq(jlw_mpris_root_identity(), "Jalwa", "identity");
+assert_streq(jlw_mpris_root_desktop_entry(), "jalwa", "desktop_entry");
+var schemes = jlw_mpris_root_supported_uri_schemes();
+assert_streq(vec_get(schemes, 0), "file", "uri scheme file");
+var mimes = jlw_mpris_root_supported_mime_types();
+assert_eq(vec_len(mimes), 7, "7 mime types");
+assert_streq(vec_get(mimes, 0), "audio/mpeg", "mime audio/mpeg");
+assert_streq(vec_get(mimes, 1), "audio/flac", "mime audio/flac");
+
+# ---- mpris_player_properties ----
+test_group("MprisPlayer properties");
+var player = jlw_mpris_player_new(JLW_STATE_STOPPED);
+assert_eq(jlw_mpris_player_can_play(player), 1, "can_play");
+assert_eq(jlw_mpris_player_can_pause(player), 1, "can_pause");
+assert_eq(jlw_mpris_player_can_go_next(player), 1, "can_go_next");
+assert_eq(jlw_mpris_player_can_go_previous(player), 1, "can_go_previous");
+assert_eq(jlw_mpris_player_can_seek(player), 1, "can_seek");
+assert_eq(jlw_mpris_player_can_control(player), 1, "can_control");
+assert_streq(jlw_mpris_player_playback_status(player), "Stopped", "status Stopped");
+assert_streq(jlw_mpris_player_playback_status(jlw_mpris_player_new(JLW_STATE_PLAYING)), "Playing", "status Playing");
+assert_streq(jlw_mpris_player_playback_status(jlw_mpris_player_new(JLW_STATE_PAUSED)), "Paused", "status Paused");
+
+# ---- mpris_player_sends_commands ----
+test_group("MprisPlayer sends commands");
+var pl = jlw_mpris_player_new(JLW_STATE_STOPPED);
+jlw_mpris_player_play_pause(pl);
+jlw_mpris_player_play(pl);
+jlw_mpris_player_pause(pl);
+jlw_mpris_player_stop(pl);
+jlw_mpris_player_next(pl);
+jlw_mpris_player_previous(pl);
+var q = JlwMprisPlayer_cmd_queue(pl);
+assert_eq(vec_len(q), 6, "6 commands queued");
+assert_eq(vec_get(q, 0), JLW_MPRIS_PLAY_PAUSE, "cmd 0 PlayPause");
+assert_eq(vec_get(q, 1), JLW_MPRIS_PLAY, "cmd 1 Play");
+assert_eq(vec_get(q, 2), JLW_MPRIS_PAUSE, "cmd 2 Pause");
+assert_eq(vec_get(q, 3), JLW_MPRIS_STOP, "cmd 3 Stop");
+assert_eq(vec_get(q, 4), JLW_MPRIS_NEXT, "cmd 4 Next");
+assert_eq(vec_get(q, 5), JLW_MPRIS_PREVIOUS, "cmd 5 Previous");
+
+var rc = assert_summary();
+syscall(60, rc);
