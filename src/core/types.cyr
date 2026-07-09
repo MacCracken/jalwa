@@ -183,3 +183,196 @@ fn jlw_pb_status_progress(self) {
     if (f64_gt(d, 0) == 0)      { return JLW_NAN; }   # zero (or negative) -> None
     return f64_div(JlwPlaybackStatus_position(self), d);
 }
+
+# ================================================================
+# Uuid  (was uuid::Uuid). 16 heap bytes. v4 = random with the RFC-4122 version
+# (byte 6 high nibble = 0100) and variant (byte 8 top bits = 10) markers set.
+# Compared BY VALUE via jlw_uuid_eq (memeq 16). `Option<Uuid>` -> a pointer, or
+# 0 (None) -- alloc never returns 0, so 0 is an unambiguous None sentinel.
+# ================================================================
+#must_use
+fn jlw_uuid_v4() {
+    var u = alloc(16);
+    random_bytes(u, 16);
+    store8(u + 6, ((load8(u + 6) & 0x0f) | 0x40));   # version 4
+    store8(u + 8, ((load8(u + 8) & 0x3f) | 0x80));   # RFC-4122 variant
+    return u;
+}
+#inline
+#must_use
+fn jlw_uuid_eq(a, b) { return memeq(a, b, 16); }
+
+# ================================================================
+# Playlist  (was struct Playlist + impl). items = vec of Uuid pointers.
+# created_at/modified_at = epoch seconds (chrono clock_epoch_secs); the Rust
+# DateTime<Utc> is stored as an i64 epoch. description -> Option<Str> (0 = None).
+# ================================================================
+#derive(accessors)
+struct JlwPlaylist { id; name; items; created_at; modified_at; description; is_smart; }
+
+#must_use
+fn jlw_playlist_new(name) {
+    var p = alloc(sizeof(JlwPlaylist));
+    var now = clock_epoch_secs();
+    JlwPlaylist_set_id(p, jlw_uuid_v4());
+    JlwPlaylist_set_name(p, name);
+    JlwPlaylist_set_items(p, vec_new());
+    JlwPlaylist_set_created_at(p, now);
+    JlwPlaylist_set_modified_at(p, now);
+    JlwPlaylist_set_description(p, 0);   # None
+    JlwPlaylist_set_is_smart(p, 0);
+    return p;
+}
+
+fn jlw_playlist_add(p, item_id) {
+    vec_push(JlwPlaylist_items(p), item_id);
+    JlwPlaylist_set_modified_at(p, clock_epoch_secs());
+    return 0;
+}
+
+# remove(item_id): retain items whose uuid != item_id. Returns 1 if any were
+# removed (and bumps modified_at), 0 otherwise. Mirrors Vec::retain + len diff.
+fn jlw_playlist_remove(p, item_id) {
+    var items = JlwPlaylist_items(p);
+    var before = vec_len(items);
+    var kept = vec_new();
+    for (var i = 0; i < before; i = i + 1) {
+        var it = vec_get(items, i);
+        if (jlw_uuid_eq(it, item_id) == 0) { vec_push(kept, it); }
+    }
+    JlwPlaylist_set_items(p, kept);
+    if (vec_len(kept) != before) {
+        JlwPlaylist_set_modified_at(p, clock_epoch_secs());
+        return 1;
+    }
+    return 0;
+}
+
+#inline
+#must_use
+fn jlw_playlist_len(p) { return vec_len(JlwPlaylist_items(p)); }
+
+#must_use
+fn jlw_playlist_is_empty(p) {
+    if (vec_len(JlwPlaylist_items(p)) == 0) { return 1; }
+    return 0;
+}
+
+fn jlw_playlist_clear(p) {
+    vec_truncate(JlwPlaylist_items(p), 0);
+    JlwPlaylist_set_modified_at(p, clock_epoch_secs());
+    return 0;
+}
+
+#inline
+#must_use
+fn jlw_playlist_name(p) { return JlwPlaylist_name(p); }
+#inline
+#must_use
+fn jlw_playlist_id(p) { return JlwPlaylist_id(p); }
+
+# ================================================================
+# PlayQueue  (was struct PlayQueue + impl). items = vec of Uuid pointers.
+# position -> i64 index, or -1 (Option::None). current/advance/go_back return a
+# Uuid pointer or 0 (None).
+# ================================================================
+#derive(accessors)
+struct JlwPlayQueue { items; position; repeat_mode; shuffle; }
+
+#must_use
+fn jlw_queue_new() {
+    var q = alloc(sizeof(JlwPlayQueue));
+    JlwPlayQueue_set_items(q, vec_new());
+    JlwPlayQueue_set_position(q, (0 - 1));    # None
+    JlwPlayQueue_set_repeat_mode(q, JLW_REPEAT_OFF);
+    JlwPlayQueue_set_shuffle(q, 0);
+    return q;
+}
+
+fn jlw_queue_enqueue(q, item_id) {
+    var items = JlwPlayQueue_items(q);
+    vec_push(items, item_id);
+    if (JlwPlayQueue_position(q) == (0 - 1)) {
+        if (vec_len(items) > 0) { JlwPlayQueue_set_position(q, 0); }
+    }
+    return 0;
+}
+
+# enqueue_many(ids): append every id in the `ids` vec; set position to 0 only if
+# the queue started empty and had no position (mirrors the Rust `was_empty` guard).
+fn jlw_queue_enqueue_many(q, ids) {
+    var items = JlwPlayQueue_items(q);
+    var was_empty = 0;
+    if (vec_len(items) == 0) { was_empty = 1; }
+    var n = vec_len(ids);
+    for (var i = 0; i < n; i = i + 1) { vec_push(items, vec_get(ids, i)); }
+    if (JlwPlayQueue_position(q) == (0 - 1)) {
+        if (was_empty == 1) {
+            if (vec_len(items) > 0) { JlwPlayQueue_set_position(q, 0); }
+        }
+    }
+    return 0;
+}
+
+#must_use
+fn jlw_queue_current(q) {
+    var pos = JlwPlayQueue_position(q);
+    if (pos == (0 - 1)) { return 0; }   # None
+    var items = JlwPlayQueue_items(q);
+    if (pos < vec_len(items)) { return vec_get(items, pos); }
+    return 0;   # out of range -> None
+}
+
+# advance(): step to the next item; wrap to first under RepeatMode::All; else None.
+fn jlw_queue_advance(q) {
+    var pos = JlwPlayQueue_position(q);
+    if (pos == (0 - 1)) { return 0; }
+    var items = JlwPlayQueue_items(q);
+    var next = pos + 1;
+    if (next < vec_len(items)) {
+        JlwPlayQueue_set_position(q, next);
+        return vec_get(items, next);
+    }
+    if (JlwPlayQueue_repeat_mode(q) == JLW_REPEAT_ALL) {
+        if (vec_len(items) == 0) { return 0; }
+        JlwPlayQueue_set_position(q, 0);
+        return vec_get(items, 0);
+    }
+    return 0;
+}
+
+# go_back(): step to the previous item; wrap to last under RepeatMode::All; else None.
+fn jlw_queue_go_back(q) {
+    var pos = JlwPlayQueue_position(q);
+    if (pos == (0 - 1)) { return 0; }
+    var items = JlwPlayQueue_items(q);
+    if (pos > 0) {
+        var prev = pos - 1;
+        JlwPlayQueue_set_position(q, prev);
+        return vec_get(items, prev);
+    }
+    if (JlwPlayQueue_repeat_mode(q) == JLW_REPEAT_ALL) {
+        var len = vec_len(items);
+        if (len == 0) { return 0; }
+        var last = len - 1;
+        JlwPlayQueue_set_position(q, last);
+        return vec_get(items, last);
+    }
+    return 0;
+}
+
+fn jlw_queue_clear(q) {
+    vec_truncate(JlwPlayQueue_items(q), 0);
+    JlwPlayQueue_set_position(q, (0 - 1));
+    return 0;
+}
+
+#inline
+#must_use
+fn jlw_queue_len(q) { return vec_len(JlwPlayQueue_items(q)); }
+
+#must_use
+fn jlw_queue_is_empty(q) {
+    if (vec_len(JlwPlayQueue_items(q)) == 0) { return 1; }
+    return 0;
+}

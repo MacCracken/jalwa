@@ -11,6 +11,15 @@
 include "src/error.cyr"
 include "src/core/types.cyr"
 
+# Helper (was inline `(0..n).map(|_| Uuid::new_v4()).collect()` in the Rust
+# tests): return a vec of n fresh v4 uuids. Kept in fn scope so the loop var
+# doesn't collide across the top-level test statements.
+fn make_ids(n) {
+    var v = vec_new();
+    for (var i = 0; i < n; i = i + 1) { vec_push(v, jlw_uuid_v4()); }
+    return v;
+}
+
 alloc_init();
 
 # ---- media_type_display ----
@@ -63,6 +72,102 @@ assert_eq(f64_lt(f64_abs(f64_sub(p, 0.25)), 0.001), 1, "progress ~0.25");
 test_group("PlaybackStatus progress zero duration");
 var zr = jlw_pb_status_new(JLW_STATE_PLAYING, 0, f64_from(10), 0, 1.0, 0);
 assert_eq(jlw_is_finite(jlw_pb_status_progress(zr)), 0, "zero duration -> None");
+
+# ---- playlist_new ----
+test_group("Playlist new");
+var pl = jlw_playlist_new("My Playlist");
+assert_streq(jlw_playlist_name(pl), "My Playlist", "name");
+assert_eq(jlw_playlist_is_empty(pl), 1, "empty");
+assert_eq(jlw_playlist_len(pl), 0, "len 0");
+
+# ---- playlist_add_remove ----
+test_group("Playlist add/remove");
+var pl2 = jlw_playlist_new("Test");
+var pid1 = jlw_uuid_v4();
+var pid2 = jlw_uuid_v4();
+jlw_playlist_add(pl2, pid1);
+jlw_playlist_add(pl2, pid2);
+assert_eq(jlw_playlist_len(pl2), 2, "len 2");
+assert_eq(jlw_playlist_remove(pl2, pid1), 1, "removed id1");
+assert_eq(jlw_playlist_len(pl2), 1, "len 1");
+assert_eq(jlw_playlist_remove(pl2, pid1), 0, "already removed");
+
+# ---- playlist_clear ----
+test_group("Playlist clear");
+var pl3 = jlw_playlist_new("Test");
+jlw_playlist_add(pl3, jlw_uuid_v4());
+jlw_playlist_add(pl3, jlw_uuid_v4());
+jlw_playlist_clear(pl3);
+assert_eq(jlw_playlist_is_empty(pl3), 1, "empty after clear");
+
+# ---- queue_new ----
+test_group("PlayQueue new");
+var q = jlw_queue_new();
+assert_eq(jlw_queue_is_empty(q), 1, "empty");
+assert_eq(jlw_queue_current(q), 0, "current None");
+
+# ---- queue_enqueue ----
+test_group("PlayQueue enqueue");
+var q2 = jlw_queue_new();
+var qid = jlw_uuid_v4();
+jlw_queue_enqueue(q2, qid);
+assert_eq(jlw_queue_len(q2), 1, "len 1");
+assert_eq(jlw_queue_current(q2), qid, "current == id");
+
+# ---- queue_enqueue_many ----
+test_group("PlayQueue enqueue_many");
+var q3 = jlw_queue_new();
+var ids3 = make_ids(5);
+jlw_queue_enqueue_many(q3, ids3);
+assert_eq(jlw_queue_len(q3), 5, "len 5");
+assert_eq(jlw_queue_current(q3), vec_get(ids3, 0), "current == ids[0]");
+
+# ---- queue_next ----
+test_group("PlayQueue advance");
+var q4 = jlw_queue_new();
+var ids4 = make_ids(3);
+jlw_queue_enqueue_many(q4, ids4);
+assert_eq(jlw_queue_current(q4), vec_get(ids4, 0), "current ids[0]");
+assert_eq(jlw_queue_advance(q4), vec_get(ids4, 1), "advance ids[1]");
+assert_eq(jlw_queue_current(q4), vec_get(ids4, 1), "current ids[1]");
+assert_eq(jlw_queue_advance(q4), vec_get(ids4, 2), "advance ids[2]");
+assert_eq(jlw_queue_advance(q4), 0, "advance None at end");
+
+# ---- queue_previous ----
+test_group("PlayQueue go_back");
+var q5 = jlw_queue_new();
+var ids5 = make_ids(3);
+jlw_queue_enqueue_many(q5, ids5);
+jlw_queue_advance(q5);
+jlw_queue_advance(q5);
+assert_eq(jlw_queue_go_back(q5), vec_get(ids5, 1), "back ids[1]");
+assert_eq(jlw_queue_go_back(q5), vec_get(ids5, 0), "back ids[0]");
+assert_eq(jlw_queue_go_back(q5), 0, "back None at start");
+
+# ---- queue_repeat_all ----
+test_group("PlayQueue repeat all");
+var q6 = jlw_queue_new();
+JlwPlayQueue_set_repeat_mode(q6, JLW_REPEAT_ALL);
+var ids6 = make_ids(2);
+jlw_queue_enqueue_many(q6, ids6);
+jlw_queue_advance(q6);
+assert_eq(jlw_queue_advance(q6), vec_get(ids6, 0), "wrap to ids[0]");
+
+# ---- queue_repeat_all_previous ----
+test_group("PlayQueue repeat all back");
+var q7 = jlw_queue_new();
+JlwPlayQueue_set_repeat_mode(q7, JLW_REPEAT_ALL);
+var ids7 = make_ids(2);
+jlw_queue_enqueue_many(q7, ids7);
+assert_eq(jlw_queue_go_back(q7), vec_get(ids7, 1), "wrap back to ids[1]");
+
+# ---- queue_clear ----
+test_group("PlayQueue clear");
+var q8 = jlw_queue_new();
+jlw_queue_enqueue(q8, jlw_uuid_v4());
+jlw_queue_clear(q8);
+assert_eq(jlw_queue_is_empty(q8), 1, "empty after clear");
+assert_eq(jlw_queue_current(q8), 0, "current None");
 
 var rc = assert_summary();
 syscall(60, rc);

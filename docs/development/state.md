@@ -14,14 +14,14 @@
 ## Source / oracle
 
 - **Rust oracle**: 15,355 LOC (40 `.rs` files, full 5-crate workspace) frozen at `rust-old/`. Do not edit.
-- **Cyrius port**: `src/error.cyr` (green) + `src/core/types.cyr` (enums + PlaybackStatus, green). `src/main.cyr` still the smoke stub.
+- **Cyrius port**: `src/error.cyr` (green) + `src/core/types.cyr` (enums + PlaybackStatus + Uuid + Playlist + PlayQueue, green). `src/main.cyr` still the smoke stub.
 
 ## Port progress
 
 | Wave | Status |
 |---|---|
 | 0 — scaffold + oracle freeze + `error.cyr` | ✅ done |
-| A — core types | ~in progress — enums + PlaybackStatus green; Playlist/PlayQueue/MediaItem/Library next (uuid+vec+option idiom) |
+| A — core types | ~70% — enums + PlaybackStatus + Uuid + Playlist + PlayQueue green (49 tests); MediaItem + Library next (string search idiom) |
 | B — core services | ☐ |
 | C — playback + DSP | ☐ |
 | D — AI | ☐ |
@@ -35,7 +35,7 @@ MPRIS export (samvada client-only).
 
 ## Tests
 
-- `tests/error.tcyr` — 19/19 green. `tests/core_types.tcyr` — 23/23 green. `tests/jalwa.tcyr` — scaffold placeholder.
+- `tests/error.tcyr` — 19/19 green. `tests/core_types.tcyr` — 49/49 green. `tests/jalwa.tcyr` — scaffold placeholder.
 - Per-module `.tcyr` suites land with each ported module, cross-checked against `rust-old/` `#[test]` blocks.
 
 ## Dependencies
