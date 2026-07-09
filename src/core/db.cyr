@@ -159,3 +159,399 @@ fn jlw_default_db_path() {
     }
     return jlw_cstr_cat2(base, "/jalwa/library.db");
 }
+
+# ============================================================================
+# patra-backed LibraryDb. A "LibraryDb" is just the patra db handle (i64).
+# Datetimes are stored as INT epoch seconds (the Rust rfc3339 TEXT is not
+# asserted anywhere; INT round-trips exactly and drops the string plumbing).
+# Optionals ride sentinels: STR None -> "", INT None -> -1.
+# ============================================================================
+
+# copy a cstring into fresh, stable memory (patra_result_get_str points INTO
+# the result set, which patra_result_free reclaims -- kept strings must be copied).
+#must_use
+fn jlw_strdup(s) {
+    var n = strlen(s);
+    var d = alloc(n + 1);
+    memcpy(d, s, n);
+    store8(d + n, 0);
+    return d;
+}
+
+# media_type as the Rust Debug string ("Audio"/"Video") the schema stores.
+#must_use
+fn jlw_media_type_debug(code) {
+    if (code == JLW_MEDIA_VIDEO) { return "Video"; }
+    return "Audio";
+}
+
+var _jlw_patra_inited = 0;
+
+# open(path): init patra once, open/create the db, run migrations. Returns the
+# patra db handle, or 0 on failure.
+#must_use
+fn jlw_db_open(path) {
+    if (_jlw_patra_inited == 0) { patra_init(); _jlw_patra_inited = 1; }
+    var db = patra_open(path);
+    if (db == 0) { return 0; }
+    jlw_db_migrate(db);
+    return db;
+}
+
+# migrate: create the 4 tables (patra dialect: INT/STR, no PRIMARY/FOREIGN KEY,
+# no IF NOT EXISTS -- re-CREATE on an existing table errors harmlessly).
+fn jlw_db_migrate(db) {
+    patra_exec(db, "CREATE TABLE media_items (id STR, path STR, title STR, artist STR, album STR, duration_ms INT, format STR, audio_codec STR, video_codec STR, media_type STR, added_at INT, last_played INT, play_count INT, rating INT, tags STR)");
+    patra_exec(db, "CREATE TABLE playlists (id STR, name STR, description STR, is_smart INT, created_at INT, modified_at INT)");
+    patra_exec(db, "CREATE TABLE playlist_items (playlist_id STR, item_id STR, position INT)");
+    patra_exec(db, "CREATE TABLE scan_paths (path STR)");
+    return JLW_ERR_NONE;
+}
+
+# save_item: upsert by id (patra has no OR REPLACE -> DELETE then INSERT).
+fn jlw_db_save_item(db, item) {
+    var idstr = jlw_uuid_to_str(JlwMediaItem_id(item));
+    var dstmt = patra_prepare(db, "DELETE FROM media_items WHERE id = ?");
+    patra_bind_text(dstmt, 0, idstr, strlen(idstr));
+    patra_exec_prepared(db, dstmt);
+    patra_finalize(dstmt);
+
+    var stmt = patra_prepare(db, "INSERT INTO media_items (id, path, title, artist, album, duration_ms, format, audio_codec, video_codec, media_type, added_at, last_played, play_count, rating, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    if (stmt == 0) { return JLW_ERR_DATABASE; }
+    patra_bind_text(stmt, 0, idstr, strlen(idstr));
+    var path = JlwMediaItem_path(item);
+    patra_bind_text(stmt, 1, path, strlen(path));
+    var title = JlwMediaItem_title(item);
+    patra_bind_text(stmt, 2, title, strlen(title));
+    var artist = JlwMediaItem_artist(item);
+    if (artist == 0) { artist = ""; }
+    patra_bind_text(stmt, 3, artist, strlen(artist));
+    var album = JlwMediaItem_album(item);
+    if (album == 0) { album = ""; }
+    patra_bind_text(stmt, 4, album, strlen(album));
+    var dur = JlwMediaItem_duration(item);
+    var dms = (0 - 1);
+    if (jlw_is_finite(dur) == 1) { dms = f64_to(f64_mul(dur, 1000.0)); }
+    patra_bind_int(stmt, 5, dms);
+    var fmtname = jlw_container_format_name(JlwMediaItem_format(item));
+    patra_bind_text(stmt, 6, fmtname, strlen(fmtname));
+    var ac = JlwMediaItem_audio_codec(item);
+    var acs = "";
+    if (ac != (0 - 1)) { acs = jlw_audio_codec_name(ac); }
+    patra_bind_text(stmt, 7, acs, strlen(acs));
+    var vc = JlwMediaItem_video_codec(item);
+    var vcs = "";
+    if (vc != (0 - 1)) { vcs = jlw_video_codec_name(vc); }
+    patra_bind_text(stmt, 8, vcs, strlen(vcs));
+    var mts = jlw_media_type_debug(JlwMediaItem_media_type(item));
+    patra_bind_text(stmt, 9, mts, strlen(mts));
+    patra_bind_int(stmt, 10, JlwMediaItem_added_at(item));
+    patra_bind_int(stmt, 11, JlwMediaItem_last_played(item));
+    patra_bind_int(stmt, 12, JlwMediaItem_play_count(item));
+    patra_bind_int(stmt, 13, JlwMediaItem_rating(item));
+    var tagsjson = jlw_tags_to_json(JlwMediaItem_tags(item));
+    patra_bind_text(stmt, 14, tagsjson, strlen(tagsjson));
+    patra_exec_prepared(db, stmt);
+    patra_finalize(stmt);
+    return JLW_ERR_NONE;
+}
+
+# load_library: rebuild the in-memory Library from all four tables.
+#must_use
+fn jlw_db_load_library(db) {
+    var lib = jlw_library_new();
+
+    # -- media_items --
+    var rs = patra_query(db, "SELECT id, path, title, artist, album, duration_ms, format, audio_codec, video_codec, media_type, added_at, last_played, play_count, rating, tags FROM media_items");
+    if (rs != 0) {
+        var n = patra_result_count(rs);
+        for (var i = 0; i < n; i = i + 1) {
+            var path = jlw_strdup(patra_result_get_str(rs, i, 1));
+            var title = jlw_strdup(patra_result_get_str(rs, i, 2));
+            var mtcode = JLW_MEDIA_AUDIO;
+            if (streq(patra_result_get_str(rs, i, 9), "Video") == 1) { mtcode = JLW_MEDIA_VIDEO; }
+            var fmtcode = jlw_parse_format(patra_result_get_str(rs, i, 6));
+            var item = jlw_media_item_new(path, title, mtcode, fmtcode);
+            JlwMediaItem_set_id(item, jlw_uuid_from_str(patra_result_get_str(rs, i, 0)));
+            var artist = patra_result_get_str(rs, i, 3);
+            if (strlen(artist) > 0) { JlwMediaItem_set_artist(item, jlw_strdup(artist)); }
+            var album = patra_result_get_str(rs, i, 4);
+            if (strlen(album) > 0) { JlwMediaItem_set_album(item, jlw_strdup(album)); }
+            var dms = patra_result_get_int(rs, i, 5);
+            if (dms != (0 - 1)) { JlwMediaItem_set_duration(item, f64_div(f64_from(dms), 1000.0)); }
+            var acs = patra_result_get_str(rs, i, 7);
+            if (strlen(acs) > 0) { JlwMediaItem_set_audio_codec(item, jlw_parse_audio_codec(acs)); }
+            var vcs = patra_result_get_str(rs, i, 8);
+            if (strlen(vcs) > 0) { JlwMediaItem_set_video_codec(item, jlw_parse_video_codec(vcs)); }
+            JlwMediaItem_set_added_at(item, patra_result_get_int(rs, i, 10));
+            JlwMediaItem_set_last_played(item, patra_result_get_int(rs, i, 11));
+            JlwMediaItem_set_play_count(item, patra_result_get_int(rs, i, 12));
+            JlwMediaItem_set_rating(item, patra_result_get_int(rs, i, 13));
+            JlwMediaItem_set_tags(item, jlw_tags_from_json(patra_result_get_str(rs, i, 14)));
+            jlw_library_add_item(lib, item);
+        }
+        patra_result_free(rs);
+    }
+
+    # -- playlists (build rows first, then load items per playlist) --
+    var prs = patra_query(db, "SELECT id, name, description, is_smart, created_at, modified_at FROM playlists");
+    if (prs != 0) {
+        var pn = patra_result_count(prs);
+        for (var p = 0; p < pn; p = p + 1) {
+            var pl = jlw_playlist_new(jlw_strdup(patra_result_get_str(prs, p, 1)));
+            JlwPlaylist_set_id(pl, jlw_uuid_from_str(patra_result_get_str(prs, p, 0)));
+            var desc = patra_result_get_str(prs, p, 2);
+            if (strlen(desc) > 0) { JlwPlaylist_set_description(pl, jlw_strdup(desc)); }
+            JlwPlaylist_set_is_smart(pl, patra_result_get_int(prs, p, 3));
+            JlwPlaylist_set_created_at(pl, patra_result_get_int(prs, p, 4));
+            JlwPlaylist_set_modified_at(pl, patra_result_get_int(prs, p, 5));
+            vec_push(JlwLibrary_playlists(lib), pl);
+        }
+        patra_result_free(prs);
+        var pls = JlwLibrary_playlists(lib);
+        var pc = vec_len(pls);
+        for (var q = 0; q < pc; q = q + 1) {
+            var plq = vec_get(pls, q);
+            var pidstr = jlw_uuid_to_str(JlwPlaylist_id(plq));
+            var istmt = patra_prepare(db, "SELECT item_id FROM playlist_items WHERE playlist_id = ? ORDER BY position");
+            patra_bind_text(istmt, 0, pidstr, strlen(pidstr));
+            var irs = patra_query_prepared(db, istmt);
+            patra_finalize(istmt);
+            if (irs != 0) {
+                var icount = patra_result_count(irs);
+                for (var j = 0; j < icount; j = j + 1) {
+                    vec_push(JlwPlaylist_items(plq), jlw_uuid_from_str(patra_result_get_str(irs, j, 0)));
+                }
+                patra_result_free(irs);
+            }
+        }
+    }
+
+    # -- scan_paths --
+    var srs = patra_query(db, "SELECT path FROM scan_paths");
+    if (srs != 0) {
+        var sn = patra_result_count(srs);
+        for (var s = 0; s < sn; s = s + 1) {
+            vec_push(JlwLibrary_scan_paths(lib), jlw_strdup(patra_result_get_str(srs, s, 0)));
+        }
+        patra_result_free(srs);
+    }
+
+    return lib;
+}
+
+# delete_item: remove from media_items + purge playlist_items refs.
+fn jlw_db_delete_item(db, id) {
+    var idstr = jlw_uuid_to_str(id);
+    var s1 = patra_prepare(db, "DELETE FROM media_items WHERE id = ?");
+    patra_bind_text(s1, 0, idstr, strlen(idstr));
+    patra_exec_prepared(db, s1);
+    patra_finalize(s1);
+    var s2 = patra_prepare(db, "DELETE FROM playlist_items WHERE item_id = ?");
+    patra_bind_text(s2, 0, idstr, strlen(idstr));
+    patra_exec_prepared(db, s2);
+    patra_finalize(s2);
+    return JLW_ERR_NONE;
+}
+
+# update_play_count: read-modify-write (patra `SET x = x + 1` not relied upon) +
+# stamp last_played = now.
+fn jlw_db_update_play_count(db, id) {
+    var idstr = jlw_uuid_to_str(id);
+    var qstmt = patra_prepare(db, "SELECT play_count FROM media_items WHERE id = ?");
+    patra_bind_text(qstmt, 0, idstr, strlen(idstr));
+    var rs = patra_query_prepared(db, qstmt);
+    patra_finalize(qstmt);
+    var cur = 0;
+    if (rs != 0) {
+        if (patra_result_count(rs) > 0) { cur = patra_result_get_int(rs, 0, 0); }
+        patra_result_free(rs);
+    }
+    var ustmt = patra_prepare(db, "UPDATE media_items SET play_count = ?, last_played = ? WHERE id = ?");
+    patra_bind_int(ustmt, 0, cur + 1);
+    patra_bind_int(ustmt, 1, clock_epoch_secs());
+    patra_bind_text(ustmt, 2, idstr, strlen(idstr));
+    patra_exec_prepared(db, ustmt);
+    patra_finalize(ustmt);
+    return JLW_ERR_NONE;
+}
+
+# update_rating: rating -1 = None.
+fn jlw_db_update_rating(db, id, rating) {
+    var idstr = jlw_uuid_to_str(id);
+    var stmt = patra_prepare(db, "UPDATE media_items SET rating = ? WHERE id = ?");
+    patra_bind_int(stmt, 0, rating);
+    patra_bind_text(stmt, 1, idstr, strlen(idstr));
+    patra_exec_prepared(db, stmt);
+    patra_finalize(stmt);
+    return JLW_ERR_NONE;
+}
+
+# save_playlist: upsert the row + replace its playlist_items.
+fn jlw_db_save_playlist(db, pl) {
+    var idstr = jlw_uuid_to_str(JlwPlaylist_id(pl));
+    var d1 = patra_prepare(db, "DELETE FROM playlists WHERE id = ?");
+    patra_bind_text(d1, 0, idstr, strlen(idstr));
+    patra_exec_prepared(db, d1);
+    patra_finalize(d1);
+    var stmt = patra_prepare(db, "INSERT INTO playlists (id, name, description, is_smart, created_at, modified_at) VALUES (?, ?, ?, ?, ?, ?)");
+    patra_bind_text(stmt, 0, idstr, strlen(idstr));
+    var name = JlwPlaylist_name(pl);
+    patra_bind_text(stmt, 1, name, strlen(name));
+    var desc = JlwPlaylist_description(pl);
+    if (desc == 0) { desc = ""; }
+    patra_bind_text(stmt, 2, desc, strlen(desc));
+    patra_bind_int(stmt, 3, JlwPlaylist_is_smart(pl));
+    patra_bind_int(stmt, 4, JlwPlaylist_created_at(pl));
+    patra_bind_int(stmt, 5, JlwPlaylist_modified_at(pl));
+    patra_exec_prepared(db, stmt);
+    patra_finalize(stmt);
+    var d2 = patra_prepare(db, "DELETE FROM playlist_items WHERE playlist_id = ?");
+    patra_bind_text(d2, 0, idstr, strlen(idstr));
+    patra_exec_prepared(db, d2);
+    patra_finalize(d2);
+    var items = JlwPlaylist_items(pl);
+    var m = vec_len(items);
+    for (var i = 0; i < m; i = i + 1) {
+        var itemidstr = jlw_uuid_to_str(vec_get(items, i));
+        var istmt = patra_prepare(db, "INSERT INTO playlist_items (playlist_id, item_id, position) VALUES (?, ?, ?)");
+        patra_bind_text(istmt, 0, idstr, strlen(idstr));
+        patra_bind_text(istmt, 1, itemidstr, strlen(itemidstr));
+        patra_bind_int(istmt, 2, i);
+        patra_exec_prepared(db, istmt);
+        patra_finalize(istmt);
+    }
+    return JLW_ERR_NONE;
+}
+
+# delete_playlist: remove its items then the row.
+fn jlw_db_delete_playlist(db, id) {
+    var idstr = jlw_uuid_to_str(id);
+    var s1 = patra_prepare(db, "DELETE FROM playlist_items WHERE playlist_id = ?");
+    patra_bind_text(s1, 0, idstr, strlen(idstr));
+    patra_exec_prepared(db, s1);
+    patra_finalize(s1);
+    var s2 = patra_prepare(db, "DELETE FROM playlists WHERE id = ?");
+    patra_bind_text(s2, 0, idstr, strlen(idstr));
+    patra_exec_prepared(db, s2);
+    patra_finalize(s2);
+    return JLW_ERR_NONE;
+}
+
+# save_scan_path: INSERT unless the path already exists (patra OR IGNORE needs a
+# UNIQUE index; a manual existence check is dialect-portable).
+fn jlw_db_save_scan_path(db, path) {
+    var qstmt = patra_prepare(db, "SELECT path FROM scan_paths WHERE path = ?");
+    patra_bind_text(qstmt, 0, path, strlen(path));
+    var rs = patra_query_prepared(db, qstmt);
+    patra_finalize(qstmt);
+    var exists = 0;
+    if (rs != 0) {
+        if (patra_result_count(rs) > 0) { exists = 1; }
+        patra_result_free(rs);
+    }
+    if (exists == 0) {
+        var stmt = patra_prepare(db, "INSERT INTO scan_paths (path) VALUES (?)");
+        patra_bind_text(stmt, 0, path, strlen(path));
+        patra_exec_prepared(db, stmt);
+        patra_finalize(stmt);
+    }
+    return JLW_ERR_NONE;
+}
+
+# load_scan_paths: all rows as path cstrings.
+#must_use
+fn jlw_db_load_scan_paths(db) {
+    var v = vec_new();
+    var rs = patra_query(db, "SELECT path FROM scan_paths");
+    if (rs != 0) {
+        var n = patra_result_count(rs);
+        for (var i = 0; i < n; i = i + 1) {
+            vec_push(v, jlw_strdup(patra_result_get_str(rs, i, 0)));
+        }
+        patra_result_free(rs);
+    }
+    return v;
+}
+
+# ============================================================================
+# PersistentLibrary -- Library + patra handle, write-through.
+# ============================================================================
+#derive(accessors)
+struct JlwPersistentLibrary { library; db; }
+
+# open(path): open the db and load the library into memory. Returns 0 on failure.
+#must_use
+fn jlw_plib_open(path) {
+    var db = jlw_db_open(path);
+    if (db == 0) { return 0; }
+    var plib = alloc(sizeof(JlwPersistentLibrary));
+    JlwPersistentLibrary_set_db(plib, db);
+    JlwPersistentLibrary_set_library(plib, jlw_db_load_library(db));
+    return plib;
+}
+
+#inline
+#must_use
+fn jlw_plib_library(plib) { return JlwPersistentLibrary_library(plib); }
+
+fn jlw_plib_add_item(plib, item) {
+    jlw_db_save_item(JlwPersistentLibrary_db(plib), item);
+    return jlw_library_add_item(JlwPersistentLibrary_library(plib), item);
+}
+
+fn jlw_plib_remove_item(plib, id) {
+    jlw_db_delete_item(JlwPersistentLibrary_db(plib), id);
+    return jlw_library_remove(JlwPersistentLibrary_library(plib), id);
+}
+
+fn jlw_plib_update_play_count(plib, id) {
+    jlw_db_update_play_count(JlwPersistentLibrary_db(plib), id);
+    var item = jlw_library_find_by_id(JlwPersistentLibrary_library(plib), id);
+    if (item != 0) {
+        JlwMediaItem_set_play_count(item, JlwMediaItem_play_count(item) + 1);
+        JlwMediaItem_set_last_played(item, clock_epoch_secs());
+    }
+    return 0;
+}
+
+fn jlw_plib_update_rating(plib, id, rating) {
+    jlw_db_update_rating(JlwPersistentLibrary_db(plib), id, rating);
+    var item = jlw_library_find_by_id(JlwPersistentLibrary_library(plib), id);
+    if (item != 0) { JlwMediaItem_set_rating(item, rating); }
+    return 0;
+}
+
+fn jlw_plib_save_playlist(plib, pl) {
+    jlw_db_save_playlist(JlwPersistentLibrary_db(plib), pl);
+    var pls = JlwLibrary_playlists(JlwPersistentLibrary_library(plib));
+    var n = vec_len(pls);
+    var found = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        if (jlw_uuid_eq(JlwPlaylist_id(vec_get(pls, i)), JlwPlaylist_id(pl)) == 1) {
+            vec_set(pls, i, pl);
+            found = 1;
+        }
+    }
+    if (found == 0) { vec_push(pls, pl); }
+    return 0;
+}
+
+fn jlw_plib_delete_playlist(plib, id) {
+    jlw_db_delete_playlist(JlwPersistentLibrary_db(plib), id);
+    var pls = JlwLibrary_playlists(JlwPersistentLibrary_library(plib));
+    var n = vec_len(pls);
+    var kept = vec_new();
+    for (var i = 0; i < n; i = i + 1) {
+        var pl = vec_get(pls, i);
+        if (jlw_uuid_eq(JlwPlaylist_id(pl), id) == 0) { vec_push(kept, pl); }
+    }
+    JlwLibrary_set_playlists(JlwPersistentLibrary_library(plib), kept);
+    return 0;
+}
+
+fn jlw_plib_add_scan_path(plib, path) {
+    jlw_db_save_scan_path(JlwPersistentLibrary_db(plib), path);
+    jlw_library_add_scan_path(JlwPersistentLibrary_library(plib), path);
+    return 0;
+}

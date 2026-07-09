@@ -1,0 +1,171 @@
+# db.tcyr -- parity tests for the patra-backed layer in src/core/db.cyr.
+# Ports the patra roundtrip #[test]s from rust-old/crates/jalwa-core/src/db.rs.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+
+# ---- helpers ----
+fn cstr3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var total = la + lb + lc;
+    var dst = alloc(total + 1);
+    memcpy(dst, a, la); memcpy(dst + la, b, lb); memcpy(dst + la + lb, c, lc);
+    store8(dst + total, 0);
+    return dst;
+}
+fn rm(path) { syscall(87, path); return 0; }
+fn is_some_epoch(e) { if (e == (0 - 1)) { return 0; } return 1; }
+
+# make_test_item(title, artist): path "/music/{title}.flac", album "Album",
+# 200s, Flac/Flac/Audio, tags ["rock"]. Mirrors the Rust fixture.
+fn make_test_item(title, artist) {
+    var it = jlw_media_item_new(cstr3("/music/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    JlwMediaItem_set_album(it, "Album");
+    JlwMediaItem_set_duration(it, f64_from(200));
+    JlwMediaItem_set_audio_codec(it, JLW_ACODEC_FLAC);
+    var tags = vec_new();
+    vec_push(tags, "rock");
+    JlwMediaItem_set_tags(it, tags);
+    return it;
+}
+
+alloc_init();
+
+# ---- db_roundtrip ----
+test_group("db roundtrip");
+var t1 = "/tmp/jalwa_db_rt.db"; rm(t1);
+var db1 = jlw_db_open(t1);
+var item1 = make_test_item("Song", "Artist");
+var iid1 = JlwMediaItem_id(item1);
+jlw_db_save_item(db1, item1);
+var lib1 = jlw_db_load_library(db1);
+assert_eq(jlw_library_items_len(lib1), 1, "1 item");
+var loaded = vec_get(JlwLibrary_items(lib1), 0);
+assert_streq(JlwMediaItem_title(loaded), "Song", "title");
+assert_streq(JlwMediaItem_artist(loaded), "Artist", "artist");
+var ltags = JlwMediaItem_tags(loaded);
+assert_eq(vec_len(ltags), 1, "1 tag");
+assert_streq(vec_get(ltags, 0), "rock", "tag rock");
+jlw_db_delete_item(db1, iid1);
+assert_eq(jlw_library_items_len(jlw_db_load_library(db1)), 0, "empty after delete");
+rm(t1);
+
+# ---- db_playlist_roundtrip ----
+test_group("db playlist roundtrip");
+var t2 = "/tmp/jalwa_db_plrt.db"; rm(t2);
+var db2 = jlw_db_open(t2);
+var item2 = make_test_item("Song", "Artist");
+jlw_db_save_item(db2, item2);
+var pl2 = jlw_playlist_new("Test");
+jlw_playlist_add(pl2, JlwMediaItem_id(item2));
+jlw_db_save_playlist(db2, pl2);
+var lib2 = jlw_db_load_library(db2);
+assert_eq(jlw_library_playlists_len(lib2), 1, "1 playlist");
+var lpl = vec_get(JlwLibrary_playlists(lib2), 0);
+assert_streq(jlw_playlist_name(lpl), "Test", "name Test");
+assert_eq(jlw_playlist_len(lpl), 1, "1 item in playlist");
+rm(t2);
+
+# ---- persistent_library (reopen persists) ----
+test_group("persistent library reopen");
+var t3 = "/tmp/jalwa_db_plib.db"; rm(t3);
+var plibA = jlw_plib_open(t3);
+jlw_plib_add_item(plibA, make_test_item("Song", "Artist"));
+assert_eq(jlw_library_items_len(jlw_plib_library(plibA)), 1, "1 item in memory");
+patra_close(JlwPersistentLibrary_db(plibA));
+var plibB = jlw_plib_open(t3);
+assert_eq(jlw_library_items_len(jlw_plib_library(plibB)), 1, "persisted across reopen");
+assert_streq(JlwMediaItem_title(vec_get(JlwLibrary_items(jlw_plib_library(plibB)), 0)), "Song", "title persisted");
+rm(t3);
+
+# ---- db_update_play_count ----
+test_group("db update play count");
+var t4 = "/tmp/jalwa_db_pc.db"; rm(t4);
+var db4 = jlw_db_open(t4);
+var item4 = make_test_item("Song", "Artist");
+var iid4 = JlwMediaItem_id(item4);
+jlw_db_save_item(db4, item4);
+jlw_db_update_play_count(db4, iid4);
+jlw_db_update_play_count(db4, iid4);
+var l4 = vec_get(JlwLibrary_items(jlw_db_load_library(db4)), 0);
+assert_eq(JlwMediaItem_play_count(l4), 2, "play_count 2");
+assert_eq(is_some_epoch(JlwMediaItem_last_played(l4)), 1, "last_played set");
+rm(t4);
+
+# ---- db_update_rating ----
+test_group("db update rating");
+var t5 = "/tmp/jalwa_db_rating.db"; rm(t5);
+var db5 = jlw_db_open(t5);
+var item5 = make_test_item("Song", "Artist");
+var iid5 = JlwMediaItem_id(item5);
+jlw_db_save_item(db5, item5);
+jlw_db_update_rating(db5, iid5, 4);
+assert_eq(JlwMediaItem_rating(vec_get(JlwLibrary_items(jlw_db_load_library(db5)), 0)), 4, "rating 4");
+jlw_db_update_rating(db5, iid5, (0 - 1));
+assert_eq(JlwMediaItem_rating(vec_get(JlwLibrary_items(jlw_db_load_library(db5)), 0)), (0 - 1), "rating None");
+rm(t5);
+
+# ---- db_scan_paths (dedup) ----
+test_group("db scan paths");
+var t6 = "/tmp/jalwa_db_scan.db"; rm(t6);
+var db6 = jlw_db_open(t6);
+jlw_db_save_scan_path(db6, "/home/user/Music");
+jlw_db_save_scan_path(db6, "/home/user/Music");
+jlw_db_save_scan_path(db6, "/home/user/Videos");
+assert_eq(vec_len(jlw_db_load_scan_paths(db6)), 2, "2 paths");
+rm(t6);
+
+# ---- db_delete_playlist ----
+test_group("db delete playlist");
+var t7 = "/tmp/jalwa_db_delpl.db"; rm(t7);
+var db7 = jlw_db_open(t7);
+var pl7 = jlw_playlist_new("Temp");
+var pid7 = JlwPlaylist_id(pl7);
+jlw_db_save_playlist(db7, pl7);
+jlw_db_delete_playlist(db7, pid7);
+assert_eq(jlw_library_playlists_len(jlw_db_load_library(db7)), 0, "no playlists");
+rm(t7);
+
+# ---- persistent_library_play_count_and_rating ----
+test_group("plib play_count + rating");
+var t8 = "/tmp/jalwa_db_plibpcr.db"; rm(t8);
+var plib8 = jlw_plib_open(t8);
+var id8 = jlw_plib_add_item(plib8, make_test_item("Song", "Artist"));
+jlw_plib_update_play_count(plib8, id8);
+assert_eq(JlwMediaItem_play_count(jlw_library_find_by_id(jlw_plib_library(plib8), id8)), 1, "pc 1");
+jlw_plib_update_rating(plib8, id8, 5);
+assert_eq(JlwMediaItem_rating(jlw_library_find_by_id(jlw_plib_library(plib8), id8)), 5, "rating 5");
+rm(t8);
+
+# ---- persistent_library_playlist_crud ----
+test_group("plib playlist crud");
+var t9 = "/tmp/jalwa_db_plibcrud.db"; rm(t9);
+var plib9 = jlw_plib_open(t9);
+var iid9 = jlw_plib_add_item(plib9, make_test_item("Song", "Artist"));
+var pl9 = jlw_playlist_new("Favs");
+var pid9 = JlwPlaylist_id(pl9);
+jlw_plib_save_playlist(plib9, pl9);
+assert_eq(jlw_library_playlists_len(jlw_plib_library(plib9)), 1, "1 playlist");
+jlw_playlist_add(pl9, iid9);
+jlw_plib_save_playlist(plib9, pl9);
+assert_eq(jlw_library_playlists_len(jlw_plib_library(plib9)), 1, "still 1");
+assert_eq(jlw_playlist_len(vec_get(JlwLibrary_playlists(jlw_plib_library(plib9)), 0)), 1, "1 item");
+jlw_plib_delete_playlist(plib9, pid9);
+assert_eq(jlw_library_playlists_len(jlw_plib_library(plib9)), 0, "deleted");
+rm(t9);
+
+# ---- persistent_library_scan_path_and_remove ----
+test_group("plib scan path + remove");
+var t10 = "/tmp/jalwa_db_plibsr.db"; rm(t10);
+var plib10 = jlw_plib_open(t10);
+jlw_plib_add_scan_path(plib10, "/music");
+assert_eq(jlw_library_scan_paths_len(jlw_plib_library(plib10)), 1, "1 scan path");
+var id10 = jlw_plib_add_item(plib10, make_test_item("Song", "Artist"));
+assert_eq(jlw_plib_remove_item(plib10, id10), 1, "removed");
+assert_eq(jlw_library_items_len(jlw_plib_library(plib10)), 0, "empty");
+rm(t10);
+
+var rc = assert_summary();
+syscall(60, rc);
