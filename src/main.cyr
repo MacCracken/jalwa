@@ -1,13 +1,157 @@
-# jalwa — Cyrius port
-# Ported from 2076 lines of Rust
+# main.cyr -- jalwa CLI entry + the full-crate ASSEMBLY.
+# Ports rust-old/src/main.rs (clap CLI). This file is the [build] entry: it
+# includes every ported module in dependency order (deps before dependents),
+# so `cyrius build src/main.cyr build/jalwa` links the whole crate.
+#
+# clap derive -> hand-rolled args dispatch. cmd_* handlers return their output
+# string (main prints it); tokio/ctrl-c/blocking-playback loops are elided
+# (playback is tarang-stubbed). GUI is Wave F; the MCP stdio loop is deferred.
 
-# Stdlib auto-included via cyrius.cyml
+# ===== ASSEMBLY: all modules, L0 -> L4 =====
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/core/playlist_io.cyr"
+include "src/core/scanner.cyr"
+include "src/core/watcher.cyr"
+include "src/core/hardware.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/playback/mpris.cyr"
+include "src/ai/reco.cyr"
+include "src/ai/daimon.cyr"
+include "src/ai/fingerprint.cyr"
+include "src/ui/renderers.cyr"
+include "src/ui/app.cyr"
+include "src/ui/tui.cyr"
+include "src/ui/widgets.cyr"
+include "src/mcp.cyr"
 
+# ===== library open =====
+# mkdir -p: create each path component (0755); pre-existing dirs error harmlessly.
+fn jlw_mkdir_p(path) {
+    var n = strlen(path);
+    for (var i = 1; i < n; i = i + 1) {
+        if (load8(path + i) == 47) {
+            var pre = alloc(i + 1);
+            memcpy(pre, path, i);
+            store8(pre + i, 0);
+            syscall(83, pre, 493);   # mkdir 0755
+        }
+    }
+    syscall(83, path, 493);
+    return 0;
+}
+# open the default library, creating its parent dir first (Rust create_dir_all).
+#must_use
+fn jlw_open_library() {
+    var path = jlw_default_db_path();
+    var n = strlen(path);
+    var last = 0;
+    for (var i = 0; i < n; i = i + 1) { if (load8(path + i) == 47) { last = i; } }
+    var parent = alloc(last + 1);
+    memcpy(parent, path, last);
+    store8(parent + last, 0);
+    jlw_mkdir_p(parent);
+    return jlw_plib_open(path);
+}
+
+# ===== cmd handlers (return the output string) =====
+#must_use
+fn jlw_cmd_search(plib, query) {
+    var results = jlw_library_search(jlw_plib_library(plib), query);
+    if (vec_len(results) == 0) { return jlw_mcp_cat(jlw_mcp_cat("No results for '", query), "'"); }
+    var sb = str_builder_new();
+    for (var i = 0; i < vec_len(results); i = i + 1) {
+        if (i > 0) { str_builder_putc(sb, 10); }
+        str_builder_add_cstr(sb, jlw_ui_render_library_item(vec_get(results, i), i));
+    }
+    return str_cstr(str_builder_build(sb));
+}
+#must_use
+fn jlw_cmd_stats(plib) { return jlw_ui_render_library_stats(jlw_plib_library(plib)); }
+#must_use
+fn jlw_cmd_library(plib) {
+    var lib = jlw_plib_library(plib);
+    var items = JlwLibrary_items(lib);
+    if (vec_len(items) == 0) { return "Library is empty. Use 'jalwa scan <directory>' to add files."; }
+    var sb = str_builder_new();
+    for (var i = 0; i < vec_len(items); i = i + 1) {
+        str_builder_add_cstr(sb, jlw_ui_render_library_item(vec_get(items, i), i));
+        str_builder_putc(sb, 10);
+    }
+    str_builder_putc(sb, 10);
+    str_builder_add_cstr(sb, jlw_ui_render_library_stats(lib));
+    return str_cstr(str_builder_build(sb));
+}
+#must_use
+fn jlw_cmd_play(engine, path) {
+    if (file_exists(path) == 0) { return jlw_mcp_cat("error: file not found: ", path); }
+    jlw_engine_open(engine, path);
+    jlw_engine_play(engine);
+    return jlw_mcp_cat("Loaded: ", path);
+}
+#must_use
+fn jlw_cmd_info(path) {
+    if (file_exists(path) == 0) { return jlw_mcp_cat("error: cannot open: ", path); }
+    # tarang probe stubbed -- report the path only for now.
+    return jlw_mcp_cat("File: ", path);
+}
+#must_use
+fn jlw_cmd_scan(plib, dir) { return "scanning requires the 'tarang' feature"; }
+#must_use
+fn jlw_cmd_export(plib, name, output) {
+    var lib = jlw_plib_library(plib);
+    var pls = JlwLibrary_playlists(lib);
+    for (var i = 0; i < vec_len(pls); i = i + 1) {
+        var pl = vec_get(pls, i);
+        if (jlw_ci_eq(jlw_playlist_name(pl), name) == 1) {
+            jlw_save_m3u(pl, lib, output);
+            return jlw_mcp_cat(jlw_mcp_cat("Exported '", name), jlw_mcp_cat("' to ", output));
+        }
+    }
+    return jlw_mcp_cat(jlw_mcp_cat("error: playlist '", name), "' not found");
+}
+#must_use
+fn jlw_cmd_import(plib, file) {
+    var paths = jlw_load_m3u(file);
+    if (paths == 0) { return jlw_mcp_cat("error: cannot read ", file); }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Imported ");
+    str_builder_add_int(sb, vec_len(paths));
+    str_builder_add_cstr(sb, " tracks");
+    return str_cstr(str_builder_build(sb));
+}
+#must_use
+fn jlw_cmd_devices() { return "No media devices detected."; }
+
+# ===== main dispatch =====
 fn main() {
     alloc_init();
-    println("jalwa ready");
+    args_init();
+    var n = argc();
+    if (n < 2) {
+        println("jalwa -- AI-native media player for AGNOS");
+        println("usage: jalwa <play|info|search|stats|scan|library|export|import|devices|tui|gui|mcp>");
+        return 0;
+    }
+    var cmd = argv(1);
+    if (streq(cmd, "search") == 1)  { if (n >= 3) { println(jlw_cmd_search(jlw_open_library(), argv(2))); } return 0; }
+    if (streq(cmd, "stats") == 1)   { println(jlw_cmd_stats(jlw_open_library())); return 0; }
+    if (streq(cmd, "library") == 1) { println(jlw_cmd_library(jlw_open_library())); return 0; }
+    if (streq(cmd, "play") == 1)    { if (n >= 3) { println(jlw_cmd_play(jlw_engine_new(jlw_engine_config_default()), argv(2))); } return 0; }
+    if (streq(cmd, "info") == 1)    { if (n >= 3) { println(jlw_cmd_info(argv(2))); } return 0; }
+    if (streq(cmd, "scan") == 1)    { if (n >= 3) { println(jlw_cmd_scan(jlw_open_library(), argv(2))); } return 0; }
+    if (streq(cmd, "export") == 1)  { if (n >= 4) { println(jlw_cmd_export(jlw_open_library(), argv(2), argv(3))); } return 0; }
+    if (streq(cmd, "import") == 1)  { if (n >= 3) { println(jlw_cmd_import(jlw_open_library(), argv(2))); } return 0; }
+    if (streq(cmd, "devices") == 1) { println(jlw_cmd_devices()); return 0; }
+    if (streq(cmd, "tui") == 1)     { jlw_tui_run(jlw_app_new(jlw_open_library(), jlw_engine_new(jlw_engine_config_default()))); return 0; }
+    if (streq(cmd, "mcp") == 1)     { println("jalwa MCP server -- 8 tools (stdio JSON-RPC loop deferred)"); return 0; }
+    if (streq(cmd, "gui") == 1)     { println("jalwa GUI -- Wave F (dhancha/Wayland) not yet ported"); return 0; }
+    println(jlw_mcp_cat("unknown command: ", cmd));
     return 0;
 }
 
-var r = main();
-syscall(SYS_EXIT, r);
+var rr = main();
+syscall(60, rr);

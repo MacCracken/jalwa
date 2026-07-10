@@ -1,0 +1,119 @@
+# mcp.tcyr -- parity tests for src/mcp.cyr (MCP tool handlers).
+# Ports the handle_tool_call / mcp_ok / mcp_err / tool_list #[test]s from
+# src/mcp.rs. The Rust checked result["content"][0]["text"] + result["isError"];
+# the port checks the {text, is_error} response directly. The stdio loop is
+# deferred (no unit test).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/ai/reco.cyr"
+include "src/ui/renderers.cyr"
+include "src/mcp.cyr"
+
+fn cstr3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var d = alloc(la + lb + lc + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); memcpy(d + la + lb, c, lc);
+    store8(d + la + lb + lc, 0);
+    return d;
+}
+fn rm(path) { syscall(87, path); return 0; }
+fn make_item(title, artist) {
+    var it = jlw_media_item_new(cstr3("/music/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    JlwMediaItem_set_duration(it, f64_from(200));
+    return it;
+}
+fn fresh_plib() { rm("/tmp/jalwa_mcp_test.db"); return jlw_plib_open("/tmp/jalwa_mcp_test.db"); }
+fn eng() { return jlw_engine_new(jlw_engine_config_default()); }
+fn contains(hay, needle) { if (strstr(hay, needle) >= 0) { return 1; } return 0; }
+fn resp_text(r) { return JlwMcpResponse_text(r); }
+fn resp_err(r) { return JlwMcpResponse_is_error(r); }
+# {"action":"X"} or {"action":"X","item_id":"Y"} arg builders
+fn arg1(k, v) { return jlw_mcp_cat(jlw_mcp_cat(jlw_mcp_cat("{\"", k), jlw_mcp_cat("\":\"", v)), "\"}"); }
+fn arg2(k1, v1, k2, v2) {
+    return jlw_mcp_cat(jlw_mcp_cat(jlw_mcp_cat(jlw_mcp_cat("{\"", k1), jlw_mcp_cat("\":\"", v1)), jlw_mcp_cat("\",\"", jlw_mcp_cat(k2, jlw_mcp_cat("\":\"", v2)))), "\"}");
+}
+
+alloc_init();
+
+# ---- mcp_ok / mcp_err format ----
+test_group("mcp_ok / mcp_err");
+var rok = jlw_mcp_ok("hello");
+assert_streq(resp_text(rok), "hello", "ok text");
+assert_eq(resp_err(rok), 0, "ok not error");
+var rerr = jlw_mcp_err("oops");
+assert_streq(resp_text(rerr), "oops", "err text");
+assert_eq(resp_err(rerr), 1, "err is error");
+
+# ---- tool_list ----
+test_group("tool_list all 8");
+var tools = jlw_mcp_tool_list();
+assert_eq(vec_len(tools), 8, "8 tools");
+assert_streq(vec_get(tools, 0), "jalwa_play", "play");
+assert_streq(vec_get(tools, 4), "jalwa_recommend", "recommend");
+assert_streq(vec_get(tools, 7), "jalwa_playlist", "playlist");
+
+# ---- dispatch: pause / status / unknown / play ----
+test_group("pause / status");
+var p1 = fresh_plib(); var e1 = eng();
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_pause", "{}", p1, e1)), "paused"), 1, "pause -> paused");
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_status", "{}", p1, e1)), "Stopped"), 1, "status -> Stopped");
+
+test_group("unknown tool");
+assert_eq(resp_err(jlw_mcp_handle_tool_call("nonexistent_tool", "{}", fresh_plib(), eng())), 1, "unknown -> error");
+
+test_group("play nonexistent");
+assert_eq(resp_err(jlw_mcp_handle_tool_call("jalwa_play", "{\"path\":\"/nonexistent.wav\"}", fresh_plib(), eng())), 1, "play missing -> error");
+
+# ---- search ----
+test_group("search empty / with results");
+var p2 = fresh_plib(); var e2 = eng();
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_search", "{\"query\":\"test\"}", p2, e2)), "No results"), 1, "no results");
+var p3 = fresh_plib();
+jlw_library_add_item(jlw_plib_library(p3), make_item("Bohemian Rhapsody", "Queen"));
+jlw_library_add_item(jlw_plib_library(p3), make_item("Time", "Pink Floyd"));
+var sr = resp_text(jlw_mcp_handle_tool_call("jalwa_search", "{\"query\":\"queen\"}", p3, eng()));
+assert_eq(contains(sr, "Queen"), 1, "has Queen");
+assert_eq(contains(sr, "Pink Floyd"), 0, "not Pink Floyd");
+
+# ---- recommend ----
+test_group("recommend invalid / empty");
+assert_eq(resp_err(jlw_mcp_handle_tool_call("jalwa_recommend", "{\"item_id\":\"not-a-uuid\"}", fresh_plib(), eng())), 1, "invalid uuid -> error");
+var rid = jlw_uuid_to_str(jlw_uuid_v4());
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_recommend", arg1("item_id", rid), fresh_plib(), eng())), "No recommendations"), 1, "empty -> No recommendations");
+
+# ---- queue ----
+test_group("queue actions");
+var pq = fresh_plib(); var eq = eng();
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_queue", "{\"action\":\"list\"}", pq, eq)), "Queue is empty"), 1, "list empty");
+assert_eq(resp_err(jlw_mcp_handle_tool_call("jalwa_queue", "{\"action\":\"enqueue\"}", pq, eq)), 1, "enqueue missing id -> error");
+var qitem = make_item("Song", "Artist");
+jlw_library_add_item(jlw_plib_library(pq), qitem);
+var qidstr = jlw_uuid_to_str(JlwMediaItem_id(qitem));
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_queue", arg2("action", "enqueue", "item_id", qidstr), pq, eq)), "Enqueued"), 1, "enqueue valid");
+assert_eq(resp_err(jlw_mcp_handle_tool_call("jalwa_queue", arg2("action", "enqueue", "item_id", jlw_uuid_to_str(jlw_uuid_v4())), pq, eq)), 1, "enqueue not found -> error");
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_queue", "{\"action\":\"clear\"}", pq, eq)), "cleared"), 1, "clear");
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_queue", "{\"action\":\"shuffle\"}", pq, eq)), "shuffled"), 1, "shuffle");
+assert_eq(resp_err(jlw_mcp_handle_tool_call("jalwa_queue", "{\"action\":\"bogus\"}", pq, eq)), 1, "unknown action -> error");
+
+# ---- library ----
+test_group("library actions");
+var pl = fresh_plib();
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_library", "{\"action\":\"stats\"}", pl, eng())), "items"), 1, "stats");
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_library", "{\"action\":\"list\"}", pl, eng())), "Library is empty"), 1, "list empty");
+
+# ---- playlist ----
+test_group("playlist actions");
+var pp = fresh_plib();
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_playlist", "{\"action\":\"list\"}", pp, eng())), "No playlists"), 1, "list empty");
+assert_eq(contains(resp_text(jlw_mcp_handle_tool_call("jalwa_playlist", arg2("action", "create", "name", "Favs"), pp, eng())), "Created playlist"), 1, "create");
+assert_eq(resp_err(jlw_mcp_handle_tool_call("jalwa_playlist", "{\"action\":\"create\"}", pp, eng())), 1, "create no name -> error");
+
+rm("/tmp/jalwa_mcp_test.db");
+var rc = assert_summary();
+syscall(60, rc);

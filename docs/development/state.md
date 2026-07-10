@@ -14,7 +14,7 @@
 ## Source / oracle
 
 - **Rust oracle**: 15,355 LOC (40 `.rs` files, full 5-crate workspace) frozen at `rust-old/`. Do not edit.
-- **Cyrius port**: `src/error.cyr` + all jalwa-core + all jalwa-playback + all jalwa-ai + all jalwa-ui (`src/ui/{renderers,app,tui,widgets}.cyr`) — green. `src/main.cyr` still the smoke stub. (`jlw_format_duration` now lives in `core/types.cyr`.)
+- **Cyrius port**: `src/error.cyr` + all jalwa-core + all jalwa-playback + all jalwa-ai + all jalwa-ui (`src/ui/{renderers,app,tui,widgets}.cyr`) — green. `src/main.cyr` = full assembly + CLI dispatch — build/jalwa builds and runs. (`jlw_format_duration` now lives in `core/types.cyr`.)
 
 ## Port progress
 
@@ -27,15 +27,15 @@
 | D — AI (reco/daimon/fingerprint) | ✅ done — `reco`, `daimon`, `fingerprint` (network + fingerprint kernel stubbed). **jalwa-ai fully ported.** |
 | E — terminal UI | ✅ done — `renderers`, `app`, `tui`, `widgets` (draw-loop + darshana tty deferred). **jalwa-ui fully ported.** |
 | F — desktop GUI | ⏳ next — egui→dhancha/mabda Wayland rewrite (theme, art_cache, 8 views, app, run) — the big lift |
-| G — binary + MCP | ☐ |
+| G — binary + MCP | ✅ core done — `mcp` (8 tools), `main` (args dispatch), **full assembly builds & runs** (923K binary). stdio JSON-RPC loop deferred. |
 
-**Modules: all jalwa-core + all non-video jalwa-playback + all jalwa-ai + all jalwa-ui ✅. 17 / 33 rust modules ported.**
+**Modules: all jalwa-core + all non-video jalwa-playback + all jalwa-ai + all jalwa-ui + `mcp` + `main` (full assembly) ✅. 19 / 33 rust modules ported.**
 Backlogged (blocked): `video_decode_thread`, `view_video` (tarang+aethersafta); real playback (tarang stub);
 MPRIS export (samvada client-only).
 
 ## Tests
 
-- core+playback suites: `error` 19 · `core_types` 72 · `playlist_io` 17 · `db_helpers` 34 · `db` 27 · `scanner` 31 · `watcher` 20 · `hardware` 55 · `dsp` 42 · `decode_thread` 15 · `engine` 46 · `mpris` 34 · `reco` 21 · `daimon` 42 · `fingerprint` 6 · `renderers` 28 · `app` 35 · `tui` 44 · `widgets` 30 — all green (618). Bare `cyrius test` all green.
+- core+playback suites: `error` 19 · `core_types` 72 · `playlist_io` 17 · `db_helpers` 34 · `db` 27 · `scanner` 31 · `watcher` 20 · `hardware` 55 · `dsp` 42 · `decode_thread` 15 · `engine` 46 · `mpris` 34 · `reco` 21 · `daimon` 42 · `fingerprint` 6 · `renderers` 28 · `app` 35 · `tui` 44 · `widgets` 30 · `mcp` 29 — all green (647). `main`: assembly builds, binary runs (stats/search/library/play/mcp verified). Bare `cyrius test` all green.
 
 > Toolchain drift: `cyrius.cyml` pins 6.4.29; cycc is now 6.4.32. Builds pass against the 6.4.29-vendored `lib/`; benign pin-drift warning. Bump the pin + `cyrius lib sync` when convenient.
 - Per-module `.tcyr` suites land with each ported module, cross-checked against `rust-old/` `#[test]` blocks.

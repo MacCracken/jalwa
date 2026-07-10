@@ -1,0 +1,282 @@
+# mcp.cyr -- the jalwa MCP server tool handlers (was src/mcp.rs).
+# L4: depends on error.cyr + core/types.cyr + core/{db,playlist_io}.cyr +
+# playback/engine.cyr + ai/reco.cyr + ui/renderers.cyr.
+#
+# The stdio JSON-RPC loop (run_on) is tokio+bote and DEFERRED (wire to
+# dist/bote.cyr when the transport lands). The 8 tool handlers + dispatch +
+# response helpers port faithfully. A tool response is modeled as
+# {text, is_error}; the MCP {"content":[{"type":"text","text":...}]} envelope is
+# built by jlw_mcp_response_to_json for the transport. Tool args arrive as a JSON
+# cstring; fields are extracted with a small targeted reader.
+
+# ---- response ----
+#derive(accessors)
+struct JlwMcpResponse { text; is_error; }
+#must_use
+fn jlw_mcp_ok(text)  { var r = alloc(sizeof(JlwMcpResponse)); JlwMcpResponse_set_text(r, text); JlwMcpResponse_set_is_error(r, 0); return r; }
+#must_use
+fn jlw_mcp_err(text) { var r = alloc(sizeof(JlwMcpResponse)); JlwMcpResponse_set_text(r, text); JlwMcpResponse_set_is_error(r, 1); return r; }
+
+# ---- small JSON arg reader (compact JSON; string fields) ----
+#must_use
+fn jlw_mcp_find(hay, needle, from) {
+    var hl = strlen(hay);
+    var nl = strlen(needle);
+    var i = from;
+    while (i + nl <= hl) {
+        if (memeq(hay + i, needle, nl) == 1) { return i; }
+        i = i + 1;
+    }
+    return (0 - 1);
+}
+# read a "..." string value at `from` (expects '"'); or "" if absent/non-string.
+#must_use
+fn jlw_mcp_read_str(s, from) {
+    var n = strlen(s);
+    if (from >= n) { return ""; }
+    if (load8(s + from) != 34) { return ""; }
+    var start = from + 1;
+    var j = start;
+    var scanning = 1;
+    while (scanning == 1) {
+        if (j >= n) { scanning = 0; }
+        else { if (load8(s + j) == 34) { scanning = 0; } else { j = j + 1; } }
+    }
+    var len = j - start;
+    var out = alloc(len + 1);
+    memcpy(out, s + start, len);
+    store8(out + len, 0);
+    return out;
+}
+# args["key"] as a string ("" if absent).
+#must_use
+fn jlw_mcp_get_str(args, key) {
+    var sb = str_builder_new();
+    str_builder_putc(sb, 34); str_builder_add_cstr(sb, key); str_builder_add_cstr(sb, "\":");   # "key":
+    var pat = str_cstr(str_builder_build(sb));
+    var idx = jlw_mcp_find(args, pat, 0);
+    if (idx < 0) { return ""; }
+    return jlw_mcp_read_str(args, idx + strlen(pat));
+}
+
+# parse a bare-32-hex uuid string -> 16 bytes, or 0 (invalid).
+#must_use
+fn jlw_uuid_parse(s) {
+    if (strlen(s) != 32) { return 0; }
+    for (var i = 0; i < 32; i = i + 1) {
+        var c = load8(s + i);
+        var ishex = 0;
+        if (c >= 48) { if (c <= 57)  { ishex = 1; } }
+        if (c >= 97) { if (c <= 102) { ishex = 1; } }
+        if (c >= 65) { if (c <= 70)  { ishex = 1; } }
+        if (ishex == 0) { return 0; }
+    }
+    return jlw_uuid_from_str(s);
+}
+
+# concat a prefix cstr + a cstr.
+#must_use
+fn jlw_mcp_cat(prefix, s) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, prefix);
+    str_builder_add_cstr(sb, s);
+    return str_cstr(str_builder_build(sb));
+}
+# "artist - title" for an item (artist defaults to "Unknown").
+#must_use
+fn jlw_mcp_item_label(item) {
+    var sb = str_builder_new();
+    var artist = JlwMediaItem_artist(item);
+    if (artist != 0) { str_builder_add_cstr(sb, artist); } else { str_builder_add_cstr(sb, "Unknown"); }
+    str_builder_add_cstr(sb, " - ");
+    str_builder_add_cstr(sb, JlwMediaItem_title(item));
+    return str_cstr(str_builder_build(sb));
+}
+
+# playback status as a compact string (state name capitalized + volume).
+#must_use
+fn jlw_mcp_status_text(engine) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "{\"state\":\"");
+    var st = jlw_engine_state(engine);
+    if (st == JLW_STATE_PLAYING)        { str_builder_add_cstr(sb, "Playing"); }
+    else { if (st == JLW_STATE_PAUSED)    { str_builder_add_cstr(sb, "Paused"); }
+    else { if (st == JLW_STATE_BUFFERING) { str_builder_add_cstr(sb, "Buffering"); }
+    else { str_builder_add_cstr(sb, "Stopped"); } } }
+    str_builder_add_cstr(sb, "\",\"volume\":");
+    str_builder_add_int(sb, f64_to(f64_mul(jlw_engine_volume(engine), 100.0)));
+    str_builder_add_cstr(sb, "}");
+    return str_cstr(str_builder_build(sb));
+}
+
+# ---- tools ----
+fn jlw_mcp_tool_play(args, engine) {
+    var path = jlw_mcp_get_str(args, "path");
+    if (strlen(path) == 0) { return jlw_mcp_err("path is required"); }
+    if (file_exists(path) == 0) { return jlw_mcp_err(jlw_mcp_cat("invalid path: ", path)); }
+    jlw_engine_open(engine, path);
+    jlw_engine_play(engine);
+    return jlw_mcp_ok(jlw_mcp_cat("Playing: ", path));
+}
+
+fn jlw_mcp_tool_pause(engine) {
+    jlw_engine_pause(engine);
+    return jlw_mcp_ok(jlw_mcp_cat("paused\n", jlw_mcp_status_text(engine)));
+}
+
+fn jlw_mcp_tool_status(engine) {
+    jlw_engine_poll_events(engine);
+    return jlw_mcp_ok(jlw_mcp_status_text(engine));
+}
+
+fn jlw_mcp_tool_search(args, plib) {
+    var query = jlw_mcp_get_str(args, "query");
+    var results = jlw_library_search(jlw_plib_library(plib), query);
+    if (vec_len(results) == 0) { return jlw_mcp_ok(jlw_mcp_cat(jlw_mcp_cat("No results for '", query), "'")); }
+    var sb = str_builder_new();
+    var n = vec_len(results);
+    if (n > 100) { n = 100; }
+    for (var i = 0; i < n; i = i + 1) {
+        if (i > 0) { str_builder_putc(sb, 10); }
+        str_builder_add_cstr(sb, jlw_ui_render_library_item(vec_get(results, i), i));
+    }
+    return jlw_mcp_ok(str_cstr(str_builder_build(sb)));
+}
+
+fn jlw_mcp_tool_recommend(args, plib) {
+    var idstr = jlw_mcp_get_str(args, "item_id");
+    var seed = jlw_uuid_parse(idstr);
+    if (seed == 0) { return jlw_mcp_err("invalid item_id UUID"); }
+    var lib = jlw_plib_library(plib);
+    var recs = jlw_ai_recommend(lib, seed, 5);
+    if (vec_len(recs) == 0) { return jlw_mcp_ok("No recommendations found"); }
+    var sb = str_builder_new();
+    for (var i = 0; i < vec_len(recs); i = i + 1) {
+        if (i > 0) { str_builder_putc(sb, 10); }
+        var rec = vec_get(recs, i);
+        str_builder_add_cstr(sb, "  ");
+        str_builder_add_int(sb, f64_to(JlwRecommendation_score(rec)));
+        str_builder_add_cstr(sb, "% ");
+        var item = jlw_library_find_by_id(lib, JlwRecommendation_item_id(rec));
+        if (item != 0) { str_builder_add_cstr(sb, jlw_mcp_item_label(item)); }
+    }
+    return jlw_mcp_ok(str_cstr(str_builder_build(sb)));
+}
+
+fn jlw_mcp_tool_queue(args, plib, engine) {
+    var action = jlw_mcp_get_str(args, "action");
+    if (streq(action, "list") == 1) {
+        var cur = jlw_engine_current_path(engine);
+        if (cur != 0) {
+            var item = jlw_library_find_by_path(jlw_plib_library(plib), cur);
+            if (item != 0) { return jlw_mcp_ok(jlw_mcp_cat("Now playing: ", jlw_mcp_item_label(item))); }
+        }
+        return jlw_mcp_ok("Queue is empty");
+    }
+    if (streq(action, "enqueue") == 1) {
+        var idstr = jlw_mcp_get_str(args, "item_id");
+        if (strlen(idstr) == 0) { return jlw_mcp_err("item_id required for enqueue"); }
+        var seed = jlw_uuid_parse(idstr);
+        if (seed != 0) {
+            var item = jlw_library_find_by_id(jlw_plib_library(plib), seed);
+            if (item != 0) { return jlw_mcp_ok(jlw_mcp_cat("Enqueued: ", jlw_mcp_item_label(item))); }
+        }
+        return jlw_mcp_err(jlw_mcp_cat("Item not found: ", idstr));
+    }
+    if (streq(action, "clear") == 1) { jlw_engine_stop(engine); return jlw_mcp_ok("Queue cleared and playback stopped"); }
+    if (streq(action, "shuffle") == 1) { return jlw_mcp_ok("Queue shuffled"); }
+    return jlw_mcp_err(jlw_mcp_cat("unknown queue action: ", action));
+}
+
+fn jlw_mcp_tool_library(args, plib) {
+    var action = jlw_mcp_get_str(args, "action");
+    var lib = jlw_plib_library(plib);
+    if (streq(action, "stats") == 1) { return jlw_mcp_ok(jlw_ui_render_library_stats(lib)); }
+    if (streq(action, "scan") == 1) { return jlw_mcp_err("scanning requires the 'tarang' feature"); }
+    if (streq(action, "list") == 1) {
+        var items = JlwLibrary_items(lib);
+        if (vec_len(items) == 0) { return jlw_mcp_ok("Library is empty"); }
+        var sb = str_builder_new();
+        var n = vec_len(items);
+        if (n > 200) { n = 200; }
+        for (var i = 0; i < n; i = i + 1) {
+            if (i > 0) { str_builder_putc(sb, 10); }
+            str_builder_add_cstr(sb, jlw_ui_render_library_item(vec_get(items, i), i));
+        }
+        return jlw_mcp_ok(str_cstr(str_builder_build(sb)));
+    }
+    return jlw_mcp_err(jlw_mcp_cat("unknown library action: ", action));
+}
+
+fn jlw_mcp_tool_playlist(args, plib) {
+    var action = jlw_mcp_get_str(args, "action");
+    var lib = jlw_plib_library(plib);
+    if (streq(action, "list") == 1) {
+        var pls = JlwLibrary_playlists(lib);
+        if (vec_len(pls) == 0) { return jlw_mcp_ok("No playlists"); }
+        var sb = str_builder_new();
+        for (var i = 0; i < vec_len(pls); i = i + 1) {
+            if (i > 0) { str_builder_putc(sb, 10); }
+            var pl = vec_get(pls, i);
+            str_builder_add_cstr(sb, jlw_playlist_name(pl));
+            str_builder_add_cstr(sb, " (");
+            str_builder_add_int(sb, jlw_playlist_len(pl));
+            str_builder_add_cstr(sb, " tracks");
+            if (JlwPlaylist_is_smart(pl) == 1) { str_builder_add_cstr(sb, ", smart"); }
+            str_builder_add_cstr(sb, ")");
+        }
+        return jlw_mcp_ok(str_cstr(str_builder_build(sb)));
+    }
+    if (streq(action, "create") == 1) {
+        var name = jlw_mcp_get_str(args, "name");
+        if (strlen(name) == 0) { return jlw_mcp_err("name required for create"); }
+        jlw_plib_save_playlist(plib, jlw_playlist_new(name));
+        return jlw_mcp_ok(jlw_mcp_cat("Created playlist: ", name));
+    }
+    if (streq(action, "add") == 1) {
+        var name = jlw_mcp_get_str(args, "name");
+        var idstr = jlw_mcp_get_str(args, "item_id");
+        if (strlen(name) == 0) { return jlw_mcp_err("name and item_id required"); }
+        if (strlen(idstr) == 0) { return jlw_mcp_err("name and item_id required"); }
+        var seed = jlw_uuid_parse(idstr);
+        if (seed == 0) { return jlw_mcp_err("invalid UUID"); }
+        var pls = JlwLibrary_playlists(lib);
+        for (var i = 0; i < vec_len(pls); i = i + 1) {
+            if (jlw_ci_eq(jlw_playlist_name(vec_get(pls, i)), name) == 1) {
+                jlw_playlist_add(vec_get(pls, i), seed);
+                return jlw_mcp_ok(jlw_mcp_cat(jlw_mcp_cat("Added to '", name), "'"));
+            }
+        }
+        return jlw_mcp_err(jlw_mcp_cat(jlw_mcp_cat("Playlist '", name), "' not found"));
+    }
+    return jlw_mcp_err(jlw_mcp_cat("unknown playlist action: ", action));
+}
+
+# dispatch a tool call by name.
+#must_use
+fn jlw_mcp_handle_tool_call(name, args, plib, engine) {
+    if (streq(name, "jalwa_play") == 1)      { return jlw_mcp_tool_play(args, engine); }
+    if (streq(name, "jalwa_pause") == 1)     { return jlw_mcp_tool_pause(engine); }
+    if (streq(name, "jalwa_status") == 1)    { return jlw_mcp_tool_status(engine); }
+    if (streq(name, "jalwa_search") == 1)    { return jlw_mcp_tool_search(args, plib); }
+    if (streq(name, "jalwa_recommend") == 1) { return jlw_mcp_tool_recommend(args, plib); }
+    if (streq(name, "jalwa_queue") == 1)     { return jlw_mcp_tool_queue(args, plib, engine); }
+    if (streq(name, "jalwa_library") == 1)   { return jlw_mcp_tool_library(args, plib); }
+    if (streq(name, "jalwa_playlist") == 1)  { return jlw_mcp_tool_playlist(args, plib); }
+    return jlw_mcp_err(jlw_mcp_cat("unknown tool: ", name));
+}
+
+# the 8 exposed tool names (was tool_defs()/tool_list()).
+#must_use
+fn jlw_mcp_tool_list() {
+    var v = vec_new();
+    vec_push(v, "jalwa_play");
+    vec_push(v, "jalwa_pause");
+    vec_push(v, "jalwa_status");
+    vec_push(v, "jalwa_search");
+    vec_push(v, "jalwa_recommend");
+    vec_push(v, "jalwa_queue");
+    vec_push(v, "jalwa_library");
+    vec_push(v, "jalwa_playlist");
+    return v;
+}
