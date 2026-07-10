@@ -46,7 +46,13 @@ fn jlw_mcp_read_raw_scalar(s, from) {
     if (from >= n) { return "null"; }
     if (load8(s + from) == 34) {                 # quoted string: capture incl quotes
         var j = from + 1;
-        while (j < n) { if (load8(s + j) == 34) { j = j + 1; break; } j = j + 1; }
+        var scan = 1;
+        while (scan == 1 && j < n) {
+            var c = load8(s + j);
+            if (c == 92) { j = j + 2; }          # backslash: skip the escaped byte
+            else { if (c == 34) { j = j + 1; scan = 0; } else { j = j + 1; } }
+        }
+        if (j > n) { j = n; }                    # a trailing backslash could overshoot
         var slen = j - from;
         var sout = alloc(slen + 1); memcpy(sout, s + from, slen); store8(sout + slen, 0);
         return sout;
@@ -107,6 +113,41 @@ fn jlw_mcp_get_obj(s, key) {
     var idx = jlw_mcp_find(s, pat, 0);
     if (idx < 0) { return "{}"; }
     return jlw_mcp_read_raw_obj(s, idx + strlen(pat));
+}
+
+# string value for a TOP-LEVEL key (brace-depth 1) of `obj`, ignoring keys inside
+# nested objects/arrays. Used for the tools/call tool name so a nested
+# arguments.name can't shadow params.name regardless of member order. Compact JSON.
+#must_use
+fn jlw_mcp_get_str_top(obj, key) {
+    var n = strlen(obj);
+    var kl = strlen(key);
+    var depth = 0;
+    var instr = 0;
+    var i = 0;
+    while (i < n) {
+        var c = load8(obj + i);
+        if (instr == 1) {
+            if (c == 92) { i = i + 2; }                          # skip escaped byte
+            else { if (c == 34) { instr = 0; } i = i + 1; }      # close string on quote
+        } else {
+            if (c == 34) {
+                if (depth == 1 && i + kl + 2 < n) {
+                    if (memeq(obj + i + 1, key, kl) == 1) {
+                        if (load8(obj + i + 1 + kl) == 34 && load8(obj + i + kl + 2) == 58) {
+                            return jlw_mcp_read_str(obj, i + kl + 3);   # value right after "key":
+                        }
+                    }
+                }
+                instr = 1; i = i + 1;
+            } else {
+                if (c == 123 || c == 91) { depth = depth + 1; }
+                else { if (c == 125 || c == 93) { depth = depth - 1; } }
+                i = i + 1;
+            }
+        }
+    }
+    return "";
 }
 
 # ---- result builders ----
@@ -212,7 +253,7 @@ fn jlw_mcp_process_request(line, plib, engine) {
         result = jlw_mcp_tools_list_json();
     } else { if (streq(method, "tools/call") == 1) {
         var params = jlw_mcp_get_obj(line, "params");
-        var tool = jlw_mcp_get_str(params, "name");
+        var tool = jlw_mcp_get_str_top(params, "name");   # top-level key: nested arguments.name can't shadow it
         var args = jlw_mcp_get_obj(params, "arguments");
         result = jlw_mcp_envelope_content(jlw_mcp_handle_tool_call(tool, args, plib, engine));
     } else {

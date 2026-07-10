@@ -321,7 +321,7 @@ fn jlw_scanner_scan_file_into(path, buf, cap) {
     if (sf == 5) {                               # MP3
         jlw_shravan_ensure_mp3();
         var foff = mp3_id3v2_skip(buf, n);
-        if (foff >= 0 && foff < n) {
+        if (foff >= 0 && foff + 4 <= n) {   # need all 4 header bytes in range (mp3_id3v2_skip doesn't clamp)
             var fh = mp3_parse_frame_header(buf, foff);
             if (fh > 0) {
                 var bitrate = load64(fh + 16);

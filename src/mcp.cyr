@@ -40,8 +40,13 @@ fn jlw_mcp_read_str(s, from) {
     var scanning = 1;
     while (scanning == 1) {
         if (j >= n) { scanning = 0; }
-        else { if (load8(s + j) == 34) { scanning = 0; } else { j = j + 1; } }
+        else {
+            var c = load8(s + j);
+            if (c == 92) { j = j + 2; }              # backslash: skip the escaped byte
+            else { if (c == 34) { scanning = 0; } else { j = j + 1; } }
+        }
     }
+    if (j > n) { j = n; }                            # a trailing backslash could overshoot
     var len = j - start;
     var out = alloc(len + 1);
     memcpy(out, s + start, len);
@@ -148,7 +153,10 @@ fn jlw_mcp_tool_recommend(args, plib) {
     var seed = jlw_uuid_parse(idstr);
     if (seed == 0) { return jlw_mcp_err("invalid item_id UUID"); }
     var lib = jlw_plib_library(plib);
-    var recs = jlw_ai_recommend(lib, seed, 5);
+    var maxstr = jlw_mcp_get_str(args, "max");        # honor the optional 'max' arg (rust: unwrap_or(5))
+    var maxn = 5;
+    if (strlen(maxstr) > 0) { var m = atoi(maxstr); if (m > 0) { maxn = m; } }
+    var recs = jlw_ai_recommend(lib, seed, maxn);
     if (vec_len(recs) == 0) { return jlw_mcp_ok("No recommendations found"); }
     var sb = str_builder_new();
     for (var i = 0; i < vec_len(recs); i = i + 1) {

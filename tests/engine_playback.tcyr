@@ -75,5 +75,20 @@ jlw_engine_set_volume(e3, 0.5);
 assert_eq(f64_to(f64_mul(JlwPlayHandle_volume(h3), 100.0)), 50, "live volume -> handle 0.5");
 jlw_engine_stop(e3);
 
+# ---- open() cancels active playback (no orphaned decode thread) ----
+# regression: manual track-switch while PLAYING must stop the old thread first
+# (rust-old open() calls self.stop()), else a second worker is spawned + leaked.
+test_group("open cancels active playback");
+var e4 = jlw_engine_new(jlw_engine_config_default());
+jlw_engine_open(e4, "tests/fixtures/probe.flac");
+jlw_engine_play(e4);
+var h4 = JlwPlaybackEngine_play_handle(e4);
+assert_eq(h4 != 0, 1, "playing (handle set)");
+jlw_engine_open(e4, "tests/fixtures/probe.mp3");   # switch tracks while still playing
+assert_eq(JlwPlaybackEngine_play_handle(e4), 0, "old handle cleared (thread stopped)");
+assert_eq(jlw_engine_state(e4), JLW_STATE_STOPPED, "state reset by open");
+assert_eq(JlwPlayHandle_stop(h4), 1, "old handle received stop signal (not orphaned)");
+assert_streq(JlwPlaybackEngine_current_path(e4), "tests/fixtures/probe.mp3", "current_path updated");
+
 var rc = assert_summary();
 syscall(60, rc);

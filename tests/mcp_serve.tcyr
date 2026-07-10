@@ -67,6 +67,10 @@ assert_eq(contains(re, "\"isError\":true"), 1, "play missing -> isError true");
 test_group("tools/call arg name collision");
 var rc2 = req("{\"jsonrpc\":\"2.0\",\"id\":32,\"method\":\"tools/call\",\"params\":{\"name\":\"jalwa_playlist\",\"arguments\":{\"action\":\"create\",\"name\":\"Favs\"}}}");
 assert_eq(contains(rc2, "Created playlist"), 1, "params.name resolved (not arguments.name)");
+# regression: arguments BEFORE name in params -> the nested arguments.name must NOT
+# shadow the top-level tool name (depth-aware jlw_mcp_get_str_top).
+var rc2b = req("{\"jsonrpc\":\"2.0\",\"id\":33,\"method\":\"tools/call\",\"params\":{\"arguments\":{\"action\":\"create\",\"name\":\"Favs\"},\"name\":\"jalwa_playlist\"}}");
+assert_eq(contains(rc2b, "Created playlist"), 1, "top-level name wins even when arguments comes first");
 
 # ---- run_unknown_method ----
 test_group("unknown method");

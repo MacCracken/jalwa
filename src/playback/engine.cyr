@@ -202,6 +202,8 @@ fn jlw_engine_play(e) {
 # open(path): probe. Errors on a missing file; real probe (duration/codec) stubbed.
 fn jlw_engine_open(e, path) {
     if (file_exists(path) == 0) { return JLW_ERR_NOT_FOUND; }
+    jlw_engine_stop(e);   # cancel any active playback thread first (rust-old open() calls self.stop());
+                          # otherwise a manual track-switch while PLAYING orphans the old decode thread.
     JlwPlaybackEngine_set_current_path(e, path);
     return JLW_ERR_NONE;
 }
