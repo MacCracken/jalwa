@@ -8,6 +8,7 @@ include "src/error.cyr"
 include "src/core/types.cyr"
 include "src/core/db.cyr"
 include "src/core/scanner.cyr"
+include "src/playback/dsp.cyr"
 include "src/playback/audio.cyr"
 
 alloc_init();
@@ -86,6 +87,27 @@ var s3 = 0;
 while (jlw_audio_play_is_done(h3) == 0 && s3 < 500) { sleep_ms(10); s3 = s3 + 1; }
 assert_eq(jlw_audio_play_is_done(h3), 1, "failed-decode thread marks done");
 assert_eq(JlwPlayHandle_rc(h3), JLW_ERR_UNSUPPORTED_FORMAT, "rc = unsupported (missing file)");
+
+# ---- graphic EQ applied to decoded samples (upfront, jlw_audio_apply_eq) ----
+test_group("EQ apply");
+var edr = jlw_audio_decode("tests/fixtures/probe.wav");
+var es = decode_result_samples(edr);
+# flat / disabled / none -> returns the SAME vec (no-op, no copy)
+assert_eq(jlw_audio_apply_eq(es, 1, 44100, dhvani_geq_settings_default()) == es, 1, "flat EQ -> same samples");
+assert_eq(jlw_audio_apply_eq(es, 1, 44100, 0) == es, 1, "no EQ (0) -> same samples");
+# a non-flat, enabled EQ -> a new, changed sample vec
+var eqs = dhvani_geq_settings_default();
+dhvani_geq_settings_set_band(eqs, 4, 12.0);     # boost ~500Hz band (near the 440Hz tone)
+DhGraphicEqSettings_set_enabled(eqs, 1);
+assert_eq(dhvani_geq_settings_is_flat(eqs), 0, "eq is non-flat");
+var eqd = jlw_audio_apply_eq(es, 1, 44100, eqs);
+assert_eq(eqd != es, 1, "non-flat EQ -> new processed vec");
+assert_eq(vec_len(eqd), vec_len(es), "same sample count");
+var changed = 0;
+for (var i = 200; i < 400; i = i + 1) {
+    if (f64_to(f64_mul(f64_abs(f64_sub(vec_get(eqd, i), vec_get(es, i))), 1000.0)) > 0) { changed = 1; }
+}
+assert_eq(changed, 1, "EQ actually altered the audio");
 
 var rc = assert_summary();
 syscall(60, rc);

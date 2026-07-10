@@ -83,6 +83,13 @@ fn jlw_audio_play_file_h(path, volume, h) {
     if (count == 0) { return JLW_ERR_PLAYBACK; }
     if (channels <= 0) { channels = 1; }
 
+    # graphic EQ (upfront, whole-track): applies the handle's dhvani settings if a
+    # non-flat EQ is enabled. A mid-track band change takes effect on the next track.
+    if (h != 0) {
+        samples = jlw_audio_apply_eq(samples, channels, rate, JlwPlayHandle_eq(h));
+        count = vec_len(samples);
+    }
+
     var dev = audio_open_playback(0, 0);
     if (dev == 0) { return JLW_ERR_PLAYBACK; }   # no device
     audio_set_params(dev, rate, channels, 16);
@@ -157,7 +164,7 @@ fn jlw_audio_play_file(path, volume) { return jlw_audio_play_file_h(path, volume
 # thread. Single-word fields -> aligned load64/store64 are atomic on x86_64/agnos,
 # so `stop`/`done`/`position` need no lock for this producer/consumer pattern.
 #derive(accessors)
-struct JlwPlayHandle { path; volume; stop; done; position; rc; paused; seek_to; }
+struct JlwPlayHandle { path; volume; stop; done; position; rc; paused; seek_to; eq; }
 
 # the thread body: play the file (cancellable via the handle), then mark done.
 fn jlw_audio_play_worker(h) {
@@ -166,12 +173,12 @@ fn jlw_audio_play_worker(h) {
     return 0;
 }
 
-# start playback on a background thread; returns the JlwPlayHandle immediately
-# (non-blocking). Poll jlw_audio_play_is_done / read position; cancel via
-# jlw_audio_play_stop; pause / live volume / seek via jlw_audio_play_ctl. Mirrors
+# start playback on a background thread with the given volume + optional EQ settings
+# (0 = none). Returns the JlwPlayHandle immediately (non-blocking). Poll is_done /
+# read position; cancel via _stop; pause / live volume / seek via _ctl. Mirrors
 # rust-old's spawned decode thread (gapless / prepare_next is a follow-up).
 #must_use
-fn jlw_audio_play_async(path, volume) {
+fn jlw_audio_play_async_full(path, volume, eq) {
     var h = alloc(sizeof(JlwPlayHandle));
     JlwPlayHandle_set_path(h, path);
     JlwPlayHandle_set_volume(h, volume);
@@ -181,9 +188,13 @@ fn jlw_audio_play_async(path, volume) {
     JlwPlayHandle_set_rc(h, JLW_ERR_NONE);
     JlwPlayHandle_set_paused(h, 0);
     JlwPlayHandle_set_seek_to(h, 0 - 1);   # no pending seek
+    JlwPlayHandle_set_eq(h, eq);           # dhvani geq settings ptr, or 0
     thread_create(&jlw_audio_play_worker, h);
     return h;
 }
+#inline
+#must_use
+fn jlw_audio_play_async(path, volume) { return jlw_audio_play_async_full(path, volume, 0); }
 
 # transport control from the main thread -> the decode thread (atomic single-word
 # flags; the loop re-reads them between chunks). code/arg use the JLW_PLAY_CMD_*
@@ -204,9 +215,25 @@ fn jlw_audio_play_stop(h) { JlwPlayHandle_set_stop(h, 1); return 0; }
 fn jlw_audio_play_position(h) { return JlwPlayHandle_position(h); }   # f64 seconds
 
 # engine-backend adapter: volume arrives as an integer percent (0-100) across the
-# fnptr seam. Registered via jlw_engine_set_audio_backend(&jlw_audio_play_async_pct,
+# fnptr seam. Registered via jlw_engine_set_audio_backend(&jlw_audio_play_async_eq,
 # &jlw_audio_play_is_done, &jlw_audio_play_stop, &jlw_audio_play_position).
 #must_use
-fn jlw_audio_play_async_pct(path, vol_pct) {
-    return jlw_audio_play_async(path, f64_div(f64_from(vol_pct), 100.0));
+fn jlw_audio_play_async_eq(path, vol_pct, eq) {
+    return jlw_audio_play_async_full(path, f64_div(f64_from(vol_pct), 100.0), eq);
+}
+
+# apply the graphic EQ (dhvani jlw_dsp) to decoded samples, returning the EQ'd
+# samples (a copy) -- or the input unchanged when the settings are absent, disabled,
+# or flat (no allocation in that common case). Stateful biquads process the whole
+# track once; a real render loop would reuse scratch (parity with dhvani's copy).
+#must_use
+fn jlw_audio_apply_eq(samples, channels, rate, eqset) {
+    if (eqset == 0) { return samples; }
+    if (dhvani_geq_settings_enabled(eqset) == 0) { return samples; }
+    if (dhvani_geq_settings_is_flat(eqset) == 1) { return samples; }
+    var eq = jlw_dsp_eq_new(rate);
+    JlwEqualizer_set_settings(eq, eqset);
+    jlw_dsp_eq_update_coefficients(eq);
+    var eqbuf = jlw_dsp_eq_process(eq, jlw_audio_buffer_new(samples, channels, rate));
+    return JlwAudioBuffer_samples(eqbuf);
 }

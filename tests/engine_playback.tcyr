@@ -15,7 +15,7 @@ include "src/playback/engine.cyr"
 include "src/playback/audio.cyr"
 
 alloc_init();
-jlw_engine_set_audio_backend(&jlw_audio_play_async_pct, &jlw_audio_play_is_done,
+jlw_engine_set_audio_backend(&jlw_audio_play_async_eq, &jlw_audio_play_is_done,
                              &jlw_audio_play_stop, &jlw_audio_play_position, &jlw_audio_play_ctl);
 
 # ---- play (no file) errors ----

@@ -170,7 +170,7 @@ fn main() {
     # wire the real audio backend into the engine (threaded shravan->vani playback);
     # the TUI's jlw_engine_play then plays in the background. Keeps engine.cyr free of
     # a compile-time dep on the audio stack (fnptr seam).
-    jlw_engine_set_audio_backend(&jlw_audio_play_async_pct, &jlw_audio_play_is_done,
+    jlw_engine_set_audio_backend(&jlw_audio_play_async_eq, &jlw_audio_play_is_done,
                                  &jlw_audio_play_stop, &jlw_audio_play_position, &jlw_audio_play_ctl);
     var n = argc();
     if (n < 2) {

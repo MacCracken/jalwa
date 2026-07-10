@@ -200,7 +200,7 @@ fn jlw_engine_play(e) {
     }
     if (JLW_ENG_PLAY_FP != 0) {
         var vol_pct = f64_to(f64_mul(JlwPlaybackEngine_volume(e), 100.0));
-        JlwPlaybackEngine_set_play_handle(e, fncall2(JLW_ENG_PLAY_FP, JlwPlaybackEngine_current_path(e), vol_pct));
+        JlwPlaybackEngine_set_play_handle(e, fncall3(JLW_ENG_PLAY_FP, JlwPlaybackEngine_current_path(e), vol_pct, JlwPlaybackEngine_eq_settings(e)));
     }
     JlwPlaybackEngine_set_state(e, JLW_STATE_PLAYING);
     return JLW_ERR_NONE;
