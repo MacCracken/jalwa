@@ -1,0 +1,175 @@
+# control.cyr — GUI action -> app/engine mutation (Wave F, Phase 3 control layer).
+#
+# jlw_gui_key_to_action (draw.cyr) turns a key into a JLW_GUI_ACT_*; this file APPLIES
+# that action to the GuiApp + engine — the actual "the GUI does something" behavior,
+# and the testable heart of the Wayland shell. View-aware, mirroring rust-old's
+# per-view egui input handlers (library Enter/a/arrows, queue d/arrows) and the TUI's
+# proven keyboard semantics (ui/tui.cyr) for the bindings the mouse-driven egui GUI
+# lacked (view-cycle, volume, next/prev, EQ nudge). PURE of Wayland — the present
+# shell (present.cyr, smoke-only) just feeds actions in and repaints. Returns a
+# run-status so the loop knows when to quit.
+
+var JLW_GUI_RUN_CONTINUE = 0;
+var JLW_GUI_RUN_QUIT     = 1;
+
+# selected_index -> library index for the active library view (search-aware), or -1 if
+# out of range. Mirrors jlw_gui_lib_item_at's index resolution.
+#must_use
+fn jlw_gui_app_selected_lib_index(app) {
+    var sel = JlwGuiApp_selected_index(app);
+    if (sel < 0) { return 0 - 1; }
+    if (strlen(JlwGuiApp_search_query(app)) > 0) {
+        var sr = JlwGuiApp_search_results(app);
+        if (sel >= vec_len(sr)) { return 0 - 1; }
+        return vec_get(sr, sel);               # search_results holds library indices
+    }
+    var n = vec_len(JlwLibrary_items(jlw_gui_app_lib(app)));
+    if (sel >= n) { return 0 - 1; }
+    return sel;
+}
+
+# play a library item by its Uuid; no-op if the id is None (0) or not found.
+fn jlw_gui_app_play_id(app, id) {
+    if (id == 0) { return 0; }
+    var item = jlw_library_find_by_id(jlw_gui_app_lib(app), id);
+    if (item == 0) { return 0; }
+    JlwGuiApp_set_current_playing_id(app, id);
+    jlw_engine_open(JlwGuiApp_engine(app), JlwMediaItem_path(item));
+    jlw_engine_play(JlwGuiApp_engine(app));
+    return 0;
+}
+
+# Enter: Library -> play the selected item (+ enqueue it if the queue was empty, so
+# the transport has something to advance through). Queue -> jump the position to the
+# selection and play it. Other views: no-op. Mirrors tui.cyr jlw_tui_handle_enter.
+fn jlw_gui_app_activate_selected(app) {
+    var view = JlwGuiApp_view(app);
+    if (view == JLW_GUI_VIEW_LIBRARY) {
+        var idx = jlw_gui_app_selected_lib_index(app);
+        if (idx == (0 - 1)) { return 0; }
+        var item = vec_get(JlwLibrary_items(jlw_gui_app_lib(app)), idx);
+        var id = JlwMediaItem_id(item);
+        JlwGuiApp_set_current_playing_id(app, id);
+        jlw_engine_open(JlwGuiApp_engine(app), JlwMediaItem_path(item));
+        jlw_engine_play(JlwGuiApp_engine(app));
+        if (jlw_queue_is_empty(JlwGuiApp_queue(app)) == 1) { jlw_queue_enqueue(JlwGuiApp_queue(app), id); }
+        return 0;
+    }
+    if (view == JLW_GUI_VIEW_QUEUE) {
+        var q = JlwGuiApp_queue(app);
+        var sel = JlwGuiApp_selected_index(app);
+        if (sel >= 0 && sel < jlw_queue_len(q)) {
+            JlwPlayQueue_set_position(q, sel);
+            jlw_gui_app_play_id(app, jlw_queue_current(q));
+        }
+        return 0;
+    }
+    return 0;
+}
+
+# 'a' in Library: enqueue the selected item (library.rs:148). No-op off the Library view.
+fn jlw_gui_app_enqueue_selected(app) {
+    if (JlwGuiApp_view(app) != JLW_GUI_VIEW_LIBRARY) { return 0; }
+    var idx = jlw_gui_app_selected_lib_index(app);
+    if (idx == (0 - 1)) { return 0; }
+    var item = vec_get(JlwLibrary_items(jlw_gui_app_lib(app)), idx);
+    jlw_queue_enqueue(JlwGuiApp_queue(app), JlwMediaItem_id(item));
+    return 0;
+}
+
+# 'd' in Queue: remove the selected row (queue.rs:109), then keep selected_index and
+# the play position consistent with the shortened list.
+fn jlw_gui_app_remove_selected_queue(app) {
+    if (JlwGuiApp_view(app) != JLW_GUI_VIEW_QUEUE) { return 0; }
+    var q = JlwGuiApp_queue(app);
+    var items = JlwPlayQueue_items(q);
+    var sel = JlwGuiApp_selected_index(app);
+    if (sel < 0 || sel >= vec_len(items)) { return 0; }
+    vec_remove(items, sel);
+    var n = vec_len(items);
+    # keep the play position pointing at the same track (shift left if it was after sel)
+    var pos = JlwPlayQueue_position(q);
+    if (pos > sel) { JlwPlayQueue_set_position(q, pos - 1); }
+    if (n == 0) { JlwPlayQueue_set_position(q, 0 - 1); }
+    # clamp the keyboard selection to the new last row
+    if (n == 0) { JlwGuiApp_set_selected_index(app, 0); }
+    else { if (sel >= n) { JlwGuiApp_set_selected_index(app, n - 1); } }
+    return 0;
+}
+
+# Tab: cycle to the next view; reset the selection. Cycles the full sidebar set
+# (Library..Devices); Video is a placeholder but stays in the cycle.
+fn jlw_gui_app_cycle_view(app) {
+    var v = JlwGuiApp_view(app) + 1;
+    if (v > JLW_GUI_VIEW_DEVICES) { v = JLW_GUI_VIEW_LIBRARY; }
+    JlwGuiApp_set_view(app, v);
+    JlwGuiApp_set_selected_index(app, 0);
+    return 0;
+}
+
+# Up/Down: move the selection by delta, clamped to [0, list_len-1] for the active view.
+# Mirrors rust-old's per-view `selected_index +/- 1` guards (library.rs:156-159 etc.).
+fn jlw_gui_app_nav(app, delta) {
+    var n = jlw_gui_app_list_len(app);
+    var sel = JlwGuiApp_selected_index(app) + delta;
+    if (sel < 0) { sel = 0; }
+    if (n <= 0) { sel = 0; }
+    if (n > 0 && sel > n - 1) { sel = n - 1; }
+    JlwGuiApp_set_selected_index(app, sel);
+    return 0;
+}
+
+# +/-: nudge master volume by 0.05 within [0,1] (set_volume clamps + reaches the live
+# decode thread). dir = +1 up, -1 down.
+fn jlw_gui_app_volume_nudge(app, dir) {
+    var e = JlwGuiApp_engine(app);
+    jlw_engine_set_volume(e, f64_add(jlw_engine_volume(e), f64_mul(f64_from(dir), 0.05)));
+    return 0;
+}
+
+# Left/Right in the Equalizer view: nudge the selected band's gain by 1 dB (the egui
+# EQ used mouse sliders; this is the keyboard equivalent, mirroring tui.cyr). No-op off
+# the Equalizer view.
+fn jlw_gui_app_eq_nudge(app, dir) {
+    if (JlwGuiApp_view(app) != JLW_GUI_VIEW_EQUALIZER) { return 0; }
+    var e = JlwGuiApp_engine(app);
+    var band = JlwGuiApp_selected_index(app);
+    if (band < 0) { band = 0; }
+    if (band > 9) { band = 9; }
+    var cur = dhvani_geq_settings_band(jlw_engine_eq_settings(e), band);
+    jlw_engine_set_eq_band(e, band, f64_add(cur, f64_from(dir)));
+    return 0;
+}
+
+# Apply one GUI action to the app + engine. Returns JLW_GUI_RUN_QUIT when the loop
+# should end, else JLW_GUI_RUN_CONTINUE. The present shell repaints after every call.
+fn jlw_gui_apply_action(app, action) {
+    var e = JlwGuiApp_engine(app);
+    if (action == JLW_GUI_ACT_QUIT)       { return JLW_GUI_RUN_QUIT; }
+    if (action == JLW_GUI_ACT_PLAY_PAUSE) { jlw_engine_toggle(e); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NAV_UP)     { jlw_gui_app_nav(app, 0 - 1); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NAV_DOWN)   { jlw_gui_app_nav(app, 1); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NAV_LEFT)   { jlw_gui_app_eq_nudge(app, 0 - 1); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NAV_RIGHT)  { jlw_gui_app_eq_nudge(app, 1); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_ENTER)      { jlw_gui_app_activate_selected(app); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NEXT_VIEW)  { jlw_gui_app_cycle_view(app); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_SEARCH)     { JlwGuiApp_set_view(app, JLW_GUI_VIEW_LIBRARY); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_VOL_UP)     { jlw_gui_app_volume_nudge(app, 1); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_VOL_DOWN)   { jlw_gui_app_volume_nudge(app, 0 - 1); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_MUTE)       { jlw_engine_toggle_mute(e); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NEXT_TRACK) { jlw_gui_app_play_id(app, jlw_queue_advance(JlwGuiApp_queue(app))); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_PREV_TRACK) { jlw_gui_app_play_id(app, jlw_queue_go_back(JlwGuiApp_queue(app))); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_EQ_TOGGLE)  { jlw_engine_toggle_eq(e); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NORMALIZE)  { jlw_engine_toggle_normalize(e); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_ENQUEUE)    { jlw_gui_app_enqueue_selected(app); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_REMOVE)     { jlw_gui_app_remove_selected_queue(app); return JLW_GUI_RUN_CONTINUE; }
+    return JLW_GUI_RUN_CONTINUE;                # NONE / unhandled
+}
+
+# One physical key event (raw evdev keycode + shift) -> its effect on the app: the
+# full running-GUI keystroke path evdev -> jalwa key -> action -> apply, composed. The
+# Wayland present loop (present.cyr) calls this for each drained key record. Returns
+# the run-status (JLW_GUI_RUN_QUIT closes the window).
+fn jlw_gui_handle_key_event(app, code, shift) {
+    return jlw_gui_apply_action(app, jlw_gui_key_to_action(jlw_gui_evdev_to_key(code, shift)));
+}

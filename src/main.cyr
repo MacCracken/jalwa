@@ -36,6 +36,9 @@ include "src/gui/views.cyr"
 include "src/gui/draw.cyr"
 include "src/gui/raster.cyr"
 include "src/gui/input.cyr"
+include "src/gui/control.cyr"
+include "src/gui/wayland.cyr"    # SMOKE-ONLY Wayland backend (forked from puka; unverifiable headless)
+include "src/gui/present.cyr"    # SMOKE-ONLY render loop over the jlw_win_* seam
 
 # ===== library open =====
 # mkdir -p: create each path component (0755); pre-existing dirs error harmlessly.
@@ -193,7 +196,7 @@ fn main() {
     if (streq(cmd, "devices") == 1) { println(jlw_cmd_devices()); return 0; }
     if (streq(cmd, "tui") == 1)     { jlw_tui_run(jlw_app_new(jlw_open_library(), jlw_engine_new(jlw_engine_config_default()))); return 0; }
     if (streq(cmd, "mcp") == 1)     { return jlw_mcp_serve(jlw_open_library(), jlw_engine_new(jlw_engine_config_default())); }
-    if (streq(cmd, "gui") == 1)     { println("jalwa GUI -- state/view logic ported; dhancha/Wayland render loop deferred"); return 0; }
+    if (streq(cmd, "gui") == 1)     { jlw_gui_run(jlw_gui_app_new(jlw_open_library(), jlw_engine_new(jlw_engine_config_default()))); return 0; }
     println(jlw_mcp_cat("unknown command: ", cmd));
     return 0;
 }

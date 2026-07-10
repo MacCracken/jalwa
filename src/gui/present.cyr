@@ -1,0 +1,116 @@
+# present.cyr — Wayland present shell + render loop (Wave F, Phase 3).
+#
+# ** SMOKE-ONLY / UNVERIFIED HEADLESS. ** This is the ONE jalwa layer that cannot be
+# unit-tested here: it needs a live Wayland compositor + display, absent in CI and this
+# dev box. The Wayland backend it drives (gui/wayland.cyr) is forked from puka's
+# sovereign client (itself unproven end-to-end) and can only be validated on real AGNOS.
+# Everything ELSE it wires — the draw builders (draw.cyr), rasterizer (raster.cyr), input
+# map (input.cyr), and control layer (control.cyr) — IS headless-tested; this file is the
+# thin, quarantined I/O glue. On a box with no compositor (like CI) jlw_win_open fails at
+# the socket connect and jlw_gui_run returns cleanly with a diagnostic — never a crash.
+#
+# Loop: open -> first paint -> poll(win_fd) -> dispatch { KEY: drain evdev records ->
+# jlw_gui_handle_key_event -> repaint | quit; RESIZE: adopt size + repaint; engine
+# TrackFinished: advance queue + repaint; CLOSE: exit }.
+
+var JLW_GUI_WIN_W = 900;    # initial window size (the compositor may reconfigure)
+var JLW_GUI_WIN_H = 600;
+
+# write a cstr to stderr (fd 2).
+fn jlw_gui__eputs(s) { syscall(1, 2, s, strlen(s)); return 0; }
+
+# poll(2) one fd for readability; pfd = caller's 8-byte pollfd scratch. timeout_ms < 0
+# blocks. Returns >0 ready, 0 timeout, <0 error.
+fn jlw_gui_poll_fd(pfd, fd, timeout_ms) {
+    store32(pfd, fd);
+    store16(pfd + 4, 1);          # events = POLLIN
+    store16(pfd + 6, 0);          # revents
+    return syscall(7, pfd, 1, timeout_ms);
+}
+
+# Rebuild the whole frame and rasterize it into the present buffer, then commit.
+fn jlw_gui_present_frame(app, win) {
+    var buf = jlw_win_present_begin(win);
+    if (buf == 0) { return 0; }
+    var w = jlw_win_w;
+    var h = jlw_win_h;
+    jlw_gui_fb_clear(buf, w, h, jlw_gui_color_to_xrgb(JLW_GUI_BG_DARK));
+    var cmds = vec_new();
+    jlw_gui_build_frame(app, w, h, cmds);
+    jlw_gui_raster(cmds, buf, w, h);
+    jlw_win_present_commit(win, 0, 0, w, h);
+    return 0;
+}
+
+# Drain every queued key record and apply it. rec: [0]=evdev keycode, [8]=value
+# (1=press, 2=autorepeat, 0=release), [16]=mods (bit0 = Shift). Returns
+# JLW_GUI_RUN_QUIT if any keystroke closes the app, else JLW_GUI_RUN_CONTINUE.
+fn jlw_gui_drain_keys(app, win) {
+    var rec[24];
+    var status = JLW_GUI_RUN_CONTINUE;
+    while (jlw_win_next_key(win, &rec) == 1) {
+        var value = load64(&rec + 8);
+        if (value == 1 || value == 2) {                 # press or autorepeat
+            var code = load64(&rec);
+            var shift = 0;
+            if ((load64(&rec + 16) & 1) != 0) { shift = 1; }
+            if (jlw_gui_handle_key_event(app, code, shift) == JLW_GUI_RUN_QUIT) {
+                status = JLW_GUI_RUN_QUIT;
+            }
+        }
+    }
+    return status;
+}
+
+# Poll the engine once; on TrackFinished, bump the finished track's play-count and
+# auto-advance the queue (mirrors tui.cyr's handler). Returns 1 if the app changed
+# (needs a repaint), else 0.
+fn jlw_gui_pump_engine(app) {
+    var engine = JlwGuiApp_engine(app);
+    var evs = jlw_engine_poll_events(engine);
+    var changed = 0;
+    var i = 0;
+    while (i < vec_len(evs)) {
+        if (JlwEngineEvent_code(vec_get(evs, i)) == JLW_EVT_TRACK_FINISHED) {
+            var cid = JlwGuiApp_current_playing_id(app);
+            if (cid != 0) { jlw_plib_update_play_count(JlwGuiApp_library(app), cid); }
+            jlw_gui_app_play_id(app, jlw_queue_advance(JlwGuiApp_queue(app)));
+            changed = 1;
+        }
+        i = i + 1;
+    }
+    return changed;
+}
+
+# Run the GUI event loop over a live Wayland window. Returns 0 on clean exit, or -1 if
+# no display/compositor is available (jlw_win_open failed at connect).
+fn jlw_gui_run(app) {
+    if (jlw_win_open("jalwa", JLW_GUI_WIN_W, JLW_GUI_WIN_H) == 0) {
+        jlw_gui__eputs("jalwa gui: no Wayland compositor available.\n");
+        jlw_gui__eputs("  Set WAYLAND_DISPLAY and run under a live display (aethersafha on AGNOS).\n");
+        return 0 - 1;
+    }
+    var win = 1;
+    var pfd[8];
+    jlw_gui_present_frame(app, win);                    # first paint
+    var running = 1;
+    while (running == 1) {
+        if (jlw_gui_poll_fd(&pfd, jlw_win_fd(win), 0 - 1) < 0) { running = 0; }
+        else {
+            var ev = jlw_win_poll_events(win);
+            if ((ev & JLW_WIN_EV_CLOSE) != 0) { running = 0; }
+            else {
+                var dirty = 0;
+                if ((ev & JLW_WIN_EV_RESIZE) != 0) { jlw_win_resize_apply(win); dirty = 1; }
+                if ((ev & JLW_WIN_EV_KEY) != 0) {
+                    if (jlw_gui_drain_keys(app, win) == JLW_GUI_RUN_QUIT) { running = 0; }
+                    else { dirty = 1; }
+                }
+                if (jlw_gui_pump_engine(app) == 1) { dirty = 1; }
+                if (running == 1 && dirty == 1) { jlw_gui_present_frame(app, win); }
+            }
+        }
+    }
+    jlw_win_close(win);
+    return 0;
+}

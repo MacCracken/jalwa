@@ -1,0 +1,189 @@
+# gui_control.tcyr -- tests for the GUI control layer (src/gui/control.cyr).
+# jlw_gui_apply_action is the testable heart of the Wayland shell: an action -> a
+# concrete app/engine mutation. This suite drives every action and asserts the
+# resulting GuiApp/engine state (view, selection, queue, volume, EQ, mute, normalize,
+# playing id, run-status) headless, over the engine's no-op audio backend. Fake media
+# paths make jlw_engine_open a safe no-op; the control layer still tracks current_playing_id
+# / queue / selection, which is what's under test.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/gui/theme.cyr"
+include "src/gui/app.cyr"
+include "src/gui/views.cyr"
+include "src/gui/draw.cyr"
+include "src/gui/input.cyr"
+include "src/gui/control.cyr"
+
+fn rm(path) { syscall(87, path); return 0; }
+fn fresh_plib() { rm("/tmp/jalwa_gui_control.db"); return jlw_plib_open("/tmp/jalwa_gui_control.db"); }
+fn eng() { return jlw_engine_new(jlw_engine_config_default()); }
+fn cat3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var d = alloc(la + lb + lc + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); memcpy(d + la + lb, c, lc); store8(d + la + lb + lc, 0);
+    return d;
+}
+fn mk(app, title, artist) {
+    var it = jlw_media_item_new(cat3("/m/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    jlw_library_add_item(jlw_gui_app_lib(app), it);
+    return it;
+}
+fn libid(app, i) { return JlwMediaItem_id(vec_get(JlwLibrary_items(jlw_gui_app_lib(app)), i)); }
+
+# ---- selection nav (per-view clamp) ----
+test_group("nav");
+var a = jlw_gui_app_new(fresh_plib(), eng());
+mk(a, "T0", "A"); mk(a, "T1", "A"); mk(a, "T2", "A");
+JlwGuiApp_set_view(a, JLW_GUI_VIEW_LIBRARY);
+JlwGuiApp_set_selected_index(a, 0);
+jlw_gui_apply_action(a, JLW_GUI_ACT_NAV_DOWN);
+assert_eq(JlwGuiApp_selected_index(a), 1, "down -> 1");
+jlw_gui_apply_action(a, JLW_GUI_ACT_NAV_DOWN);
+jlw_gui_apply_action(a, JLW_GUI_ACT_NAV_DOWN);
+assert_eq(JlwGuiApp_selected_index(a), 2, "down clamps at last row");
+jlw_gui_apply_action(a, JLW_GUI_ACT_NAV_UP);
+assert_eq(JlwGuiApp_selected_index(a), 1, "up -> 1");
+JlwGuiApp_set_selected_index(a, 0);
+jlw_gui_apply_action(a, JLW_GUI_ACT_NAV_UP);
+assert_eq(JlwGuiApp_selected_index(a), 0, "up clamps at 0");
+
+# ---- view cycle (Tab) resets selection + wraps ----
+test_group("cycle_view");
+JlwGuiApp_set_view(a, JLW_GUI_VIEW_LIBRARY);
+JlwGuiApp_set_selected_index(a, 2);
+jlw_gui_apply_action(a, JLW_GUI_ACT_NEXT_VIEW);
+assert_eq(JlwGuiApp_view(a), JLW_GUI_VIEW_NOW_PLAYING, "tab -> now playing");
+assert_eq(JlwGuiApp_selected_index(a), 0, "tab resets selection");
+JlwGuiApp_set_view(a, JLW_GUI_VIEW_DEVICES);
+jlw_gui_apply_action(a, JLW_GUI_ACT_NEXT_VIEW);
+assert_eq(JlwGuiApp_view(a), JLW_GUI_VIEW_LIBRARY, "tab wraps Devices -> Library");
+
+# ---- enqueue ('a') + activate/Enter ----
+test_group("enqueue_activate");
+JlwGuiApp_set_view(a, JLW_GUI_VIEW_LIBRARY);
+JlwGuiApp_set_selected_index(a, 1);
+jlw_gui_apply_action(a, JLW_GUI_ACT_ENQUEUE);
+assert_eq(jlw_queue_len(JlwGuiApp_queue(a)), 1, "enqueue -> queue len 1");
+assert_eq(jlw_uuid_eq(vec_get(JlwPlayQueue_items(JlwGuiApp_queue(a)), 0), libid(a, 1)), 1, "enqueued the selected item");
+JlwGuiApp_set_view(a, JLW_GUI_VIEW_QUEUE);
+jlw_gui_apply_action(a, JLW_GUI_ACT_ENQUEUE);
+assert_eq(jlw_queue_len(JlwGuiApp_queue(a)), 1, "enqueue off-Library is a no-op");
+JlwGuiApp_set_view(a, JLW_GUI_VIEW_LIBRARY);
+JlwGuiApp_set_selected_index(a, 2);
+jlw_gui_apply_action(a, JLW_GUI_ACT_ENTER);
+assert_eq(jlw_uuid_eq(JlwGuiApp_current_playing_id(a), libid(a, 2)), 1, "Enter sets current_playing_id to selection");
+
+# ---- remove ('d') from queue ----
+test_group("remove_queue");
+var b = jlw_gui_app_new(fresh_plib(), eng());
+mk(b, "Q0", "A"); mk(b, "Q1", "A");
+var q = JlwGuiApp_queue(b);
+jlw_queue_enqueue(q, libid(b, 0));
+jlw_queue_enqueue(q, libid(b, 1));
+JlwGuiApp_set_view(b, JLW_GUI_VIEW_QUEUE);
+JlwGuiApp_set_selected_index(b, 0);
+jlw_gui_apply_action(b, JLW_GUI_ACT_REMOVE);
+assert_eq(jlw_queue_len(q), 1, "remove -> queue len 1");
+assert_eq(jlw_uuid_eq(vec_get(JlwPlayQueue_items(q), 0), libid(b, 1)), 1, "remaining row is Q1");
+JlwGuiApp_set_view(b, JLW_GUI_VIEW_LIBRARY);
+jlw_gui_apply_action(b, JLW_GUI_ACT_REMOVE);
+assert_eq(jlw_queue_len(q), 1, "remove off-Queue is a no-op");
+
+# ---- volume nudge + clamp + mute ----
+test_group("volume_mute");
+var c = jlw_gui_app_new(fresh_plib(), eng());
+jlw_engine_set_volume(JlwGuiApp_engine(c), 0.5);
+jlw_gui_apply_action(c, JLW_GUI_ACT_VOL_UP);
+assert_eq(f64_gt(jlw_engine_volume(JlwGuiApp_engine(c)), 0.5), 1, "vol up increases");
+jlw_gui_apply_action(c, JLW_GUI_ACT_VOL_DOWN);
+jlw_gui_apply_action(c, JLW_GUI_ACT_VOL_DOWN);
+assert_eq(f64_lt(jlw_engine_volume(JlwGuiApp_engine(c)), 0.5), 1, "vol down decreases");
+jlw_engine_set_volume(JlwGuiApp_engine(c), 1.0);
+jlw_gui_apply_action(c, JLW_GUI_ACT_VOL_UP);
+assert_eq(f64_gt(jlw_engine_volume(JlwGuiApp_engine(c)), 1.0), 0, "vol clamps at 1.0");
+var m0 = jlw_engine_muted(JlwGuiApp_engine(c));
+jlw_gui_apply_action(c, JLW_GUI_ACT_MUTE);
+assert_eq(jlw_engine_muted(JlwGuiApp_engine(c)), 1 - m0, "mute toggles");
+
+# ---- eq toggle / normalize / band nudge (Left/Right, EQ view only) ----
+test_group("eq_normalize");
+var d = jlw_gui_app_new(fresh_plib(), eng());
+var de = JlwGuiApp_engine(d);
+var e0 = dhvani_geq_settings_enabled(jlw_engine_eq_settings(de));
+jlw_gui_apply_action(d, JLW_GUI_ACT_EQ_TOGGLE);
+assert_eq(dhvani_geq_settings_enabled(jlw_engine_eq_settings(de)), 1 - e0, "eq toggles");
+var n0 = jlw_engine_normalize_enabled(de);
+jlw_gui_apply_action(d, JLW_GUI_ACT_NORMALIZE);
+assert_eq(jlw_engine_normalize_enabled(de), 1 - n0, "normalize toggles");
+JlwGuiApp_set_view(d, JLW_GUI_VIEW_EQUALIZER);
+JlwGuiApp_set_selected_index(d, 3);
+var g0 = dhvani_geq_settings_band(jlw_engine_eq_settings(de), 3);
+jlw_gui_apply_action(d, JLW_GUI_ACT_NAV_RIGHT);
+assert_eq(f64_gt(dhvani_geq_settings_band(jlw_engine_eq_settings(de), 3), g0), 1, "right nudges band 3 up");
+jlw_gui_apply_action(d, JLW_GUI_ACT_NAV_LEFT);
+jlw_gui_apply_action(d, JLW_GUI_ACT_NAV_LEFT);
+assert_eq(f64_lt(dhvani_geq_settings_band(jlw_engine_eq_settings(de), 3), g0), 1, "left nudges band 3 down");
+JlwGuiApp_set_view(d, JLW_GUI_VIEW_LIBRARY);
+var g1 = dhvani_geq_settings_band(jlw_engine_eq_settings(de), 3);
+jlw_gui_apply_action(d, JLW_GUI_ACT_NAV_LEFT);
+assert_eq(dhvani_geq_settings_band(jlw_engine_eq_settings(de), 3) == g1, 1, "left off-EQ leaves bands untouched");
+
+# ---- next / prev track via the queue ----
+test_group("next_prev");
+var f = jlw_gui_app_new(fresh_plib(), eng());
+mk(f, "N0", "A"); mk(f, "N1", "A");
+var fq = JlwGuiApp_queue(f);
+jlw_queue_enqueue(fq, libid(f, 0));       # position becomes 0
+jlw_queue_enqueue(fq, libid(f, 1));
+jlw_gui_apply_action(f, JLW_GUI_ACT_NEXT_TRACK);
+assert_eq(jlw_uuid_eq(JlwGuiApp_current_playing_id(f), libid(f, 1)), 1, "next -> advances to id1");
+jlw_gui_apply_action(f, JLW_GUI_ACT_PREV_TRACK);
+assert_eq(jlw_uuid_eq(JlwGuiApp_current_playing_id(f), libid(f, 0)), 1, "prev -> back to id0");
+jlw_gui_apply_action(f, JLW_GUI_ACT_PREV_TRACK);
+assert_eq(jlw_uuid_eq(JlwGuiApp_current_playing_id(f), libid(f, 0)), 1, "prev at start (no repeat) -> no-op");
+
+# ---- run status: quit / search / none ----
+test_group("run_status");
+var g = jlw_gui_app_new(fresh_plib(), eng());
+assert_eq(jlw_gui_apply_action(g, JLW_GUI_ACT_QUIT), JLW_GUI_RUN_QUIT, "quit -> RUN_QUIT");
+assert_eq(jlw_gui_apply_action(g, JLW_GUI_ACT_PLAY_PAUSE), JLW_GUI_RUN_CONTINUE, "play/pause -> CONTINUE");
+JlwGuiApp_set_view(g, JLW_GUI_VIEW_QUEUE);
+jlw_gui_apply_action(g, JLW_GUI_ACT_SEARCH);
+assert_eq(JlwGuiApp_view(g), JLW_GUI_VIEW_LIBRARY, "search -> switches to Library view");
+assert_eq(jlw_gui_apply_action(g, JLW_GUI_ACT_NONE), JLW_GUI_RUN_CONTINUE, "none -> CONTINUE");
+
+# ---- search-aware selection resolver ----
+test_group("selected_lib_index");
+var h = jlw_gui_app_new(fresh_plib(), eng());
+mk(h, "alpha", "A"); mk(h, "beta", "B"); mk(h, "gamma", "C");
+JlwGuiApp_set_view(h, JLW_GUI_VIEW_LIBRARY);
+JlwGuiApp_set_selected_index(h, 1);
+assert_eq(jlw_gui_app_selected_lib_index(h), 1, "no search -> selection is the library index");
+JlwGuiApp_set_search_query(h, "gam");
+jlw_gui_app_update_search(h);                       # results = [2] (gamma)
+JlwGuiApp_set_selected_index(h, 0);
+assert_eq(jlw_gui_app_selected_lib_index(h), 2, "search -> maps selection to underlying library index");
+
+# ---- full keystroke path: raw evdev key event -> app effect ----
+test_group("handle_key_event");
+var k = jlw_gui_app_new(fresh_plib(), eng());
+mk(k, "K0", "A"); mk(k, "K1", "A");
+JlwGuiApp_set_view(k, JLW_GUI_VIEW_LIBRARY);
+JlwGuiApp_set_selected_index(k, 0);
+assert_eq(jlw_gui_handle_key_event(k, 108, 0), JLW_GUI_RUN_CONTINUE, "evdev Down -> continue");
+assert_eq(JlwGuiApp_selected_index(k), 1, "evdev Down moved selection");
+jlw_gui_handle_key_event(k, 30, 0);                       # 'a' -> enqueue selected
+assert_eq(jlw_queue_len(JlwGuiApp_queue(k)), 1, "evdev 'a' enqueued");
+assert_eq(jlw_gui_handle_key_event(k, 16, 0), JLW_GUI_RUN_QUIT, "evdev 'q' -> RUN_QUIT");
+jlw_gui_handle_key_event(k, 15, 0);                       # Tab -> next view
+assert_eq(JlwGuiApp_view(k), JLW_GUI_VIEW_NOW_PLAYING, "evdev Tab cycled view");
+
+rm("/tmp/jalwa_gui_control.db");
+var rc = assert_summary();
+syscall(60, rc);

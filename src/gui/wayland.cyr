@@ -1,0 +1,640 @@
+# wayland.cyr — jalwa's sovereign Wayland client (forked from puka).
+#
+# A single-file, high-fidelity fork of puka's sovereign Wayland backend
+# (src/platform/wayland/{wire,client,shm}.cyr + src/platform/window.cyr),
+# concatenated in dependency order (wire -> client -> shm -> window) and
+# renamed into jalwa's flat namespace (jlw_ / Jlw / JLW_). No libwayland;
+# every message is the raw wire protocol over the AF_UNIX socket.
+#
+# ** UNVERIFIED HEADLESS. ** The protocol/syscall logic here needs a live
+# compositor to exercise (absent in CI / this dev box); it is a mechanical
+# rename of puka's code, preserved byte-for-byte. gui/present.cyr is the
+# thin I/O glue that drives it (the jlw_win_* seam below).
+#
+# Modules never `include` each other — the entry file / [lib].modules imposes
+# order; this file includes nothing.
+
+# ---- syscall wrappers (puka helpers, not part of the forked files) ----
+# x86-64 Linux/agnos syscall numbers: socket=41, connect=42, close=3.
+fn jlw_wl_sys_socket(dom, typ, proto) { return syscall(41, dom, typ, proto); }
+fn jlw_wl_sys_connect(fd, addr, len) { return syscall(42, fd, addr, len); }
+fn jlw_wl_sys_close(fd) { return syscall(3, fd); }
+
+# ================================================================
+# wire.cyr — Wayland wire-protocol codec (PURE: no syscalls; headless-testable).
+#
+# The Wayland wire format, implemented from scratch (sovereign — no libwayland).
+# A message is 32-bit-aligned, little-endian (host order on x86-64):
+#   word0 @+0 = target object id (u32)
+#   word1 @+4 = (size << 16) | (opcode & 0xFFFF)   # size = TOTAL bytes incl. header
+# then the arguments in signature order, each padded to 4 bytes:
+#   int/uint/object/new_id : 4 bytes
+#   string                 : u32 len(=strlen+1, incl NUL), bytes+NUL, pad to 4
+#   array                  : u32 byte-len, bytes, pad to 4
+#   fd                     : ZERO body bytes (rides out-of-band via SCM_RIGHTS)
+# ================================================================
+
+# ---- header ----
+fn jlw_wire_hdr_put(p, oid, opcode, size): i64 {
+    store32(p, oid);
+    store32(p + 4, (size << 16) | (opcode & 0xFFFF));
+    return 0;
+}
+fn jlw_wire_msg_id(p): i64   { return load32(p); }
+fn jlw_wire_msg_op(p): i64   { return load32(p + 4) & 0xFFFF; }
+fn jlw_wire_msg_size(p): i64 { return (load32(p + 4) >> 16) & 0xFFFF; }
+
+# ---- argument writers (return the next byte offset) ----
+fn jlw_wire_put_u32(p, off, v): i64 { store32(p + off, v); return off + 4; }
+
+fn jlw_wire_put_str(p, off, sptr, slen): i64 {   # slen = strlen (no NUL)
+    var L = slen + 1;
+    store32(p + off, L);
+    var o = off + 4;
+    var i = 0;
+    while (i < slen) { store8(p + o + i, load8(sptr + i)); i = i + 1; }
+    store8(p + o + slen, 0);                  # NUL
+    var padded = (L + 3) & (0 - 4);           # round up to 4 (~3)
+    return off + 4 + padded;
+}
+
+# ---- argument readers ----
+# A string arg at `off`: its byte length L (incl NUL) is the u32 at +off; the
+# content starts at +off+4. jlw_wire_str_next advances past it (4 + padded(L)).
+fn jlw_wire_str_len(p, off): i64  { return load32(p + off); }
+fn jlw_wire_str_ptr(p, off): i64  { return p + off + 4; }
+fn jlw_wire_str_next(off, L): i64 { return off + 4 + ((L + 3) & (0 - 4)); }
+
+# ================================================================
+# client.cyr — Wayland AF_UNIX connection + registry + xdg-shell window (sovereign).
+#
+# Connects to $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY, runs the wl_display handshake,
+# binds the globals a terminal needs (wl_compositor / wl_shm / xdg_wm_base /
+# wl_seat), and drives the xdg-shell window lifecycle (create surface, configure/
+# ack, commit). The buffer (shm) and input layers build on the object ids +
+# dispatch here. No libwayland; everything is the wire protocol over the socket.
+#
+# The wire parser is an UNTRUSTED-input boundary — every message is size/bounds-
+# checked before any field is read.
+# ================================================================
+
+enum JlwWlAbi {
+    JLW_WL_AF_UNIX        = 1;
+    JLW_WL_SOCK_STREAM    = 1;
+    JLW_WL_SYS_SENDMSG    = 46;
+    JLW_WL_DISPLAY_ID     = 1;       # wl_display always has object id 1 (implicit)
+    # ---- request opcodes ----
+    JLW_OP_DISPLAY_SYNC   = 0;   JLW_OP_DISPLAY_GETREG = 1;
+    JLW_OP_REGISTRY_BIND  = 0;
+    JLW_OP_COMPOSITOR_CREATE_SURFACE = 0;
+    JLW_OP_XDG_GET_SURFACE = 2;  JLW_OP_XDG_PONG = 3;
+    JLW_OP_XDGSURF_GET_TOPLEVEL = 1; JLW_OP_XDGSURF_ACK = 4;
+    JLW_OP_TOPLEVEL_SET_TITLE = 2;   JLW_OP_TOPLEVEL_SET_APPID = 3;
+    JLW_OP_SURFACE_ATTACH = 1;   JLW_OP_SURFACE_FRAME = 3;  JLW_OP_SURFACE_COMMIT = 6;  JLW_OP_SURFACE_DAMAGE_BUFFER = 9;
+    # ---- event opcodes ----
+    JLW_EV_DISPLAY_ERROR  = 0;   JLW_EV_DISPLAY_DELETE = 1;
+    JLW_EV_REGISTRY_GLOBAL = 0;
+    JLW_EV_CALLBACK_DONE  = 0;
+    JLW_EV_XDG_PING       = 0;
+    JLW_EV_XDGSURF_CONFIGURE = 0;
+    JLW_EV_TOPLEVEL_CONFIGURE = 0; JLW_EV_TOPLEVEL_CLOSE = 1;
+    JLW_EV_BUFFER_RELEASE = 0;
+    JLW_OP_SEAT_GET_KEYBOARD = 1;
+    JLW_EV_SEAT_CAPS = 0;            # wl_seat.capabilities; KEYBOARD bit = 2
+    JLW_EV_KBD_KEY = 3;             # wl_keyboard.key (serial,time,key,state)
+    JLW_EV_KBD_MODS = 4;           # wl_keyboard.modifiers (serial,depressed,...)
+}
+
+var jlw_wl_fd      = 0 - 1;
+var jlw_wl_rbuf[1024];          # recv accumulation (module-global: 8192 bytes)
+var jlw_wl_rlen    = 0;
+var jlw_wl_sbuf[64];            # send scratch (512 bytes)
+var jlw_wl_next_id = 2;
+var jlw_wl_verbose = 0;         # 1 = print globals (the probe); 0 = quiet
+
+# bound-global registry names + the bound object ids
+var jlw_wl_reg_id = 0;
+var jlw_wl_gn_comp = 0; var jlw_wl_gn_shm = 0; var jlw_wl_gn_xdg = 0; var jlw_wl_gn_seat = 0;
+var jlw_wl_gv_seat = 0;
+var jlw_wl_comp_oid = 0; var jlw_wl_shm_oid = 0; var jlw_wl_xdg_oid = 0; var jlw_wl_seat_oid = 0;
+var jlw_wl_surf_oid = 0; var jlw_wl_xsurf_oid = 0; var jlw_wl_top_oid = 0;
+var jlw_wl_buf_oid = 0; var jlw_wl_kbd_oid = 0; var jlw_wl_frame_oid = 0;
+
+# dispatch flags
+var jlw_wl_cur_sync = 0; var jlw_wl_sync_done = 0;
+var jlw_wl_configured = 0; var jlw_wl_cfg_w = 0; var jlw_wl_cfg_h = 0;
+var jlw_wl_closed = 0; var jlw_wl_buf_busy = 0; var jlw_wl_frame_done = 1; var jlw_wl_nglobals = 0;
+
+# keyboard: a ring of (evdev_keycode, value, mods) records + the live mod mask.
+var jlw_wl_mods = 0;
+var jlw_wl_kq[96];              # 32 records * 3 i64 (module-global: 768 bytes)
+var jlw_wl_kq_head = 0; var jlw_wl_kq_tail = 0;
+
+# xkb 'depressed' bitmask -> puka MOD_* mask (values fixed at 1/4/2/8 here to keep
+# client.cyr independent of input.cyr — the probe includes neither).
+fn jlw_wl__derive_mods(dep): i64 {
+    var m = 0;
+    if ((dep & 1) != 0)  { m = m | 1; }    # XKB Shift   -> MOD_SHIFT(1)
+    if ((dep & 4) != 0)  { m = m | 4; }    # XKB Control -> MOD_CTRL(4)
+    if ((dep & 8) != 0)  { m = m | 2; }    # XKB Mod1/Alt-> MOD_ALT(2)
+    if ((dep & 64) != 0) { m = m | 8; }    # XKB Mod4/Super -> MOD_META(8)
+    return m;
+}
+fn jlw_wl__push_key(code, val, mods): i64 {
+    var nt = (jlw_wl_kq_tail + 1) % 32;
+    if (nt == jlw_wl_kq_head) { return 0; }    # full: drop
+    var b = jlw_wl_kq_tail * 3;
+    store64(&jlw_wl_kq + b * 8, code);
+    store64(&jlw_wl_kq + (b + 1) * 8, val);
+    store64(&jlw_wl_kq + (b + 2) * 8, mods);
+    jlw_wl_kq_tail = nt;
+    return 0;
+}
+fn jlw_wl_pop_key(out24): i64 {                # writes code,val,mods; 1 if popped else 0
+    if (jlw_wl_kq_head == jlw_wl_kq_tail) { return 0; }
+    var b = jlw_wl_kq_head * 3;
+    store64(out24, load64(&jlw_wl_kq + b * 8));
+    store64(out24 + 8, load64(&jlw_wl_kq + (b + 1) * 8));
+    store64(out24 + 16, load64(&jlw_wl_kq + (b + 2) * 8));
+    jlw_wl_kq_head = (jlw_wl_kq_head + 1) % 32;
+    return 1;
+}
+fn jlw_wl_key_pending(): i64 { if (jlw_wl_kq_head != jlw_wl_kq_tail) { return 1; } return 0; }
+
+fn jlw_wl_alloc_id(): i64 { var id = jlw_wl_next_id; jlw_wl_next_id = jlw_wl_next_id + 1; return id; }
+
+# ---- stdout helpers (probe visibility) ----
+fn jlw_wl__emit(s, n): i64 { syscall(1, 1, s, n); return 0; }
+fn jlw_wl__emit_str(s): i64 { return jlw_wl__emit(s, strlen(s)); }
+fn jlw_wl__emit_uint(n): i64 {
+    if (n == 0) { return jlw_wl__emit("0", 1); }
+    var d[24];
+    var k = 0;
+    while (n > 0) { store8(&d + k, 0x30 + n % 10); n = n / 10; k = k + 1; }
+    var o[24];
+    var j = 0;
+    while (j < k) { store8(&o + j, load8(&d + k - 1 - j)); j = j + 1; }
+    return jlw_wl__emit(&o, k);
+}
+
+fn jlw_wl__streq(ptr, len, lit): i64 {
+    if (strlen(lit) != len) { return 0; }
+    var i = 0;
+    while (i < len) { if (load8(ptr + i) != load8(lit + i)) { return 0; } i = i + 1; }
+    return 1;
+}
+
+# ---- connection ----
+fn jlw_wl__copy_cstr(dst, off, src): i64 {
+    var i = 0;
+    while (load8(src + i) != 0) { store8(dst + off + i, load8(src + i)); i = i + 1; }
+    return off + i;
+}
+fn jlw_wl__sock_path(buf): i64 {
+    var wd = getenv("WAYLAND_DISPLAY");
+    if (wd != 0) { if (load8(wd) == 0x2F) {
+        var n = jlw_wl__copy_cstr(buf, 0, wd); store8(buf + n, 0); return n;
+    } }
+    var rt = getenv("XDG_RUNTIME_DIR");
+    if (rt == 0) { return 0 - 1; }
+    var n = jlw_wl__copy_cstr(buf, 0, rt);
+    store8(buf + n, 0x2F); n = n + 1;
+    if (wd != 0) { n = jlw_wl__copy_cstr(buf, n, wd); }
+    else { n = jlw_wl__copy_cstr(buf, n, "wayland-0"); }
+    store8(buf + n, 0);
+    return n;
+}
+fn jlw_wl_connect(): i64 {
+    var path[128];
+    var plen = jlw_wl__sock_path(&path);
+    if (plen < 0) { return 0 - 1; }
+    var fd = jlw_wl_sys_socket(JLW_WL_AF_UNIX, JLW_WL_SOCK_STREAM, 0);
+    if (fd < 0) { return 0 - 1; }
+    var addr[120];
+    store8(&addr, JLW_WL_AF_UNIX); store8(&addr + 1, 0);
+    var i = 0;
+    while (i < plen) { store8(&addr + 2 + i, load8(&path + i)); i = i + 1; }
+    store8(&addr + 2 + plen, 0);
+    if (jlw_wl_sys_connect(fd, &addr, 2 + plen + 1) < 0) { jlw_wl_sys_close(fd); return 0 - 1; }
+    jlw_wl_fd = fd; jlw_wl_rlen = 0; jlw_wl_next_id = 2;
+    return fd;
+}
+
+# ---- request senders ----
+fn jlw_wl__send(size): i64 { return file_write(jlw_wl_fd, &jlw_wl_sbuf, size); }
+
+# send jlw_wl_sbuf[0..size) with one fd attached via SCM_RIGHTS ancillary data.
+fn jlw_wl__send_fd(size, fd): i64 {
+    var iov[16];
+    store64(&iov, &jlw_wl_sbuf);
+    store64(&iov + 8, size);
+    var cmsg[24];
+    store64(&cmsg, 20);                 # cmsg_len = CMSG_LEN(4)
+    store32(&cmsg + 8, 1);              # SOL_SOCKET
+    store32(&cmsg + 12, 1);             # SCM_RIGHTS
+    store32(&cmsg + 16, fd);
+    var mh[56];
+    store64(&mh, 0);
+    store32(&mh + 8, 0); store32(&mh + 12, 0);
+    store64(&mh + 16, &iov);
+    store64(&mh + 24, 1);
+    store64(&mh + 32, &cmsg);
+    store64(&mh + 40, 24);              # controllen = CMSG_SPACE(4)
+    store32(&mh + 48, 0);
+    return syscall(JLW_WL_SYS_SENDMSG, jlw_wl_fd, &mh, 0);
+}
+
+fn jlw_wl_get_registry(): i64 {
+    jlw_wl_reg_id = jlw_wl_alloc_id();
+    jlw_wire_hdr_put(&jlw_wl_sbuf, JLW_WL_DISPLAY_ID, JLW_OP_DISPLAY_GETREG, 12);
+    store32(&jlw_wl_sbuf + 8, jlw_wl_reg_id);
+    jlw_wl__send(12);
+    return jlw_wl_reg_id;
+}
+fn jlw_wl_sync(): i64 {
+    jlw_wl_cur_sync = jlw_wl_alloc_id();
+    jlw_wl_sync_done = 0;
+    jlw_wire_hdr_put(&jlw_wl_sbuf, JLW_WL_DISPLAY_ID, JLW_OP_DISPLAY_SYNC, 12);
+    store32(&jlw_wl_sbuf + 8, jlw_wl_cur_sync);
+    jlw_wl__send(12);
+    return jlw_wl_cur_sync;
+}
+fn jlw_wl_bind(name, iface, ver): i64 {
+    var oid = jlw_wl_alloc_id();
+    var off = jlw_wire_put_u32(&jlw_wl_sbuf, 8, name);
+    off = jlw_wire_put_str(&jlw_wl_sbuf, off, iface, strlen(iface));
+    off = jlw_wire_put_u32(&jlw_wl_sbuf, off, ver);
+    off = jlw_wire_put_u32(&jlw_wl_sbuf, off, oid);
+    jlw_wire_hdr_put(&jlw_wl_sbuf, jlw_wl_reg_id, JLW_OP_REGISTRY_BIND, off);
+    jlw_wl__send(off);
+    return oid;
+}
+# one-arg request (new_id or object) to `target`
+fn jlw_wl__req1(target, op, arg): i64 {
+    jlw_wire_hdr_put(&jlw_wl_sbuf, target, op, 12);
+    store32(&jlw_wl_sbuf + 8, arg);
+    return jlw_wl__send(12);
+}
+fn jlw_wl__req0(target, op): i64 { jlw_wire_hdr_put(&jlw_wl_sbuf, target, op, 8); return jlw_wl__send(8); }
+fn jlw_wl__set_string(target, op, s): i64 {
+    var off = jlw_wire_put_str(&jlw_wl_sbuf, 8, s, strlen(s));
+    jlw_wire_hdr_put(&jlw_wl_sbuf, target, op, off);
+    return jlw_wl__send(off);
+}
+fn jlw_wl__pong(serial): i64 { return jlw_wl__req1(jlw_wl_xdg_oid, JLW_OP_XDG_PONG, serial); }
+
+# wl_keyboard events. modifiers updates the live mask; key queues an
+# (evdev_keycode, value, mods) record the app drains via jlw_win_next_key.
+# wl_keyboard.key delivers the RAW evdev keycode (NOT evdev+8 — that offset is
+# only for feeding libxkbcommon, which a sovereign client doesn't use), so it
+# goes straight to evdev__keymap. keymap/enter/leave/repeat_info are ignored
+# (US-layout; the keymap fd is discarded by the plain read() in jlw_wl_pump).
+fn jlw_wl__kbd(o, op): i64 {
+    if (op == JLW_EV_KBD_MODS) { jlw_wl_mods = jlw_wl__derive_mods(load32(&jlw_wl_rbuf + o + 12)); return 0; }
+    if (op == JLW_EV_KBD_KEY) {
+        var key = load32(&jlw_wl_rbuf + o + 16);
+        var state = load32(&jlw_wl_rbuf + o + 20);
+        jlw_wl__push_key(key, state, jlw_wl_mods);
+    }
+    return 0;
+}
+
+# ---- event dispatch ----
+fn jlw_wl__handle(o): i64 {
+    var id = load32(&jlw_wl_rbuf + o);
+    var op = load32(&jlw_wl_rbuf + o + 4) & 0xFFFF;
+    if (id == JLW_WL_DISPLAY_ID) {
+        if (op == JLW_EV_DISPLAY_ERROR) { jlw_wl__emit_str("wl_display.error (fatal)\n"); jlw_wl_closed = 1; }
+        return 0;
+    }
+    if (id == jlw_wl_cur_sync) { if (op == JLW_EV_CALLBACK_DONE) { jlw_wl_sync_done = 1; } return 0; }
+    if (id == jlw_wl_frame_oid) { if (op == JLW_EV_CALLBACK_DONE) { jlw_wl_frame_done = 1; } return 0; }
+    if (id == jlw_wl_reg_id) {
+        if (op == JLW_EV_REGISTRY_GLOBAL) {
+            var nm = load32(&jlw_wl_rbuf + o + 8);
+            var L = jlw_wire_str_len(&jlw_wl_rbuf, o + 12);
+            var sp = jlw_wire_str_ptr(&jlw_wl_rbuf, o + 12);
+            var ver = load32(&jlw_wl_rbuf + jlw_wire_str_next(o + 12, L));
+            jlw_wl_nglobals = jlw_wl_nglobals + 1;
+            if (jlw_wl__streq(sp, L - 1, "wl_compositor")) { jlw_wl_gn_comp = nm; }
+            if (jlw_wl__streq(sp, L - 1, "wl_shm")) { jlw_wl_gn_shm = nm; }
+            if (jlw_wl__streq(sp, L - 1, "xdg_wm_base")) { jlw_wl_gn_xdg = nm; }
+            if (jlw_wl__streq(sp, L - 1, "wl_seat")) { jlw_wl_gn_seat = nm; jlw_wl_gv_seat = ver; }
+            if (jlw_wl_verbose == 1) {
+                jlw_wl__emit_str("  "); jlw_wl__emit(sp, L - 1);
+                jlw_wl__emit_str(" v"); jlw_wl__emit_uint(ver); jlw_wl__emit_str("\n");
+            }
+        }
+        return 0;
+    }
+    if (id == jlw_wl_xdg_oid) { if (op == JLW_EV_XDG_PING) { jlw_wl__pong(load32(&jlw_wl_rbuf + o + 8)); } return 0; }
+    if (id == jlw_wl_xsurf_oid) {
+        if (op == JLW_EV_XDGSURF_CONFIGURE) {
+            var serial = load32(&jlw_wl_rbuf + o + 8);
+            jlw_wl__req1(jlw_wl_xsurf_oid, JLW_OP_XDGSURF_ACK, serial);   # ack immediately
+            jlw_wl_configured = 1;
+        }
+        return 0;
+    }
+    if (id == jlw_wl_top_oid) {
+        if (op == JLW_EV_TOPLEVEL_CONFIGURE) {
+            var w = load32(&jlw_wl_rbuf + o + 8);
+            var h = load32(&jlw_wl_rbuf + o + 12);
+            if (w > 0) { jlw_wl_cfg_w = w; }
+            if (h > 0) { jlw_wl_cfg_h = h; }
+        }
+        if (op == JLW_EV_TOPLEVEL_CLOSE) { jlw_wl_closed = 1; }
+        return 0;
+    }
+    if (id == jlw_wl_buf_oid) { if (op == JLW_EV_BUFFER_RELEASE) { jlw_wl_buf_busy = 0; } return 0; }
+    if (id == jlw_wl_seat_oid) {
+        if (op == JLW_EV_SEAT_CAPS) {
+            if ((load32(&jlw_wl_rbuf + o + 8) & 2) != 0) {     # KEYBOARD capability
+                if (jlw_wl_kbd_oid == 0) {
+                    jlw_wl_kbd_oid = jlw_wl_alloc_id();
+                    jlw_wl__req1(jlw_wl_seat_oid, JLW_OP_SEAT_GET_KEYBOARD, jlw_wl_kbd_oid);
+                }
+            }
+        }
+        return 0;
+    }
+    if (id == jlw_wl_kbd_oid) { return jlw_wl__kbd(o, op); }
+    return 0;
+}
+
+# Parse all complete messages currently in jlw_wl_rbuf; compact the tail. Returns 0.
+fn jlw_wl__parse(): i64 {
+    var o = 0;
+    var go = 1;
+    while (go == 1) {
+        if (o + 8 > jlw_wl_rlen) { go = 0; }
+        else {
+            var size = (load32(&jlw_wl_rbuf + o + 4) >> 16) & 0xFFFF;
+            if (size < 8) { jlw_wl_closed = 1; return 0 - 1; }
+            if (o + size > jlw_wl_rlen) { go = 0; }
+            else { jlw_wl__handle(o); o = o + size; }
+        }
+    }
+    var rem = jlw_wl_rlen - o;
+    var k = 0;
+    while (k < rem) { store8(&jlw_wl_rbuf + k, load8(&jlw_wl_rbuf + o + k)); k = k + 1; }
+    jlw_wl_rlen = rem;
+    return 0;
+}
+
+# One blocking read + parse pass. Returns 0, or -1 on EOF/error.
+fn jlw_wl_pump(): i64 {
+    var n = file_read(jlw_wl_fd, &jlw_wl_rbuf + jlw_wl_rlen, 8192 - jlw_wl_rlen);
+    if (n <= 0) { jlw_wl_closed = 1; return 0 - 1; }
+    jlw_wl_rlen = jlw_wl_rlen + n;
+    return jlw_wl__parse();
+}
+
+# Pump until our latest sync callback fires (a roundtrip barrier).
+fn jlw_wl_dispatch(): i64 {
+    while (jlw_wl_sync_done == 0) { if (jlw_wl_pump() < 0) { return 0 - 1; } }
+    return 0;
+}
+
+fn jlw_wl_close(): i64 {
+    if (jlw_wl_fd >= 0) { jlw_wl_sys_close(jlw_wl_fd); jlw_wl_fd = 0 - 1; }
+    return 0;
+}
+
+# ================================================================
+# shm.cyr — Wayland wl_shm software-present buffer (cut #1 / permanent fallback).
+#
+# A memfd-backed, mmap'd pixel buffer the compositor reads directly. This is the
+# bring-up scaffold that proves the whole Wayland client with an un-wrong buffer,
+# and the permanent CPU fallback (no-GPU / non-AMD sessions). The renderer blits
+# its frame into jlw_shm_ptr as XRGB8888; mabda GPU present (cut #2/#3) swaps in
+# later behind the same jlw_win_present_begin/commit seam. Uses jlw_wl_alloc_id /
+# jlw_wl__send / jlw_wl__send_fd / jlw_wl_sbuf / jlw_wl_shm_oid / jlw_wl_buf_oid.
+# ================================================================
+
+enum JlwShmAbi {
+    JLW_SYS_MEMFD_CREATE = 319;
+    JLW_SYS_FTRUNCATE    = 77;
+    JLW_SYS_MMAP9        = 9;
+    JLW_SYS_MUNMAP11     = 11;
+    JLW_MFD_CLOEXEC      = 1;
+    JLW_SHM_PROT_RW      = 3;        # PROT_READ|PROT_WRITE
+    JLW_SHM_MAP_SHARED   = 1;
+    JLW_WL_SHM_XRGB8888  = 1;        # opaque -> compositor can skip occluders
+    JLW_OP_SHM_CREATE_POOL    = 0;
+    JLW_OP_POOL_CREATE_BUFFER = 0;
+    JLW_OP_POOL_DESTROY       = 1;   # wl_shm_pool.destroy
+    JLW_OP_BUFFER_DESTROY     = 0;   # wl_buffer.destroy
+}
+
+var jlw_shm_fd     = 0 - 1;
+var jlw_shm_ptr    = 0;
+var jlw_shm_size   = 0;
+var jlw_shm_cap    = 0;          # mapped/pool capacity (high-water; resize grows, never shrinks)
+var jlw_shm_pool   = 0;
+var jlw_shm_w = 0; var jlw_shm_h = 0; var jlw_shm_stride = 0;
+
+# Allocate a memfd of W*H*4, map it, and create the wl_shm pool + wl_buffer.
+# Returns the mapped XRGB8888 pixel pointer, or 0 on failure. Sets jlw_wl_buf_oid.
+fn jlw_shm_create(w, h): i64 {
+    var stride = w * 4;
+    var size = stride * h;
+    if (size <= 0) { return 0; }
+    var fd = syscall(JLW_SYS_MEMFD_CREATE, "jalwa-wl", JLW_MFD_CLOEXEC);
+    if (fd < 0) { return 0; }
+    if (syscall(JLW_SYS_FTRUNCATE, fd, size) < 0) { jlw_wl_sys_close(fd); return 0; }
+    var ptr = syscall(JLW_SYS_MMAP9, 0, size, JLW_SHM_PROT_RW, JLW_SHM_MAP_SHARED, fd, 0);
+    if (ptr == (0 - 1)) { jlw_wl_sys_close(fd); return 0; }
+    if (ptr < 0) { if (ptr > (0 - 4096)) { jlw_wl_sys_close(fd); return 0; } }
+    jlw_shm_fd = fd; jlw_shm_ptr = ptr; jlw_shm_size = size; jlw_shm_cap = size;
+    jlw_shm_w = w; jlw_shm_h = h; jlw_shm_stride = stride;
+
+    # wl_shm.create_pool(new_id, fd[SCM_RIGHTS], size)
+    jlw_shm_pool = jlw_wl_alloc_id();
+    store32(&jlw_wl_sbuf + 8, jlw_shm_pool);
+    store32(&jlw_wl_sbuf + 12, size);
+    jlw_wire_hdr_put(&jlw_wl_sbuf, jlw_wl_shm_oid, JLW_OP_SHM_CREATE_POOL, 16);
+    jlw_wl__send_fd(16, fd);
+
+    # wl_shm_pool.create_buffer(new_id, offset, w, h, stride, format)
+    jlw_wl_buf_oid = jlw_wl_alloc_id();
+    store32(&jlw_wl_sbuf + 8, jlw_wl_buf_oid);
+    store32(&jlw_wl_sbuf + 12, 0);
+    store32(&jlw_wl_sbuf + 16, w);
+    store32(&jlw_wl_sbuf + 20, h);
+    store32(&jlw_wl_sbuf + 24, stride);
+    store32(&jlw_wl_sbuf + 28, JLW_WL_SHM_XRGB8888);
+    jlw_wire_hdr_put(&jlw_wl_sbuf, jlw_shm_pool, JLW_OP_POOL_CREATE_BUFFER, 32);
+    jlw_wl__send(32);
+    return ptr;
+}
+
+# Refit the present buffer to a new window size. A wl_buffer's geometry is fixed
+# at creation, so a new buffer is always made; the backing memfd/pool are reused
+# when the new size fits the high-water capacity (the common drag case — no fd
+# churn) and grown (old mapping/fd/pool explicitly torn down — no leak) only when
+# the window exceeds every prior size. Returns the (possibly remapped) pixel
+# pointer, or 0 on failure. The caller repaints fully before presenting.
+fn jlw_shm_resize(w, h): i64 {
+    var stride = w * 4;
+    var size = stride * h;
+    if (size <= 0) { return 0; }
+    if (size > jlw_shm_cap) {
+        # grow: release the old buffer/pool/mapping/fd, then build fresh at `size`.
+        if (jlw_wl_buf_oid != 0) { jlw_wl__req0(jlw_wl_buf_oid, JLW_OP_BUFFER_DESTROY); }
+        if (jlw_shm_pool != 0)   { jlw_wl__req0(jlw_shm_pool, JLW_OP_POOL_DESTROY); }
+        if (jlw_shm_ptr != 0)    { syscall(JLW_SYS_MUNMAP11, jlw_shm_ptr, jlw_shm_size); jlw_shm_ptr = 0; }
+        if (jlw_shm_fd >= 0)     { jlw_wl_sys_close(jlw_shm_fd); jlw_shm_fd = 0 - 1; }
+        return jlw_shm_create(w, h);
+    }
+    # within capacity: keep the mapping + pool, rebuild only the wl_buffer.
+    jlw_wl__req0(jlw_wl_buf_oid, JLW_OP_BUFFER_DESTROY);
+    jlw_wl_buf_oid = jlw_wl_alloc_id();
+    store32(&jlw_wl_sbuf + 8, jlw_wl_buf_oid);
+    store32(&jlw_wl_sbuf + 12, 0);
+    store32(&jlw_wl_sbuf + 16, w);
+    store32(&jlw_wl_sbuf + 20, h);
+    store32(&jlw_wl_sbuf + 24, stride);
+    store32(&jlw_wl_sbuf + 28, JLW_WL_SHM_XRGB8888);
+    jlw_wire_hdr_put(&jlw_wl_sbuf, jlw_shm_pool, JLW_OP_POOL_CREATE_BUFFER, 32);
+    jlw_wl__send(32);
+    jlw_shm_w = w; jlw_shm_h = h; jlw_shm_stride = stride;
+    return jlw_shm_ptr;
+}
+
+# Fill the whole buffer with one XRGB colour (store32 -> bytes B,G,R,0 on LE).
+fn jlw_shm_fill(rgb): i64 {
+    var px = rgb & 0xFFFFFF;
+    var n = jlw_shm_w * jlw_shm_h;
+    var i = 0;
+    while (i < n) { store32(jlw_shm_ptr + i * 4, px); i = i + 1; }
+    return 0;
+}
+
+# ================================================================
+# window.cyr — the cross-platform window-backend seam (generic `jlw_win_*`).
+#
+# The engine (parser/grid/terminal/fb/input) NEVER references this file — the
+# renderer hands over a pixel buffer; the backend hands back input/resize/close
+# events. The names are platform-neutral (`jlw_win_*`, never `jlw_wl_*`) so this
+# contract extracts to the future `aethersafha` crate as a MOVE, not a rewrite
+# (ADR-0002). X11 / macOS / AGNOS backends later fill the identical contract; a
+# single backend today forwards straight to the Wayland implementation (a
+# fn-pointer slot table replaces the forwarding when a 2nd backend exists).
+# ================================================================
+
+enum JlwWinAbi {
+    JLW_WIN_EV_NONE   = 0;
+    JLW_WIN_EV_RESIZE = 1;
+    JLW_WIN_EV_KEY    = 2;
+    JLW_WIN_EV_CLOSE  = 4;
+    JLW_WIN_EV_FRAME  = 8;
+    JLW_WIN_CAP_SHM   = 0;     # jlw_win_present_begin returns a CPU pixel buffer
+    JLW_WIN_CAP_GPU   = 1;     # jlw_win_present_begin returns 0; caller records GPU draws
+}
+
+var jlw_win_w = 0;
+var jlw_win_h = 0;
+
+fn jlw_win_backend_select(): i64 { return 0; }   # one backend today (Wayland)
+
+# Connect, bind globals, create the xdg-shell window, wait the first configure,
+# allocate the present buffer. Returns an opaque handle (1) or 0 on failure.
+fn jlw_win_open(title, init_w, init_h): i64 {
+    if (jlw_wl_connect() < 0) { return 0; }
+    jlw_wl_get_registry();
+    jlw_wl_sync();
+    if (jlw_wl_dispatch() < 0) { return 0; }              # enumerate + record globals
+    if (jlw_wl_gn_comp == 0) { return 0; }
+    if (jlw_wl_gn_shm == 0)  { return 0; }
+    if (jlw_wl_gn_xdg == 0)  { return 0; }
+    jlw_wl_comp_oid = jlw_wl_bind(jlw_wl_gn_comp, "wl_compositor", 4);
+    jlw_wl_shm_oid  = jlw_wl_bind(jlw_wl_gn_shm, "wl_shm", 1);
+    jlw_wl_xdg_oid  = jlw_wl_bind(jlw_wl_gn_xdg, "xdg_wm_base", 1);
+    if (jlw_wl_gn_seat != 0) { jlw_wl_seat_oid = jlw_wl_bind(jlw_wl_gn_seat, "wl_seat", 5); }   # -> capabilities -> keyboard
+
+    jlw_wl_surf_oid = jlw_wl_alloc_id();
+    jlw_wl__req1(jlw_wl_comp_oid, JLW_OP_COMPOSITOR_CREATE_SURFACE, jlw_wl_surf_oid);
+    jlw_wl_xsurf_oid = jlw_wl_alloc_id();
+    store32(&jlw_wl_sbuf + 8, jlw_wl_xsurf_oid);
+    store32(&jlw_wl_sbuf + 12, jlw_wl_surf_oid);
+    jlw_wire_hdr_put(&jlw_wl_sbuf, jlw_wl_xdg_oid, JLW_OP_XDG_GET_SURFACE, 16);
+    jlw_wl__send(16);
+    jlw_wl_top_oid = jlw_wl_alloc_id();
+    jlw_wl__req1(jlw_wl_xsurf_oid, JLW_OP_XDGSURF_GET_TOPLEVEL, jlw_wl_top_oid);
+    jlw_wl__set_string(jlw_wl_top_oid, JLW_OP_TOPLEVEL_SET_TITLE, title);
+    jlw_wl__set_string(jlw_wl_top_oid, JLW_OP_TOPLEVEL_SET_APPID, "jalwa");
+    jlw_wl__req0(jlw_wl_surf_oid, JLW_OP_SURFACE_COMMIT);          # map (no buffer) -> ask configure
+
+    while (jlw_wl_configured == 0) {
+        if (jlw_wl_pump() < 0) { return 0; }
+        if (jlw_wl_closed == 1) { return 0; }
+    }
+    jlw_win_w = jlw_wl_cfg_w; jlw_win_h = jlw_wl_cfg_h;
+    if (jlw_win_w <= 0) { jlw_win_w = init_w; }
+    if (jlw_win_h <= 0) { jlw_win_h = init_h; }
+    if (jlw_shm_create(jlw_win_w, jlw_win_h) == 0) { return 0; }
+    return 1;
+}
+
+fn jlw_win_caps(win): i64 { return JLW_WIN_CAP_SHM; }
+fn jlw_win_fd(win): i64 { return jlw_wl_fd; }
+fn jlw_win_size_px(win, out16): i64 { store64(out16, jlw_win_w); store64(out16 + 8, jlw_win_h); return 0; }
+
+# CPU path: the writable XRGB8888 buffer the renderer blits into.
+fn jlw_win_present_begin(win): i64 { return jlw_shm_ptr; }
+
+# attach + damage + frame (throttle) + commit. x,y,w,h = damage rect (buffer px).
+fn jlw_win_present_commit(win, x, y, w, h): i64 {
+    store32(&jlw_wl_sbuf + 8, jlw_wl_buf_oid);
+    store32(&jlw_wl_sbuf + 12, 0);
+    store32(&jlw_wl_sbuf + 16, 0);
+    jlw_wire_hdr_put(&jlw_wl_sbuf, jlw_wl_surf_oid, JLW_OP_SURFACE_ATTACH, 20);
+    jlw_wl__send(20);
+    store32(&jlw_wl_sbuf + 8, x);
+    store32(&jlw_wl_sbuf + 12, y);
+    store32(&jlw_wl_sbuf + 16, w);
+    store32(&jlw_wl_sbuf + 20, h);
+    jlw_wire_hdr_put(&jlw_wl_sbuf, jlw_wl_surf_oid, JLW_OP_SURFACE_DAMAGE_BUFFER, 24);
+    jlw_wl__send(24);
+    jlw_wl_frame_oid = jlw_wl_alloc_id();
+    jlw_wl_frame_done = 0;
+    jlw_wl__req1(jlw_wl_surf_oid, JLW_OP_SURFACE_FRAME, jlw_wl_frame_oid);
+    jlw_wl__req0(jlw_wl_surf_oid, JLW_OP_SURFACE_COMMIT);
+    jlw_wl_buf_busy = 1;
+    return 0;
+}
+
+# Read + dispatch pending wayland events; return an OR-mask of JLW_WIN_EV_*.
+# Call only when jlw_win_fd is poll-readable (it does one read).
+fn jlw_win_poll_events(win): i64 {
+    if (jlw_wl_pump() < 0) { return JLW_WIN_EV_CLOSE; }
+    var m = JLW_WIN_EV_NONE;
+    if (jlw_wl_closed == 1) { m = m | JLW_WIN_EV_CLOSE; }
+    if (jlw_wl_frame_done == 1) { m = m | JLW_WIN_EV_FRAME; }
+    if (jlw_wl_key_pending() == 1) { m = m | JLW_WIN_EV_KEY; }
+    # The compositor configured a new size (the serial was already acked in the
+    # dispatch). Surface it once; the caller adopts it via jlw_win_resize_apply.
+    if (jlw_wl_cfg_w > 0) { if (jlw_wl_cfg_h > 0) {
+        if (jlw_wl_cfg_w != jlw_win_w) { m = m | JLW_WIN_EV_RESIZE; }
+        if (jlw_wl_cfg_h != jlw_win_h) { m = m | JLW_WIN_EV_RESIZE; }
+    } }
+    return m;
+}
+
+# Adopt the latest configured size: update jlw_win_w/jlw_win_h and refit the present
+# buffer (shm grows only past its high-water; the wl_buffer is rebuilt at the new
+# dims). After this the caller reflows the grid + renderer and repaints fully.
+# Returns 0, or -1 if the buffer refit failed.
+fn jlw_win_resize_apply(win): i64 {
+    jlw_win_w = jlw_wl_cfg_w;
+    jlw_win_h = jlw_wl_cfg_h;
+    if (jlw_shm_resize(jlw_win_w, jlw_win_h) == 0) { return 0 - 1; }
+    return 0;
+}
+
+# Drain one key record: out24[+0]=evdev keycode, [+8]=value(1=press), [+16]=mods.
+# Returns 1 if a record was produced, 0 if the queue is empty.
+fn jlw_win_next_key(win, out24): i64 { return jlw_wl_pop_key(out24); }
+
+fn jlw_win_close(win): i64 { jlw_wl_close(); return 0; }
