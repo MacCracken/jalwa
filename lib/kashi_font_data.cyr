@@ -1,0 +1,763 @@
+# === kashi — freestanding console-font data core ===
+#
+# THIS FILE IS FREESTANDING. It uses NO stdlib, NO sakshi, NO heap, NO
+# syscalls — only the `store8` / `load8` pointer intrinsics and integer
+# arithmetic. A freestanding kernel (agnos: `[deps] stdlib = []`, vendored
+# klib/) can `include` this file directly and get bitmap glyph data without
+# linking the Cyrius stdlib. Do NOT add stdlib includes here — that breaks
+# the load-bearing consumption contract (see docs/adr/0001).
+#
+# The full kashi library face (PSF1/PSF2 import, runtime font loading) is a
+# SEPARATE, stdlib-using surface (src/lib.cyr) and never reaches this file.
+#
+# --- Fonts carried ---
+#
+# Font 0 — IBM VGA BIOS 8x16 ROM font (public domain, IBM 1981; the same
+#   byte table Linux's lib/fonts/font_8x16.c carries). 96 glyphs covering
+#   printable ASCII 0x20..0x7F. Each glyph is 16 rows top-to-bottom; bit 7
+#   = leftmost pixel of that row. Legible at 2K+ native HDMI (cell 8x16 is
+#   ~1.5% of screen height at 1080p). This is the table agnos's
+#   kernel/arch/x86_64/fb_console.cyr currently uses.
+#
+# Font 1 — hand-drawn 8x8 CGA-style bitmap (public domain, AGNOS original).
+#   96 glyphs, ASCII 0x20..0x7F, 8 rows per glyph. Smaller; the original
+#   agnos console font before the 8x16 replacement. Retained here so the
+#   8x8 source survives the kernel-side migration and stays available for
+#   low-resolution / dense-grid uses (BBS-style art, tiny status lines).
+#
+# --- Storage model ---
+#
+# Two module-scope BSS buffers, BYTE-addressed via store8/load8. NOTE the
+# Cyrius var-array unit rule: at MODULE scope `var X[N]` allocates N*u64
+# (8N bytes), so `var kashi_font16[3584]` reserves 28 KiB of BSS but we use
+# only the first 3584 BYTES (one byte per glyph row). `var kashi_font8[1792]`
+# reserves 14 KiB and uses the first 1792 bytes. See architecture note 001
+# for the rationale of using bytes as the var-array N. As of 0.4.0 the
+# range covers all of CP437 (224 glyphs); agnos's `fb_font` will widen to
+# match when it integrates kashi.
+#
+# Glyph rows are packed top-to-bottom by `kashi_font_init()` from u64 literals
+# that read in scan order: for the 8x16 font, fset16(ch, hi, lo) where
+# hi = rows 0-7 (top), lo = rows 8-15; for the 8x8 font, fset8(ch, val)
+# where val = rows 0-7. byte (literal >> 56) is the topmost row.
+#
+# --- Consumption contract (agnos kernel, integrated at agnos 1.38.0) ---
+#
+#   [deps.kashi]
+#   path    = "../kashi"
+#   modules = ["src/font_data.cyr"]
+#
+# Then, once at boot (before the first glyph render):
+#   kashi_font_init();
+# Per-glyph render:
+#   var p = kashi_glyph_ptr(KASHI_FONT_VGA_8X16, ch);   # base of 16 row bytes
+#   var bits = kashi_glyph_row(KASHI_FONT_VGA_8X16, ch, row);  # one row byte
+# Metadata:
+#   kashi_font_width(id) / kashi_font_height(id) / kashi_font_first(id) /
+#   kashi_font_count(id) / kashi_font_stride(id)
+
+# --- Font identifiers (enum-style constants; pass to every accessor) ---
+# Enum values are compile-time constants — they do NOT consume gvar slots,
+# unlike module-scope `var X = ...`. Named + semicolon-separated per the
+# Cyrius grammar.
+enum KashiFontId {
+    KASHI_FONT_VGA_8X16 = 0;   # IBM VGA BIOS 8x16
+    KASHI_FONT_CGA_8X8 = 1;    # hand-drawn 8x8 CGA-style
+    KASHI_FONT_VGA_9X16 = 2;   # VGA 9x16 (derived from font16 + VGA col-9 rule; ADR 0006)
+}
+
+# All three built-in fonts cover the full CP437 range (0x20..0xFF, 224
+# glyphs). VGA 8x16 carries the IBM VGA BIOS bytes (sourced from Linux's
+# public-domain font_8x16.c; ADR 0004). CGA 8x8 is dual-sourced:
+# hand-drawn AGNOS-original ASCII low half (0x20..0x7F) + Linux PD
+# font_8x8.c high half (ADR 0007). VGA 9x16 is derived from VGA 8x16 +
+# the VGA col-9 replication rule at init (ADR 0006); no separate byte
+# table on disk.
+enum KashiGlyphRange {
+    KASHI_GLYPH_FIRST = 0x20;  # first encoded codepoint (space)
+    KASHI_GLYPH_LAST = 0xFF;   # last encoded codepoint (last CP437 cell)
+    KASHI_GLYPH_COUNT = 224;   # 0xFF - 0x20 + 1
+}
+
+# Module-scope BSS. See the "Storage model" note above for the u64-unit
+# rule: these reserve 8x their byte footprint but we address them per-byte.
+var kashi_font16[3584];    # 224 glyphs x 16 rows (VGA 8x16)        — bytes 0..3583
+var kashi_font8[1792];     # 224 glyphs x  8 rows (CGA 8x8)         — bytes 0..1791
+var kashi_font9_16[7168];  # 224 glyphs x 16 rows x 2 bytes (VGA 9x16, derived)
+var kashi_font_ready = 0;  # 1 after kashi_font_init() has run
+
+# Pack one 8x16 glyph's 16 row-bytes into kashi_font16[(ch-0x20)*16 .. +15].
+# hi = rows 0-7 (top first), lo = rows 8-15. Byte (hi>>56) is the top row.
+# Internal — callers use kashi_font_init(). ch is trusted (table-internal).
+fn kashi_fset16(ch, hi, lo) {
+    # Defensive bound (audit 2026-05-27, F1): a table-authoring typo with
+    # ch outside [FIRST, LAST] would compute a negative or overrun offset
+    # and silently corrupt BSS before/after the buffer. init runs once, so
+    # this guard is free. All current calls are in-range; this protects
+    # any future built-in font added past the current three.
+    if (ch < KASHI_GLYPH_FIRST) { return 0; }
+    if (ch > KASHI_GLYPH_LAST) { return 0; }
+    var g = &kashi_font16 + (ch - KASHI_GLYPH_FIRST) * 16;
+    store8(g + 0, (hi >> 56) & 0xFF);
+    store8(g + 1, (hi >> 48) & 0xFF);
+    store8(g + 2, (hi >> 40) & 0xFF);
+    store8(g + 3, (hi >> 32) & 0xFF);
+    store8(g + 4, (hi >> 24) & 0xFF);
+    store8(g + 5, (hi >> 16) & 0xFF);
+    store8(g + 6, (hi >> 8) & 0xFF);
+    store8(g + 7, hi & 0xFF);
+    store8(g + 8, (lo >> 56) & 0xFF);
+    store8(g + 9, (lo >> 48) & 0xFF);
+    store8(g + 10, (lo >> 40) & 0xFF);
+    store8(g + 11, (lo >> 32) & 0xFF);
+    store8(g + 12, (lo >> 24) & 0xFF);
+    store8(g + 13, (lo >> 16) & 0xFF);
+    store8(g + 14, (lo >> 8) & 0xFF);
+    store8(g + 15, lo & 0xFF);
+    return 0;
+}
+
+# Pack one 8x8 glyph's 8 row-bytes into kashi_font8[(ch-0x20)*8 .. +7].
+# val = rows 0-7, byte (val>>56) is the top row. Internal.
+fn kashi_fset8(ch, val) {
+    # Defensive bound — see kashi_fset16 (audit 2026-05-27, F1).
+    if (ch < KASHI_GLYPH_FIRST) { return 0; }
+    if (ch > KASHI_GLYPH_LAST) { return 0; }
+    var g = &kashi_font8 + (ch - KASHI_GLYPH_FIRST) * 8;
+    store8(g + 0, (val >> 56) & 0xFF);
+    store8(g + 1, (val >> 48) & 0xFF);
+    store8(g + 2, (val >> 40) & 0xFF);
+    store8(g + 3, (val >> 32) & 0xFF);
+    store8(g + 4, (val >> 24) & 0xFF);
+    store8(g + 5, (val >> 16) & 0xFF);
+    store8(g + 6, (val >> 8) & 0xFF);
+    store8(g + 7, val & 0xFF);
+    return 0;
+}
+
+# Populate both glyph buffers. Idempotent — safe to call more than once.
+# Call ONCE before the first glyph access (a freestanding consumer has no
+# constructor mechanism, so this is explicit). Returns 0.
+fn kashi_font_init() {
+    # --- Font 0: IBM VGA BIOS 8x16 ROM font (public domain). ---
+    # Byte-for-byte the table agnos's fb_console.cyr carries; hi = rows 0-7,
+    # lo = rows 8-15. Each literal reads top-to-bottom as
+    # 0xR0R1R2R3R4R5R6R7 0xR8R9RARBRCRDRERF.
+    kashi_fset16(0x20, 0x0000000000000000, 0x0000000000000000);  # space
+    kashi_fset16(0x21, 0x0000183C3C3C1818, 0x1800181800000000);  # !
+    kashi_fset16(0x22, 0x0066666624000000, 0x0000000000000000);  # "
+    kashi_fset16(0x23, 0x0000006C6CFE6C6C, 0x6CFE6C6C00000000);  # #
+    kashi_fset16(0x24, 0x18187CC6C2C07C06, 0x0686C67C18180000);  # $
+    kashi_fset16(0x25, 0x00000000C2C60C18, 0x3060C68600000000);  # %
+    kashi_fset16(0x26, 0x0000386C6C3876DC, 0xCCCCCC7600000000);  # &
+    kashi_fset16(0x27, 0x0030303060000000, 0x0000000000000000);  # '
+    kashi_fset16(0x28, 0x00000C1830303030, 0x3030180C00000000);  # (
+    kashi_fset16(0x29, 0x000030180C0C0C0C, 0x0C0C183000000000);  # )
+    kashi_fset16(0x2A, 0x0000000000663CFF, 0x3C66000000000000);  # *
+    kashi_fset16(0x2B, 0x000000000018187E, 0x1818000000000000);  # +
+    kashi_fset16(0x2C, 0x0000000000000000, 0x0018181830000000);  # ,
+    kashi_fset16(0x2D, 0x00000000000000FE, 0x0000000000000000);  # -
+    kashi_fset16(0x2E, 0x0000000000000000, 0x0000181800000000);  # .
+    kashi_fset16(0x2F, 0x0000000002060C18, 0x3060C08000000000);  # /
+    kashi_fset16(0x30, 0x0000386CC6C6D6D6, 0xC6C66C3800000000);  # 0
+    kashi_fset16(0x31, 0x0000183878181818, 0x1818187E00000000);  # 1
+    kashi_fset16(0x32, 0x00007CC6060C1830, 0x60C0C6FE00000000);  # 2
+    kashi_fset16(0x33, 0x00007CC606063C06, 0x0606C67C00000000);  # 3
+    kashi_fset16(0x34, 0x00000C1C3C6CCCFE, 0x0C0C0C1E00000000);  # 4
+    kashi_fset16(0x35, 0x0000FEC0C0C0FC06, 0x0606C67C00000000);  # 5
+    kashi_fset16(0x36, 0x00003860C0C0FCC6, 0xC6C6C67C00000000);  # 6
+    kashi_fset16(0x37, 0x0000FEC606060C18, 0x3030303000000000);  # 7
+    kashi_fset16(0x38, 0x00007CC6C6C67CC6, 0xC6C6C67C00000000);  # 8
+    kashi_fset16(0x39, 0x00007CC6C6C67E06, 0x06060C7800000000);  # 9
+    kashi_fset16(0x3A, 0x0000000018180000, 0x0018180000000000);  # :
+    kashi_fset16(0x3B, 0x0000000018180000, 0x0018183000000000);  # ;
+    kashi_fset16(0x3C, 0x000000060C183060, 0x30180C0600000000);  # <
+    kashi_fset16(0x3D, 0x00000000007E0000, 0x7E00000000000000);  # =
+    kashi_fset16(0x3E, 0x0000006030180C06, 0x0C18306000000000);  # >
+    kashi_fset16(0x3F, 0x00007CC6C60C1818, 0x1800181800000000);  # ?
+    kashi_fset16(0x40, 0x0000007CC6C6DEDE, 0xDEDCC07C00000000);  # @
+    kashi_fset16(0x41, 0x000010386CC6C6FE, 0xC6C6C6C600000000);  # A
+    kashi_fset16(0x42, 0x0000FC6666667C66, 0x666666FC00000000);  # B
+    kashi_fset16(0x43, 0x00003C66C2C0C0C0, 0xC0C2663C00000000);  # C
+    kashi_fset16(0x44, 0x0000F86C66666666, 0x66666CF800000000);  # D
+    kashi_fset16(0x45, 0x0000FE6662687868, 0x606266FE00000000);  # E
+    kashi_fset16(0x46, 0x0000FE6662687868, 0x606060F000000000);  # F
+    kashi_fset16(0x47, 0x00003C66C2C0C0DE, 0xC6C6663A00000000);  # G
+    kashi_fset16(0x48, 0x0000C6C6C6C6FEC6, 0xC6C6C6C600000000);  # H
+    kashi_fset16(0x49, 0x00003C1818181818, 0x1818183C00000000);  # I
+    kashi_fset16(0x4A, 0x00001E0C0C0C0C0C, 0xCCCCCC7800000000);  # J
+    kashi_fset16(0x4B, 0x0000E666666C7878, 0x6C6666E600000000);  # K
+    kashi_fset16(0x4C, 0x0000F06060606060, 0x606266FE00000000);  # L
+    kashi_fset16(0x4D, 0x0000C6EEFEFED6C6, 0xC6C6C6C600000000);  # M
+    kashi_fset16(0x4E, 0x0000C6E6F6FEDECE, 0xC6C6C6C600000000);  # N
+    kashi_fset16(0x4F, 0x00007CC6C6C6C6C6, 0xC6C6C67C00000000);  # O
+    kashi_fset16(0x50, 0x0000FC6666667C60, 0x606060F000000000);  # P
+    kashi_fset16(0x51, 0x00007CC6C6C6C6C6, 0xC6D6DE7C0C0E0000);  # Q
+    kashi_fset16(0x52, 0x0000FC6666667C6C, 0x666666E600000000);  # R
+    kashi_fset16(0x53, 0x00007CC6C660380C, 0x06C6C67C00000000);  # S
+    kashi_fset16(0x54, 0x00007E7E5A181818, 0x1818183C00000000);  # T
+    kashi_fset16(0x55, 0x0000C6C6C6C6C6C6, 0xC6C6C67C00000000);  # U
+    kashi_fset16(0x56, 0x0000C6C6C6C6C6C6, 0xC66C381000000000);  # V
+    kashi_fset16(0x57, 0x0000C6C6C6C6D6D6, 0xD6FEEE6C00000000);  # W
+    kashi_fset16(0x58, 0x0000C6C66C7C3838, 0x7C6CC6C600000000);  # X
+    kashi_fset16(0x59, 0x0000666666663C18, 0x1818183C00000000);  # Y
+    kashi_fset16(0x5A, 0x0000FEC6860C1830, 0x60C2C6FE00000000);  # Z
+    kashi_fset16(0x5B, 0x00003C3030303030, 0x3030303C00000000);  # [
+    kashi_fset16(0x5C, 0x00000080C0E07038, 0x1C0E060200000000);  # backslash
+    kashi_fset16(0x5D, 0x00003C0C0C0C0C0C, 0x0C0C0C3C00000000);  # ]
+    kashi_fset16(0x5E, 0x10386CC600000000, 0x0000000000000000);  # ^
+    kashi_fset16(0x5F, 0x0000000000000000, 0x0000000000FF0000);  # _
+    kashi_fset16(0x60, 0x0030180C00000000, 0x0000000000000000);  # `
+    kashi_fset16(0x61, 0x0000000000780C7C, 0xCCCCCC7600000000);  # a
+    kashi_fset16(0x62, 0x0000E06060786C66, 0x6666667C00000000);  # b
+    kashi_fset16(0x63, 0x00000000007CC6C0, 0xC0C0C67C00000000);  # c
+    kashi_fset16(0x64, 0x00001C0C0C3C6CCC, 0xCCCCCC7600000000);  # d
+    kashi_fset16(0x65, 0x00000000007CC6FE, 0xC0C0C67C00000000);  # e
+    kashi_fset16(0x66, 0x00001C3632307830, 0x3030307800000000);  # f
+    kashi_fset16(0x67, 0x000000000076CCCC, 0xCCCCCC7C0CCC7800);  # g
+    kashi_fset16(0x68, 0x0000E060606C7666, 0x666666E600000000);  # h
+    kashi_fset16(0x69, 0x0000181800381818, 0x1818183C00000000);  # i
+    kashi_fset16(0x6A, 0x00000606000E0606, 0x0606060666663C00);  # j
+    kashi_fset16(0x6B, 0x0000E06060666C78, 0x786C66E600000000);  # k
+    kashi_fset16(0x6C, 0x0000381818181818, 0x1818183C00000000);  # l
+    kashi_fset16(0x6D, 0x0000000000ECFED6, 0xD6D6D6C600000000);  # m
+    kashi_fset16(0x6E, 0x0000000000DC6666, 0x6666666600000000);  # n
+    kashi_fset16(0x6F, 0x00000000007CC6C6, 0xC6C6C67C00000000);  # o
+    kashi_fset16(0x70, 0x0000000000DC6666, 0x6666667C6060F000);  # p
+    kashi_fset16(0x71, 0x000000000076CCCC, 0xCCCCCC7C0C0C1E00);  # q
+    kashi_fset16(0x72, 0x0000000000DC7666, 0x606060F000000000);  # r
+    kashi_fset16(0x73, 0x00000000007CC660, 0x380CC67C00000000);  # s
+    kashi_fset16(0x74, 0x0000103030FC3030, 0x3030361C00000000);  # t
+    kashi_fset16(0x75, 0x0000000000CCCCCC, 0xCCCCCC7600000000);  # u
+    kashi_fset16(0x76, 0x0000000000C6C6C6, 0xC6C66C3800000000);  # v
+    kashi_fset16(0x77, 0x0000000000C6C6D6, 0xD6D6FE6C00000000);  # w
+    kashi_fset16(0x78, 0x0000000000C66C38, 0x38386CC600000000);  # x
+    kashi_fset16(0x79, 0x0000000000C6C6C6, 0xC6C6C67E060CF800);  # y
+    kashi_fset16(0x7A, 0x0000000000FECC18, 0x3060C6FE00000000);  # z
+    kashi_fset16(0x7B, 0x00000E1818187018, 0x1818180E00000000);  # {
+    kashi_fset16(0x7C, 0x0000181818181818, 0x1818181800000000);  # |
+    kashi_fset16(0x7D, 0x0000701818180E18, 0x1818187000000000);  # }
+    kashi_fset16(0x7E, 0x0076DC0000000000, 0x0000000000000000);  # ~
+    kashi_fset16(0x7F, 0x0000000010386CC6, 0xC6C6FE0000000000);  # DEL: CP437 triangle, not blank (matches IBM VGA)
+
+    # --- VGA 8x16 high half (CP437 0x80..0xFF) — added in 0.4.0 (ADR 0004) ---
+    # 128 glyphs sourced byte-for-byte from Linux's lib/fonts/font_8x16.c (the
+    # same PD IBM VGA BIOS table whose ASCII half lives above). Mechanically
+    # generated; fidelity spot-checked in tests/test.cyr.
+    kashi_fset16(0x80, 0x00003C66C2C0C0C0, 0xC0C2663C18700000);  # CP437 0x80
+    kashi_fset16(0x81, 0x0000CC0000CCCCCC, 0xCCCCCC7600000000);  # CP437 0x81
+    kashi_fset16(0x82, 0x000C1830007CC6FE, 0xC0C0C67C00000000);  # CP437 0x82
+    kashi_fset16(0x83, 0x0010386C00780C7C, 0xCCCCCC7600000000);  # CP437 0x83
+    kashi_fset16(0x84, 0x0000CC0000780C7C, 0xCCCCCC7600000000);  # CP437 0x84
+    kashi_fset16(0x85, 0x0060301800780C7C, 0xCCCCCC7600000000);  # CP437 0x85
+    kashi_fset16(0x86, 0x00386C3800780C7C, 0xCCCCCC7600000000);  # CP437 0x86
+    kashi_fset16(0x87, 0x00000000007CC6C0, 0xC0C0C67C18700000);  # CP437 0x87
+    kashi_fset16(0x88, 0x0010386C007CC6FE, 0xC0C0C67C00000000);  # CP437 0x88
+    kashi_fset16(0x89, 0x0000C600007CC6FE, 0xC0C0C67C00000000);  # CP437 0x89
+    kashi_fset16(0x8A, 0x00603018007CC6FE, 0xC0C0C67C00000000);  # CP437 0x8A
+    kashi_fset16(0x8B, 0x0000660000381818, 0x1818183C00000000);  # CP437 0x8B
+    kashi_fset16(0x8C, 0x00183C6600381818, 0x1818183C00000000);  # CP437 0x8C
+    kashi_fset16(0x8D, 0x0060301800381818, 0x1818183C00000000);  # CP437 0x8D
+    kashi_fset16(0x8E, 0x00C60010386CC6C6, 0xFEC6C6C600000000);  # CP437 0x8E
+    kashi_fset16(0x8F, 0x386C3810386CC6FE, 0xC6C6C6C600000000);  # CP437 0x8F
+    kashi_fset16(0x90, 0x0C1800FE66626878, 0x686266FE00000000);  # CP437 0x90
+    kashi_fset16(0x91, 0x0000000000EC3636, 0x7ED8D86E00000000);  # CP437 0x91
+    kashi_fset16(0x92, 0x00003E6CCCCCFECC, 0xCCCCCCCE00000000);  # CP437 0x92
+    kashi_fset16(0x93, 0x0010386C007CC6C6, 0xC6C6C67C00000000);  # CP437 0x93
+    kashi_fset16(0x94, 0x0000C600007CC6C6, 0xC6C6C67C00000000);  # CP437 0x94
+    kashi_fset16(0x95, 0x00603018007CC6C6, 0xC6C6C67C00000000);  # CP437 0x95
+    kashi_fset16(0x96, 0x003078CC00CCCCCC, 0xCCCCCC7600000000);  # CP437 0x96
+    kashi_fset16(0x97, 0x0060301800CCCCCC, 0xCCCCCC7600000000);  # CP437 0x97
+    kashi_fset16(0x98, 0x0000C60000C6C6C6, 0xC6C6C67E060C7800);  # CP437 0x98
+    kashi_fset16(0x99, 0x00C6007CC6C6C6C6, 0xC6C6C67C00000000);  # CP437 0x99
+    kashi_fset16(0x9A, 0x00C600C6C6C6C6C6, 0xC6C6C67C00000000);  # CP437 0x9A
+    kashi_fset16(0x9B, 0x0018187CC6C0C0C0, 0xC67C181800000000);  # CP437 0x9B
+    kashi_fset16(0x9C, 0x00386C6460F06060, 0x6060E6FC00000000);  # CP437 0x9C
+    kashi_fset16(0x9D, 0x000066663C187E18, 0x7E18181800000000);  # CP437 0x9D
+    kashi_fset16(0x9E, 0x00F8CCCCF8C4CCDE, 0xCCCCCCC600000000);  # CP437 0x9E
+    kashi_fset16(0x9F, 0x000E1B1818187E18, 0x1818D87000000000);  # CP437 0x9F
+    kashi_fset16(0xA0, 0x0018306000780C7C, 0xCCCCCC7600000000);  # CP437 0xA0
+    kashi_fset16(0xA1, 0x000C183000381818, 0x1818183C00000000);  # CP437 0xA1
+    kashi_fset16(0xA2, 0x00183060007CC6C6, 0xC6C6C67C00000000);  # CP437 0xA2
+    kashi_fset16(0xA3, 0x0018306000CCCCCC, 0xCCCCCC7600000000);  # CP437 0xA3
+    kashi_fset16(0xA4, 0x000076DC00DC6666, 0x6666666600000000);  # CP437 0xA4
+    kashi_fset16(0xA5, 0x76DC00C6E6F6FEDE, 0xCEC6C6C600000000);  # CP437 0xA5
+    kashi_fset16(0xA6, 0x00003C6C6C3E007E, 0x0000000000000000);  # CP437 0xA6
+    kashi_fset16(0xA7, 0x0000386C6C38007C, 0x0000000000000000);  # CP437 0xA7
+    kashi_fset16(0xA8, 0x0000303000303060, 0xC0C6C67C00000000);  # CP437 0xA8
+    kashi_fset16(0xA9, 0x000000000000FEC0, 0xC0C0C00000000000);  # CP437 0xA9
+    kashi_fset16(0xAA, 0x000000000000FE06, 0x0606060000000000);  # CP437 0xAA
+    kashi_fset16(0xAB, 0x0060E062666C1830, 0x60DC860C183E0000);  # CP437 0xAB
+    kashi_fset16(0xAC, 0x0060E062666C1830, 0x66CE9A3F06060000);  # CP437 0xAC
+    kashi_fset16(0xAD, 0x0000181800181818, 0x3C3C3C1800000000);  # CP437 0xAD
+    kashi_fset16(0xAE, 0x0000000000366CD8, 0x6C36000000000000);  # CP437 0xAE
+    kashi_fset16(0xAF, 0x0000000000D86C36, 0x6CD8000000000000);  # CP437 0xAF
+    kashi_fset16(0xB0, 0x1144114411441144, 0x1144114411441144);  # CP437 0xB0
+    kashi_fset16(0xB1, 0x55AA55AA55AA55AA, 0x55AA55AA55AA55AA);  # CP437 0xB1
+    kashi_fset16(0xB2, 0xDD77DD77DD77DD77, 0xDD77DD77DD77DD77);  # CP437 0xB2
+    kashi_fset16(0xB3, 0x1818181818181818, 0x1818181818181818);  # CP437 0xB3
+    kashi_fset16(0xB4, 0x18181818181818F8, 0x1818181818181818);  # CP437 0xB4
+    kashi_fset16(0xB5, 0x1818181818F818F8, 0x1818181818181818);  # CP437 0xB5
+    kashi_fset16(0xB6, 0x36363636363636F6, 0x3636363636363636);  # CP437 0xB6
+    kashi_fset16(0xB7, 0x00000000000000FE, 0x3636363636363636);  # CP437 0xB7
+    kashi_fset16(0xB8, 0x0000000000F818F8, 0x1818181818181818);  # CP437 0xB8
+    kashi_fset16(0xB9, 0x3636363636F606F6, 0x3636363636363636);  # CP437 0xB9
+    kashi_fset16(0xBA, 0x3636363636363636, 0x3636363636363636);  # CP437 0xBA
+    kashi_fset16(0xBB, 0x0000000000FE06F6, 0x3636363636363636);  # CP437 0xBB
+    kashi_fset16(0xBC, 0x3636363636F606FE, 0x0000000000000000);  # CP437 0xBC
+    kashi_fset16(0xBD, 0x36363636363636FE, 0x0000000000000000);  # CP437 0xBD
+    kashi_fset16(0xBE, 0x1818181818F818F8, 0x0000000000000000);  # CP437 0xBE
+    kashi_fset16(0xBF, 0x00000000000000F8, 0x1818181818181818);  # CP437 0xBF
+    kashi_fset16(0xC0, 0x181818181818181F, 0x0000000000000000);  # CP437 0xC0
+    kashi_fset16(0xC1, 0x18181818181818FF, 0x0000000000000000);  # CP437 0xC1
+    kashi_fset16(0xC2, 0x00000000000000FF, 0x1818181818181818);  # CP437 0xC2
+    kashi_fset16(0xC3, 0x181818181818181F, 0x1818181818181818);  # CP437 0xC3
+    kashi_fset16(0xC4, 0x00000000000000FF, 0x0000000000000000);  # CP437 0xC4
+    kashi_fset16(0xC5, 0x18181818181818FF, 0x1818181818181818);  # CP437 0xC5
+    kashi_fset16(0xC6, 0x18181818181F181F, 0x1818181818181818);  # CP437 0xC6
+    kashi_fset16(0xC7, 0x3636363636363637, 0x3636363636363636);  # CP437 0xC7
+    kashi_fset16(0xC8, 0x363636363637303F, 0x0000000000000000);  # CP437 0xC8
+    kashi_fset16(0xC9, 0x00000000003F3037, 0x3636363636363636);  # CP437 0xC9
+    kashi_fset16(0xCA, 0x3636363636F700FF, 0x0000000000000000);  # CP437 0xCA
+    kashi_fset16(0xCB, 0x0000000000FF00F7, 0x3636363636363636);  # CP437 0xCB
+    kashi_fset16(0xCC, 0x3636363636373037, 0x3636363636363636);  # CP437 0xCC
+    kashi_fset16(0xCD, 0x0000000000FF00FF, 0x0000000000000000);  # CP437 0xCD
+    kashi_fset16(0xCE, 0x3636363636F700F7, 0x3636363636363636);  # CP437 0xCE
+    kashi_fset16(0xCF, 0x1818181818FF00FF, 0x0000000000000000);  # CP437 0xCF
+    kashi_fset16(0xD0, 0x36363636363636FF, 0x0000000000000000);  # CP437 0xD0
+    kashi_fset16(0xD1, 0x0000000000FF00FF, 0x1818181818181818);  # CP437 0xD1
+    kashi_fset16(0xD2, 0x00000000000000FF, 0x3636363636363636);  # CP437 0xD2
+    kashi_fset16(0xD3, 0x363636363636363F, 0x0000000000000000);  # CP437 0xD3
+    kashi_fset16(0xD4, 0x18181818181F181F, 0x0000000000000000);  # CP437 0xD4
+    kashi_fset16(0xD5, 0x00000000001F181F, 0x1818181818181818);  # CP437 0xD5
+    kashi_fset16(0xD6, 0x000000000000003F, 0x3636363636363636);  # CP437 0xD6
+    kashi_fset16(0xD7, 0x36363636363636FF, 0x3636363636363636);  # CP437 0xD7
+    kashi_fset16(0xD8, 0x1818181818FF18FF, 0x1818181818181818);  # CP437 0xD8
+    kashi_fset16(0xD9, 0x18181818181818F8, 0x0000000000000000);  # CP437 0xD9
+    kashi_fset16(0xDA, 0x000000000000001F, 0x1818181818181818);  # CP437 0xDA
+    kashi_fset16(0xDB, 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);  # CP437 0xDB (full block)
+    kashi_fset16(0xDC, 0x00000000000000FF, 0xFFFFFFFFFFFFFFFF);  # CP437 0xDC
+    kashi_fset16(0xDD, 0xF0F0F0F0F0F0F0F0, 0xF0F0F0F0F0F0F0F0);  # CP437 0xDD
+    kashi_fset16(0xDE, 0x0F0F0F0F0F0F0F0F, 0x0F0F0F0F0F0F0F0F);  # CP437 0xDE
+    kashi_fset16(0xDF, 0xFFFFFFFFFFFFFF00, 0x0000000000000000);  # CP437 0xDF
+    kashi_fset16(0xE0, 0x000000000076DCD8, 0xD8D8DC7600000000);  # CP437 0xE0
+    kashi_fset16(0xE1, 0x000078CCCCCCD8CC, 0xC6C6C6CC00000000);  # CP437 0xE1
+    kashi_fset16(0xE2, 0x0000FEC6C6C0C0C0, 0xC0C0C0C000000000);  # CP437 0xE2
+    kashi_fset16(0xE3, 0x0000000000FE6C6C, 0x6C6C6C6C00000000);  # CP437 0xE3
+    kashi_fset16(0xE4, 0x0000FEC660301818, 0x3060C6FE00000000);  # CP437 0xE4
+    kashi_fset16(0xE5, 0x00000000007ED8D8, 0xD8D8D87000000000);  # CP437 0xE5
+    kashi_fset16(0xE6, 0x0000000000666666, 0x6666667C6060C000);  # CP437 0xE6
+    kashi_fset16(0xE7, 0x0000000076DC1818, 0x1818181800000000);  # CP437 0xE7
+    kashi_fset16(0xE8, 0x00007E183C666666, 0x663C187E00000000);  # CP437 0xE8
+    kashi_fset16(0xE9, 0x0000386CC6C6FEC6, 0xC6C66C3800000000);  # CP437 0xE9
+    kashi_fset16(0xEA, 0x0000386CC6C6C66C, 0x6C6C6CEE00000000);  # CP437 0xEA
+    kashi_fset16(0xEB, 0x00001E30180C3E66, 0x6666663C00000000);  # CP437 0xEB
+    kashi_fset16(0xEC, 0x00000000007EDBDB, 0xDB7E000000000000);  # CP437 0xEC
+    kashi_fset16(0xED, 0x00000003067EDBDB, 0xF37E60C000000000);  # CP437 0xED
+    kashi_fset16(0xEE, 0x00001C3060607C60, 0x6060301C00000000);  # CP437 0xEE
+    kashi_fset16(0xEF, 0x0000007CC6C6C6C6, 0xC6C6C6C600000000);  # CP437 0xEF
+    kashi_fset16(0xF0, 0x00000000FE0000FE, 0x0000FE0000000000);  # CP437 0xF0
+    kashi_fset16(0xF1, 0x0000000018187E18, 0x1800007E00000000);  # CP437 0xF1
+    kashi_fset16(0xF2, 0x00000030180C060C, 0x1830007E00000000);  # CP437 0xF2
+    kashi_fset16(0xF3, 0x0000000C18306030, 0x180C007E00000000);  # CP437 0xF3
+    kashi_fset16(0xF4, 0x00000E1B1B181818, 0x1818181818181818);  # CP437 0xF4
+    kashi_fset16(0xF5, 0x1818181818181818, 0x18D8D8D870000000);  # CP437 0xF5
+    kashi_fset16(0xF6, 0x000000000018007E, 0x0018000000000000);  # CP437 0xF6
+    kashi_fset16(0xF7, 0x000000000076DC00, 0x76DC000000000000);  # CP437 0xF7
+    kashi_fset16(0xF8, 0x00386C6C38000000, 0x0000000000000000);  # CP437 0xF8
+    kashi_fset16(0xF9, 0x0000000000000018, 0x1800000000000000);  # CP437 0xF9
+    kashi_fset16(0xFA, 0x0000000000000018, 0x0000000000000000);  # CP437 0xFA
+    kashi_fset16(0xFB, 0x000F0C0C0C0C0CEC, 0x6C6C3C1C00000000);  # CP437 0xFB
+    kashi_fset16(0xFC, 0x006C363636363600, 0x0000000000000000);  # CP437 0xFC
+    kashi_fset16(0xFD, 0x003C660C18327E00, 0x0000000000000000);  # CP437 0xFD
+    kashi_fset16(0xFE, 0x000000007E7E7E7E, 0x7E7E7E0000000000);  # CP437 0xFE
+    kashi_fset16(0xFF, 0x0000000000000000, 0x0000000000000000);  # CP437 0xFF (blank)
+
+    # --- Font 1: hand-drawn 8x8 CGA-style bitmap (public domain). ---
+    # val = rows 0-7, byte (val>>56) is the top row. Byte-for-byte the
+    # original agnos console table (pre-8x16 replacement).
+    kashi_fset8(0x20, 0x0000000000000000);  # space
+    kashi_fset8(0x21, 0x1818181818001800);  # !
+    kashi_fset8(0x22, 0x6C6C000000000000);  # "
+    kashi_fset8(0x23, 0x6CFE6C6CFE6C0000);  # #
+    kashi_fset8(0x24, 0x187EC07C06FC1800);  # $
+    kashi_fset8(0x25, 0xC6CC1830667CC600);  # %
+    kashi_fset8(0x26, 0x386C3876DCCC7600);  # &
+    kashi_fset8(0x27, 0x3030600000000000);  # '
+    kashi_fset8(0x28, 0x0C18303030180C00);  # (
+    kashi_fset8(0x29, 0x30180C0C0C183000);  # )
+    kashi_fset8(0x2A, 0x00663CFF3C660000);  # *
+    kashi_fset8(0x2B, 0x0018187E18180000);  # +
+    kashi_fset8(0x2C, 0x0000000000181830);  # ,
+    kashi_fset8(0x2D, 0x000000FE00000000);  # -
+    kashi_fset8(0x2E, 0x0000000000181800);  # .
+    kashi_fset8(0x2F, 0x03060C18306080C0);  # /
+    kashi_fset8(0x30, 0x7CC6CEDEE6E67C00);  # 0
+    kashi_fset8(0x31, 0x18381818181818FF);  # 1
+    kashi_fset8(0x32, 0x7CC60E3C70E0FE00);  # 2
+    kashi_fset8(0x33, 0x7CC6063C06C67C00);  # 3
+    kashi_fset8(0x34, 0x1C3C6CCCFE0C1E00);  # 4
+    kashi_fset8(0x35, 0xFEC0FC0606C67C00);  # 5
+    kashi_fset8(0x36, 0x3860C0FCC6C67C00);  # 6
+    kashi_fset8(0x37, 0xFEC60C1830303000);  # 7
+    kashi_fset8(0x38, 0x7CC6C67CC6C67C00);  # 8
+    kashi_fset8(0x39, 0x7CC6C67E060C7800);  # 9
+    kashi_fset8(0x3A, 0x0018180000181800);  # :
+    kashi_fset8(0x3B, 0x0018180000181830);  # ;
+    kashi_fset8(0x3C, 0x060C18306030180C);  # <
+    kashi_fset8(0x3D, 0x0000FE0000FE0000);  # =
+    kashi_fset8(0x3E, 0x6030180C18306000);  # >
+    kashi_fset8(0x3F, 0x7CC6060C18001800);  # ?
+    kashi_fset8(0x40, 0x7CC6DEDADE607C00);  # @
+    kashi_fset8(0x41, 0x386CC6C6FEC6C600);  # A
+    kashi_fset8(0x42, 0xFC66667C6666FC00);  # B
+    kashi_fset8(0x43, 0x3C66C0C0C0663C00);  # C
+    kashi_fset8(0x44, 0xF86C6666666CF800);  # D
+    kashi_fset8(0x45, 0xFE60687868607E00);  # E
+    kashi_fset8(0x46, 0xFE60687868606000);  # F
+    kashi_fset8(0x47, 0x3C66C0C0CE663E00);  # G
+    kashi_fset8(0x48, 0xC6C6C6FEC6C6C600);  # H
+    kashi_fset8(0x49, 0x3C18181818183C00);  # I
+    kashi_fset8(0x4A, 0x0E060606C6C67C00);  # J
+    kashi_fset8(0x4B, 0xC6CCD8F0D8CCC600);  # K
+    kashi_fset8(0x4C, 0x6060606060607E00);  # L
+    kashi_fset8(0x4D, 0xC6EEFEFED6C6C600);  # M
+    kashi_fset8(0x4E, 0xC6E6F6DECEC6C600);  # N
+    kashi_fset8(0x4F, 0x7CC6C6C6C6C67C00);  # O
+    kashi_fset8(0x50, 0xFC66667C60606000);  # P
+    kashi_fset8(0x51, 0x7CC6C6C6D6CE7B00);  # Q
+    kashi_fset8(0x52, 0xFC66667C6C66C700);  # R
+    kashi_fset8(0x53, 0x7CC660380CC67C00);  # S
+    kashi_fset8(0x54, 0x7E5A181818183C00);  # T
+    kashi_fset8(0x55, 0xC6C6C6C6C6C67C00);  # U
+    kashi_fset8(0x56, 0xC6C6C6C6C66C3800);  # V
+    kashi_fset8(0x57, 0xC6C6C6D6FEEEC600);  # W
+    kashi_fset8(0x58, 0xC6C66C386CC6C600);  # X
+    kashi_fset8(0x59, 0x6666663C18183C00);  # Y
+    kashi_fset8(0x5A, 0xFEC68C183266FE00);  # Z
+    kashi_fset8(0x5B, 0x3C30303030303C00);  # [
+    kashi_fset8(0x5C, 0xC06030180C060200);  # backslash
+    kashi_fset8(0x5D, 0x3C0C0C0C0C0C3C00);  # ]
+    kashi_fset8(0x5E, 0x10386CC600000000);  # ^
+    kashi_fset8(0x5F, 0x00000000000000FF);  # _
+    kashi_fset8(0x60, 0x3018000000000000);  # `
+    kashi_fset8(0x61, 0x0000780C7CCCCC76);  # a
+    kashi_fset8(0x62, 0xE0607C6666667C00);  # b
+    kashi_fset8(0x63, 0x00007CC6C0C67C00);  # c
+    kashi_fset8(0x64, 0x1C0C7CCCCCCC7600);  # d
+    kashi_fset8(0x65, 0x00007CC6FEC07C00);  # e
+    kashi_fset8(0x66, 0x386C60F060607000);  # f
+    kashi_fset8(0x67, 0x000076CCCC7C0CF8);  # g
+    kashi_fset8(0x68, 0xE0606C7666666600);  # h
+    kashi_fset8(0x69, 0x1800381818183C00);  # i
+    kashi_fset8(0x6A, 0x0600060606666638);  # j
+    kashi_fset8(0x6B, 0xE0606678786C6600);  # k
+    kashi_fset8(0x6C, 0x3818181818183C00);  # l
+    kashi_fset8(0x6D, 0x0000FEDBDBDBDB00);  # m
+    kashi_fset8(0x6E, 0x0000DC6666666600);  # n
+    kashi_fset8(0x6F, 0x00007CC6C6C67C00);  # o
+    kashi_fset8(0x70, 0x0000DC6666667C60);  # p
+    kashi_fset8(0x71, 0x000076CCCC7C0C1E);  # q
+    kashi_fset8(0x72, 0x0000DC7666606000);  # r
+    kashi_fset8(0x73, 0x00007EC07C06FC00);  # s
+    kashi_fset8(0x74, 0x3030FC3030361C00);  # t
+    kashi_fset8(0x75, 0x0000CCCCCCCC7600);  # u
+    kashi_fset8(0x76, 0x0000C6C6C66C3800);  # v
+    kashi_fset8(0x77, 0x0000C6D6D6FE6C00);  # w
+    kashi_fset8(0x78, 0x0000C66C386CC600);  # x
+    kashi_fset8(0x79, 0x0000C6C6C67E067C);  # y
+    kashi_fset8(0x7A, 0x0000FE8C18327E00);  # z
+    kashi_fset8(0x7B, 0x0E1818701818FE00);  # {
+    kashi_fset8(0x7C, 0x1818181818181800);  # |
+    kashi_fset8(0x7D, 0x70181C0E181870FE);  # }
+    kashi_fset8(0x7E, 0x76DC000000000000);  # ~
+    kashi_fset8(0x7F, 0x0000000000000000);  # DEL=blank
+
+    # --- CGA 8x8 high half (CP437 0x80..0xFF) — added in 0.5.1 (ADR 0007).
+    # 128 glyphs sourced byte-for-byte from Linux's lib/fonts/font_8x8.c
+    # (public-domain IBM CGA 8x8). The ASCII half above is the AGNOS hand-
+    # drawn original, so this font now mixes two PD sources: the box-
+    # drawing range (0xB0..0xDF) is geometric and style-neutral; the
+    # accented-letter glyphs (0x80..0xAF, 0xE0..0xFF) may not perfectly
+    # match the hand-drawn aesthetic, but having coverage beats a blank
+    # high-half. Mechanically generated; fidelity spot-checked in tests.
+    kashi_fset8(0x80, 0x7CC6C0C0C67C0C78);  # CP437 0x80
+    kashi_fset8(0x81, 0xCC00CCCCCCCC7600);  # CP437 0x81
+    kashi_fset8(0x82, 0x0C187CC6FEC07C00);  # CP437 0x82
+    kashi_fset8(0x83, 0x386C7C067EC67F00);  # CP437 0x83
+    kashi_fset8(0x84, 0xC6007CC6FEC07C00);  # CP437 0x84
+    kashi_fset8(0x85, 0x6030780C7CCC7600);  # CP437 0x85
+    kashi_fset8(0x86, 0x386C386C7CC67F00);  # CP437 0x86
+    kashi_fset8(0x87, 0x00007CC6C07CFB30);  # CP437 0x87
+    kashi_fset8(0x88, 0x10387CC6FEC07C00);  # CP437 0x88
+    kashi_fset8(0x89, 0x00C67CC6FEC67C00);  # CP437 0x89
+    kashi_fset8(0x8A, 0x60307CC6FEC67C00);  # CP437 0x8A
+    kashi_fset8(0x8B, 0x00CC003078306018);  # CP437 0x8B
+    kashi_fset8(0x8C, 0x7CC60030183C7C00);  # CP437 0x8C
+    kashi_fset8(0x8D, 0x60300030183C7C00);  # CP437 0x8D
+    kashi_fset8(0x8E, 0xC6386CC6FEC6C600);  # CP437 0x8E
+    kashi_fset8(0x8F, 0x386C386CFEC6C600);  # CP437 0x8F
+    kashi_fset8(0x90, 0x183060FE60607C00);  # CP437 0x90
+    kashi_fset8(0x91, 0x0000CC7E0C7ECC7F);  # CP437 0x91
+    kashi_fset8(0x92, 0x1E36667EC6C6C700);  # CP437 0x92
+    kashi_fset8(0x93, 0x386C00386CC67C00);  # CP437 0x93
+    kashi_fset8(0x94, 0x00C6003C66C67C00);  # CP437 0x94
+    kashi_fset8(0x95, 0x60300038606C3800);  # CP437 0x95
+    kashi_fset8(0x96, 0x78CC00CCCCCC7600);  # CP437 0x96
+    kashi_fset8(0x97, 0x6030CCCCCCCC7600);  # CP437 0x97
+    kashi_fset8(0x98, 0x00C600C6C67E067C);  # CP437 0x98
+    kashi_fset8(0x99, 0xC6386CC6C66C3800);  # CP437 0x99
+    kashi_fset8(0x9A, 0xC6C6C6C6C6C67C00);  # CP437 0x9A
+    kashi_fset8(0x9B, 0x18187E18187E1818);  # CP437 0x9B
+    kashi_fset8(0x9C, 0x3C66606060E66FC0);  # CP437 0x9C
+    kashi_fset8(0x9D, 0xC6386CC66C386C00);  # CP437 0x9D
+    kashi_fset8(0x9E, 0xC0C0F8CCCEFCC0E0);  # CP437 0x9E
+    kashi_fset8(0x9F, 0x1818181818181830);  # CP437 0x9F
+    kashi_fset8(0xA0, 0x183060007CC6FE00);  # CP437 0xA0
+    kashi_fset8(0xA1, 0x18306000380F1800);  # CP437 0xA1
+    kashi_fset8(0xA2, 0x0C18007CC6C67C00);  # CP437 0xA2
+    kashi_fset8(0xA3, 0x183600CCCCCC7600);  # CP437 0xA3
+    kashi_fset8(0xA4, 0x76DC00DC666666F0);  # CP437 0xA4
+    kashi_fset8(0xA5, 0x76DC00E6F6DECEC6);  # CP437 0xA5
+    kashi_fset8(0xA6, 0x3C6C6C3F00000000);  # CP437 0xA6
+    kashi_fset8(0xA7, 0x386C6C3800000000);  # CP437 0xA7
+    kashi_fset8(0xA8, 0x18003078306C3800);  # CP437 0xA8
+    kashi_fset8(0xA9, 0x0000007EC0C00000);  # CP437 0xA9
+    kashi_fset8(0xAA, 0x0000007E06060000);  # CP437 0xAA
+    kashi_fset8(0xAB, 0xC3C6CCDE3367CF03);  # CP437 0xAB
+    kashi_fset8(0xAC, 0xC3C6CCDB3760CF03);  # CP437 0xAC
+    kashi_fset8(0xAD, 0x1800181818181800);  # CP437 0xAD
+    kashi_fset8(0xAE, 0x00366CD86C360000);  # CP437 0xAE
+    kashi_fset8(0xAF, 0x00D86C366CD80000);  # CP437 0xAF
+    kashi_fset8(0xB0, 0x2288228822882288);  # CP437 0xB0
+    kashi_fset8(0xB1, 0x55AA55AA55AA55AA);  # CP437 0xB1
+    kashi_fset8(0xB2, 0x77DD77DD77DD77DD);  # CP437 0xB2
+    kashi_fset8(0xB3, 0x1818181818181818);  # CP437 0xB3
+    kashi_fset8(0xB4, 0x1818181818F81818);  # CP437 0xB4
+    kashi_fset8(0xB5, 0x1818F818F8181818);  # CP437 0xB5
+    kashi_fset8(0xB6, 0x6C6C6C6C6CEC6C6C);  # CP437 0xB6
+    kashi_fset8(0xB7, 0x000000FC6C6C6C6C);  # CP437 0xB7
+    kashi_fset8(0xB8, 0x0000F818F8181818);  # CP437 0xB8
+    kashi_fset8(0xB9, 0x6CEC0CEC6C6C6C6C);  # CP437 0xB9
+    kashi_fset8(0xBA, 0x6C6C6C6C6C6C6C6C);  # CP437 0xBA
+    kashi_fset8(0xBB, 0x0000FC0CEC6C6C6C);  # CP437 0xBB
+    kashi_fset8(0xBC, 0x6C6C0CFC00000000);  # CP437 0xBC
+    kashi_fset8(0xBD, 0x6C6C6CFC00000000);  # CP437 0xBD
+    kashi_fset8(0xBE, 0x1818F818F8000000);  # CP437 0xBE
+    kashi_fset8(0xBF, 0x000000F818181818);  # CP437 0xBF
+    kashi_fset8(0xC0, 0x181818181F000000);  # CP437 0xC0
+    kashi_fset8(0xC1, 0x18181818FF000000);  # CP437 0xC1
+    kashi_fset8(0xC2, 0x000000FF18181818);  # CP437 0xC2
+    kashi_fset8(0xC3, 0x181818181F181818);  # CP437 0xC3
+    kashi_fset8(0xC4, 0x000000FF00000000);  # CP437 0xC4
+    kashi_fset8(0xC5, 0x18181818FF181818);  # CP437 0xC5
+    kashi_fset8(0xC6, 0x181F181F18181818);  # CP437 0xC6
+    kashi_fset8(0xC7, 0x6C6C6C6C6F6C6C6C);  # CP437 0xC7
+    kashi_fset8(0xC8, 0x6C6C6F606F000000);  # CP437 0xC8
+    kashi_fset8(0xC9, 0x00003F3037363636);  # CP437 0xC9 — double upper-left corner
+    kashi_fset8(0xCA, 0x6C6CEF00EF000000);  # CP437 0xCA
+    kashi_fset8(0xCB, 0x0000FF00EF6C6C6C);  # CP437 0xCB
+    kashi_fset8(0xCC, 0x6C6C6F606F6C6C6C);  # CP437 0xCC
+    kashi_fset8(0xCD, 0x0000FF00FF000000);  # CP437 0xCD — double horizontal
+    kashi_fset8(0xCE, 0x6C6CEF00EF6C6C6C);  # CP437 0xCE
+    kashi_fset8(0xCF, 0x1818FF00FF000000);  # CP437 0xCF
+    kashi_fset8(0xD0, 0x6C6C6C6CFF000000);  # CP437 0xD0
+    kashi_fset8(0xD1, 0x0000FF00FF181818);  # CP437 0xD1
+    kashi_fset8(0xD2, 0x000000FF6C6C6C6C);  # CP437 0xD2
+    kashi_fset8(0xD3, 0x6C6C6C6C7C000000);  # CP437 0xD3
+    kashi_fset8(0xD4, 0x18181F181F000000);  # CP437 0xD4
+    kashi_fset8(0xD5, 0x0000001F18181818);  # CP437 0xD5
+    kashi_fset8(0xD6, 0x0000007C6C6C6C6C);  # CP437 0xD6
+    kashi_fset8(0xD7, 0x6C6C6C6CFF6C6C6C);  # CP437 0xD7
+    kashi_fset8(0xD8, 0x1818FF18FF181818);  # CP437 0xD8
+    kashi_fset8(0xD9, 0x18181818F8000000);  # CP437 0xD9
+    kashi_fset8(0xDA, 0x000000001F181818);  # CP437 0xDA
+    kashi_fset8(0xDB, 0xFFFFFFFFFFFFFFFF);  # CP437 0xDB — full block
+    kashi_fset8(0xDC, 0x00000000FFFFFFFF);  # CP437 0xDC — lower half
+    kashi_fset8(0xDD, 0xF0F0F0F0F0F0F0F0);  # CP437 0xDD — left half
+    kashi_fset8(0xDE, 0x0F0F0F0F0F0F0F0F);  # CP437 0xDE — right half
+    kashi_fset8(0xDF, 0xFFFFFFFF00000000);  # CP437 0xDF — upper half
+    kashi_fset8(0xE0, 0x000076DCC8DC7600);  # CP437 0xE0
+    kashi_fset8(0xE1, 0x0078CCF8CCF8C0C0);  # CP437 0xE1
+    kashi_fset8(0xE2, 0x00FEC6C0C0C0C000);  # CP437 0xE2
+    kashi_fset8(0xE3, 0x00FE6C6C6C6C6C00);  # CP437 0xE3
+    kashi_fset8(0xE4, 0xFEC6603060C6FE00);  # CP437 0xE4
+    kashi_fset8(0xE5, 0x000000007ED8D870);  # CP437 0xE5
+    kashi_fset8(0xE6, 0x00006666667C60C0);  # CP437 0xE6
+    kashi_fset8(0xE7, 0x000076DC18181800);  # CP437 0xE7
+    kashi_fset8(0xE8, 0x7E183C6666663C18);  # CP437 0xE8
+    kashi_fset8(0xE9, 0x386CC6FEC6C66C38);  # CP437 0xE9
+    kashi_fset8(0xEA, 0x386CC6C66C6C6CEE);  # CP437 0xEA
+    kashi_fset8(0xEB, 0x1E30187CCCCCCC78);  # CP437 0xEB
+    kashi_fset8(0xEC, 0x0000007EDBDB7E00);  # CP437 0xEC
+    kashi_fset8(0xED, 0x06067EDBDB7EC0C0);  # CP437 0xED
+    kashi_fset8(0xEE, 0x386060607C606038);  # CP437 0xEE
+    kashi_fset8(0xEF, 0x7CC6C6C6C6C6C600);  # CP437 0xEF
+    kashi_fset8(0xF0, 0x00FE0000FE0000FE);  # CP437 0xF0
+    kashi_fset8(0xF1, 0x18187E18187E0000);  # CP437 0xF1
+    kashi_fset8(0xF2, 0x60301818306000FC);  # CP437 0xF2
+    kashi_fset8(0xF3, 0x180C0C18306000FC);  # CP437 0xF3
+    kashi_fset8(0xF4, 0x0E1B1B1818181818);  # CP437 0xF4
+    kashi_fset8(0xF5, 0x18181818D8D8D870);  # CP437 0xF5
+    kashi_fset8(0xF6, 0x18180018187E0000);  # CP437 0xF6
+    kashi_fset8(0xF7, 0x0076DC0076DC0000);  # CP437 0xF7
+    kashi_fset8(0xF8, 0x386C6C3800000000);  # CP437 0xF8
+    kashi_fset8(0xF9, 0x0000001818000000);  # CP437 0xF9
+    kashi_fset8(0xFA, 0x0000001800000000);  # CP437 0xFA
+    kashi_fset8(0xFB, 0x0F0C0C0CEC6C3C1C);  # CP437 0xFB
+    kashi_fset8(0xFC, 0x6C36363636000000);  # CP437 0xFC
+    kashi_fset8(0xFD, 0x780C18307C000000);  # CP437 0xFD
+    kashi_fset8(0xFE, 0x00003C3C3C3C0000);  # CP437 0xFE
+    kashi_fset8(0xFF, 0x0000000000000000);  # CP437 0xFF — blank
+
+    # --- Derive VGA 9x16 from VGA 8x16 + the VGA 9-bit-mode col-9 rule.
+    # In VGA text mode the 9th column is generated by the hardware: for
+    # codepoints in the CP437 box-drawing range 0xC0..0xDF, col 8 (the
+    # leftmost bit of the second byte) repeats col 7 (bit 0 of the first
+    # byte) so box-drawing lines connect across cells; for all other
+    # codepoints col 8 is 0. We bake this rule at init time so the new
+    # 9x16 built-in is just `font16 + computed col-9`, no second table
+    # to ship or transcribe. See ADR 0006.
+    var dch = KASHI_GLYPH_FIRST;
+    while (dch <= KASHI_GLYPH_LAST) {
+        var src_base = &kashi_font16 + (dch - KASHI_GLYPH_FIRST) * 16;
+        var dst_base = &kashi_font9_16 + (dch - KASHI_GLYPH_FIRST) * 32;
+        var dr = 0;
+        while (dr < 16) {
+            var b0 = load8(src_base + dr);
+            var b1 = 0;
+            if (dch >= 0xC0) {
+                if (dch <= 0xDF) { b1 = (b0 & 1) << 7; }
+            }
+            store8(dst_base + dr * 2 + 0, b0);
+            store8(dst_base + dr * 2 + 1, b1);
+            dr = dr + 1;
+        }
+        dch = dch + 1;
+    }
+
+    kashi_font_ready = 1;
+    return 0;
+}
+
+# 1 once kashi_font_init() has populated the tables, else 0. Lets a
+# freestanding consumer assert init ran before the first render (audit
+# 2026-05-27, F2 — previously the flag was write-only). Pre-init the
+# buffers are zeroed BSS, so access is bounds-safe and renders blank.
+fn kashi_font_is_ready() {
+    return kashi_font_ready;
+}
+
+# --- Metadata accessors (freestanding; pure arithmetic) ---
+
+# Glyph cell width in pixels. Both fonts are 8 px wide. Unknown id -> 0.
+fn kashi_font_width(font_id) {
+    if (font_id == KASHI_FONT_VGA_8X16) { return 8; }
+    if (font_id == KASHI_FONT_CGA_8X8) { return 8; }
+    if (font_id == KASHI_FONT_VGA_9X16) { return 9; }
+    return 0;
+}
+
+# Glyph cell height in pixels (= rows per glyph). Unknown id -> 0.
+fn kashi_font_height(font_id) {
+    if (font_id == KASHI_FONT_VGA_8X16) { return 16; }
+    if (font_id == KASHI_FONT_CGA_8X8) { return 8; }
+    if (font_id == KASHI_FONT_VGA_9X16) { return 16; }
+    return 0;
+}
+
+# First encoded codepoint (0x20 / space) for any valid font. Unknown -> 0.
+fn kashi_font_first(font_id) {
+    if (font_id == KASHI_FONT_VGA_8X16) { return KASHI_GLYPH_FIRST; }
+    if (font_id == KASHI_FONT_CGA_8X8) { return KASHI_GLYPH_FIRST; }
+    if (font_id == KASHI_FONT_VGA_9X16) { return KASHI_GLYPH_FIRST; }
+    return 0;
+}
+
+# Number of encoded glyphs (224) for any valid font. Unknown -> 0.
+fn kashi_font_count(font_id) {
+    if (font_id == KASHI_FONT_VGA_8X16) { return KASHI_GLYPH_COUNT; }
+    if (font_id == KASHI_FONT_CGA_8X8) { return KASHI_GLYPH_COUNT; }
+    if (font_id == KASHI_FONT_VGA_9X16) { return KASHI_GLYPH_COUNT; }
+    return 0;
+}
+
+# Bytes per glyph row = ceil(width / 8). 8-wide built-ins return 1; the
+# VGA 9x16 built-in (0.5.1) returns 2. Unknown id -> 0. Added in 0.5.0
+# (ADR 0005); extended in 0.5.1 (ADR 0006).
+fn kashi_font_stride(font_id) {
+    if (font_id == KASHI_FONT_VGA_8X16) { return 1; }
+    if (font_id == KASHI_FONT_CGA_8X8) { return 1; }
+    if (font_id == KASHI_FONT_VGA_9X16) { return 2; }
+    return 0;
+}
+
+# 1 if `ch` is in the encoded range [0x20, 0x7F], else 0. Caller-facing
+# bounds gate so consumers can decide their own fallback for control chars.
+fn kashi_glyph_encoded(ch) {
+    if (ch < KASHI_GLYPH_FIRST) { return 0; }
+    if (ch > KASHI_GLYPH_LAST) { return 0; }
+    return 1;
+}
+
+# Base pointer to a glyph's contiguous row bytes within the BSS buffer.
+# Returns the address of row 0; the consumer reads `height` bytes from it.
+# Returns 0 (null) for an out-of-range char or unknown font — the caller
+# must null-check (a freestanding kernel cannot afford a wild deref).
+fn kashi_glyph_ptr(font_id, ch) {
+    if (kashi_glyph_encoded(ch) == 0) { return 0; }
+    if (font_id == KASHI_FONT_VGA_8X16) {
+        return &kashi_font16 + (ch - KASHI_GLYPH_FIRST) * 16;
+    }
+    if (font_id == KASHI_FONT_CGA_8X8) {
+        return &kashi_font8 + (ch - KASHI_GLYPH_FIRST) * 8;
+    }
+    if (font_id == KASHI_FONT_VGA_9X16) {
+        return &kashi_font9_16 + (ch - KASHI_GLYPH_FIRST) * 32;
+    }
+    return 0;
+}
+
+# One row byte of a glyph (bit 7 = leftmost pixel). row is 0-based, top
+# first. Returns 0 for an out-of-range char, unknown font, or out-of-range
+# row — a 0 byte renders as blank, the safe default for a console. For
+# wide-glyph fonts (stride > 1) this returns the LEADING byte (byte_idx 0);
+# use kashi_glyph_row_byte for the other bytes.
+fn kashi_glyph_row(font_id, ch, row) {
+    if (kashi_glyph_encoded(ch) == 0) { return 0; }
+    var h = kashi_font_height(font_id);
+    if (h == 0) { return 0; }
+    if (row < 0) { return 0; }
+    if (row >= h) { return 0; }
+    var base = kashi_glyph_ptr(font_id, ch);
+    if (base == 0) { return 0; }
+    # Stride-aware (0.5.1). Inline the stride rather than call
+    # kashi_font_stride() since this accessor is on the per-row render
+    # hot path; the function call adds a few ns. Returns the LEADING
+    # byte of the row for wide fonts (matches the ADR 0005 contract);
+    # multi-byte access via kashi_glyph_row_byte.
+    var stride = 1;
+    if (font_id == KASHI_FONT_VGA_9X16) { stride = 2; }
+    return load8(base + row * stride);
+}
+
+# One row byte at column-byte position `byte_idx` (0 = leftmost 8 px).
+# Multi-byte-aware sibling of kashi_glyph_row: for stride-1 fonts (both
+# built-ins) only byte_idx == 0 is meaningful — anything else returns 0.
+# Bounds-safe: all out-of-range inputs return 0 (blank). Added in 0.5.0
+# (ADR 0005); enables wide-glyph access uniformly across the freestanding
+# and library-face accessor families.
+fn kashi_glyph_row_byte(font_id, ch, row, byte_idx) {
+    if (byte_idx < 0) { return 0; }
+    var stride = kashi_font_stride(font_id);
+    if (stride == 0) { return 0; }
+    if (byte_idx >= stride) { return 0; }
+    if (kashi_glyph_encoded(ch) == 0) { return 0; }
+    var h = kashi_font_height(font_id);
+    if (h == 0) { return 0; }
+    if (row < 0) { return 0; }
+    if (row >= h) { return 0; }
+    var base = kashi_glyph_ptr(font_id, ch);
+    if (base == 0) { return 0; }
+    return load8(base + row * stride + byte_idx);
+}

@@ -34,6 +34,7 @@ include "src/gui/art_cache.cyr"
 include "src/gui/app.cyr"
 include "src/gui/views.cyr"
 include "src/gui/draw.cyr"
+include "src/gui/raster.cyr"
 
 # ===== library open =====
 # mkdir -p: create each path component (0755); pre-existing dirs error harmlessly.

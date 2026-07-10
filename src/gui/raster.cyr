@@ -1,0 +1,261 @@
+# raster.cyr — CPU rasterizer for the GUI draw-command IR (Wave F, Phase 2).
+#
+# Executes a JlwDrawCmd list (gui/draw.cyr) into a linear XRGB8888 pixel buffer:
+# 4 bytes/pixel, little-endian — the wl_shm WL_SHM_FORMAT_XRGB8888 layout, so the
+# same buffer feeds the Phase-3 Wayland present shell unchanged. Pure CPU, no
+# display: every pixel is headless-assertable via load32.
+#
+# Text uses kashi's freestanding VGA 8x16 font (kashi_glyph_row, bit7 = leftmost
+# column). Bytes are drawn as CP437 glyphs — ASCII is 1:1; multi-byte UTF-8 renders
+# its constituent bytes (a known cosmetic limitation, refined when we add UTF-8→CP437
+# folding). Forked from puka render/fb.cyr but rewritten to take an explicit
+# (buf, w, h) instead of puka's process-global framebuffer, and adds the
+# glyph/text/border/image executors puka's cell-grid renderer never needed.
+#
+# color_to_xrgb (draw.cyr) yields 0x00RRGGBB; store32 writes it LE as [BB,GG,RR,00],
+# which is exactly XRGB8888 and round-trips back through load32.
+
+var JLW_GLYPH_W = 8;
+var JLW_GLYPH_H = 16;
+
+# Draw commands anchor text at row_top + JLW_GUI_TEXT_DY (20) as a baseline-ish
+# reference; the 16px glyph box sits JLW_GLYPH_TOP_ADJ above that so it stays inside
+# a 32px row (top 6 .. bottom 22).
+var JLW_GLYPH_TOP_ADJ = 14;
+
+# ---- framebuffer allocation / clear ----
+
+# Allocate a w*h XRGB8888 buffer (4 bytes/px). The bump allocator does not zero,
+# so callers must jlw_gui_fb_clear before rastering onto it.
+#must_use
+fn jlw_gui_fb_new(w, h) {
+    return alloc(w * h * 4);
+}
+
+fn jlw_gui_fb_clear(buf, w, h, xrgb) {
+    var n = w * h;
+    var p = buf;
+    var i = 0;
+    while (i < n) {
+        store32(p, xrgb);
+        p = p + 4;
+        i = i + 1;
+    }
+    return 0;
+}
+
+# ---- primitives (all bounds-clipped to the fb) ----
+
+#inline
+fn jlw_gui_fb_plot(buf, fbw, fbh, x, y, xrgb) {
+    if (x < 0) { return 0; }
+    if (y < 0) { return 0; }
+    if (x >= fbw) { return 0; }
+    if (y >= fbh) { return 0; }
+    store32(buf + (y * fbw + x) * 4, xrgb);
+    return 0;
+}
+
+fn jlw_gui_fb_fill_rect(buf, fbw, fbh, x, y, w, h, xrgb) {
+    var x0 = x;
+    var y0 = y;
+    var x1 = x + w;
+    var y1 = y + h;
+    if (x0 < 0) { x0 = 0; }
+    if (y0 < 0) { y0 = 0; }
+    if (x1 > fbw) { x1 = fbw; }
+    if (y1 > fbh) { y1 = fbh; }
+    var yy = y0;
+    while (yy < y1) {
+        var p = buf + (yy * fbw + x0) * 4;
+        var xx = x0;
+        while (xx < x1) {
+            store32(p, xrgb);
+            p = p + 4;
+            xx = xx + 1;
+        }
+        yy = yy + 1;
+    }
+    return 0;
+}
+
+# 1px rectangle outline (top/bottom/left/right edges).
+fn jlw_gui_fb_border(buf, fbw, fbh, x, y, w, h, xrgb) {
+    if (w <= 0 || h <= 0) { return 0; }
+    jlw_gui_fb_fill_rect(buf, fbw, fbh, x, y, w, 1, xrgb);              # top
+    jlw_gui_fb_fill_rect(buf, fbw, fbh, x, y + h - 1, w, 1, xrgb);      # bottom
+    jlw_gui_fb_fill_rect(buf, fbw, fbh, x, y, 1, h, xrgb);             # left
+    jlw_gui_fb_fill_rect(buf, fbw, fbh, x + w - 1, y, 1, h, xrgb);      # right
+    return 0;
+}
+
+# ---- text (kashi VGA 8x16) ----
+
+# kashi glyph tables are filled lazily & idempotently: any raster entry point is
+# safe to call cold.
+fn jlw_gui_raster_ensure_font() {
+    if (kashi_font_is_ready() == 0) { kashi_font_init(); }
+    return 0;
+}
+
+# Blit one CP437 glyph with its top-left at (x, y). bit7 of each row byte is the
+# leftmost column (kashi contract).
+fn jlw_gui_fb_glyph(buf, fbw, fbh, x, y, ch, xrgb) {
+    var row = 0;
+    while (row < JLW_GLYPH_H) {
+        var bits = kashi_glyph_row(KASHI_FONT_VGA_8X16, ch, row);
+        if (bits != 0) {
+            var col = 0;
+            while (col < JLW_GLYPH_W) {
+                if ((bits & (128 >> col)) != 0) {
+                    jlw_gui_fb_plot(buf, fbw, fbh, x + col, y + row, xrgb);
+                }
+                col = col + 1;
+            }
+        }
+        row = row + 1;
+    }
+    return 0;
+}
+
+# Decode one UTF-8 codepoint at cstr+i. Returns (cp * 8 + nbytes), nbytes in 1..4.
+# A malformed lead / bad continuation byte decodes as a single raw byte so decoding
+# never runs past the NUL. kashi is CP437, so multi-byte codepoints are folded to a
+# drawable glyph by jlw_gui__cp_to_glyph.
+#must_use
+fn jlw_gui__utf8_at(cstr, i) {
+    var b0 = load8(cstr + i);
+    if (b0 < 128) { return b0 * 8 + 1; }
+    if ((b0 & 224) == 192) {                          # 110xxxxx  2-byte
+        var n1 = load8(cstr + i + 1);
+        if ((n1 & 192) != 128) { return b0 * 8 + 1; }
+        return ((b0 & 31) * 64 + (n1 & 63)) * 8 + 2;
+    }
+    if ((b0 & 240) == 224) {                          # 1110xxxx  3-byte
+        var n1 = load8(cstr + i + 1);
+        var n2 = load8(cstr + i + 2);
+        if ((n1 & 192) != 128 || (n2 & 192) != 128) { return b0 * 8 + 1; }
+        return ((b0 & 15) * 4096 + (n1 & 63) * 64 + (n2 & 63)) * 8 + 3;
+    }
+    if ((b0 & 248) == 240) {                          # 11110xxx  4-byte
+        var n1 = load8(cstr + i + 1);
+        var n2 = load8(cstr + i + 2);
+        var n3 = load8(cstr + i + 3);
+        if ((n1 & 192) != 128 || (n2 & 192) != 128 || (n3 & 192) != 128) { return b0 * 8 + 1; }
+        return ((b0 & 7) * 262144 + (n1 & 63) * 4096 + (n2 & 63) * 64 + (n3 & 63)) * 8 + 4;
+    }
+    return b0 * 8 + 1;                                 # stray continuation -> raw
+}
+
+# Fold a Unicode codepoint to a CP437 glyph index (kashi VGA 8x16 is CP437). ASCII is
+# 1:1; the punctuation the UI actually emits maps to its CP437 twin; everything else
+# (emoji nav icons, CJK, ...) becomes a filled-box marker so it reads as "a glyph" and
+# advances one cell rather than smearing raw bytes.
+#must_use
+fn jlw_gui__cp_to_glyph(cp) {
+    if (cp < 128) { return cp; }
+    if (cp == 0x2013 || cp == 0x2014) { return 45; }  # en/em-dash  -> '-'
+    if (cp == 0x2018 || cp == 0x2019) { return 39; }  # curly quote -> '\''
+    if (cp == 0x201C || cp == 0x201D) { return 34; }  # curly dquote -> '"'
+    if (cp == 0x2026) { return 46; }                  # ellipsis    -> '.'
+    if (cp == 0x2022 || cp == 0x00B7) { return 250; } # bullet/middot -> CP437 0xFA
+    if (cp == 0x00A0) { return 32; }                  # nbsp        -> space
+    return 254;                                       # unknown     -> CP437 0xFE box
+}
+
+# Draw a NUL-terminated UTF-8 cstr left-to-right, 8px advance per *codepoint*.
+# max_chars caps the codepoint count (0 = uncapped). Control codepoints (< 32) advance
+# without drawing. Returns the pen x after the last glyph.
+fn jlw_gui_fb_text(buf, fbw, fbh, x, y, cstr, xrgb, max_chars) {
+    if (cstr == 0) { return x; }
+    var i = 0;
+    var drawn = 0;
+    var px = x;
+    while (1) {
+        if (load8(cstr + i) == 0) { break; }
+        if (max_chars > 0 && drawn >= max_chars) { break; }
+        var packed = jlw_gui__utf8_at(cstr, i);
+        var cp = packed / 8;
+        i = i + (packed % 8);
+        var g = jlw_gui__cp_to_glyph(cp);
+        if (g >= 32) { jlw_gui_fb_glyph(buf, fbw, fbh, px, y, g, xrgb); }
+        px = px + JLW_GLYPH_W;
+        drawn = drawn + 1;
+    }
+    return px;
+}
+
+# ---- executor: draw-command list -> pixels ----
+
+fn jlw_gui_raster(cmds, buf, fbw, fbh) {
+    jlw_gui_raster_ensure_font();
+    var n = vec_len(cmds);
+    var i = 0;
+    while (i < n) {
+        var c = vec_get(cmds, i);
+        var k = JlwDrawCmd_kind(c);
+        var col = jlw_gui_color_to_xrgb(JlwDrawCmd_color(c));
+        if (k == JLW_DRAW_RECT) {
+            jlw_gui_fb_fill_rect(buf, fbw, fbh, JlwDrawCmd_x(c), JlwDrawCmd_y(c),
+                                 JlwDrawCmd_w(c), JlwDrawCmd_h(c), col);
+        }
+        if (k == JLW_DRAW_BORDER) {
+            jlw_gui_fb_border(buf, fbw, fbh, JlwDrawCmd_x(c), JlwDrawCmd_y(c),
+                              JlwDrawCmd_w(c), JlwDrawCmd_h(c), col);
+        }
+        if (k == JLW_DRAW_TEXT) {
+            jlw_gui_fb_text(buf, fbw, fbh, JlwDrawCmd_x(c),
+                            JlwDrawCmd_y(c) - JLW_GLYPH_TOP_ADJ,
+                            JlwDrawCmd_text(c), col, JlwDrawCmd_aux(c));
+        }
+        if (k == JLW_DRAW_IMAGE) {
+            # No decoded art source yet: fill the slot with widget bg + a muted outline
+            # so the region is visible. Real scaled-RGBA blit lands when art_cache
+            # exposes decoded pixels.
+            jlw_gui_fb_fill_rect(buf, fbw, fbh, JlwDrawCmd_x(c), JlwDrawCmd_y(c),
+                                 JlwDrawCmd_w(c), JlwDrawCmd_h(c),
+                                 jlw_gui_color_to_xrgb(JLW_GUI_BG_WIDGET));
+            jlw_gui_fb_border(buf, fbw, fbh, JlwDrawCmd_x(c), JlwDrawCmd_y(c),
+                              JlwDrawCmd_w(c), JlwDrawCmd_h(c),
+                              jlw_gui_color_to_xrgb(JLW_GUI_TEXT_MUTED));
+        }
+        # CLIP_PUSH / CLIP_POP: ignored in the first raster (builders already
+        # virtualize lists, so nothing overdraws). Clip-stack lands with scroll.
+        i = i + 1;
+    }
+    return 0;
+}
+
+# ---- debug/smoke: dump the framebuffer to a binary PPM (P6) ----
+#
+# The one human-eyeballable artifact for the headless raster: open the .ppm in any
+# image viewer. Converts each XRGB8888 pixel to packed RGB (a PPM row is 3 bytes/px).
+# Returns JLW_ERR_NONE, or JLW_ERR_IO if the file can't be created.
+fn jlw_gui_fb_dump_ppm(buf, fbw, fbh, path) {
+    var fd = file_open(path, 577, 420);            # O_WRONLY|O_CREAT|O_TRUNC, mode 0644
+    if (fd < 0) { return JLW_ERR_IO; }
+    file_write(fd, "P6\n", 3);
+    fmt_int_fd(fd, fbw);
+    file_write(fd, " ", 1);
+    fmt_int_fd(fd, fbh);
+    file_write(fd, "\n255\n", 5);
+    var row = alloc(fbw * 3);                       # one packed-RGB scanline
+    var y = 0;
+    while (y < fbh) {
+        var base = buf + y * fbw * 4;
+        var o = row;
+        var x = 0;
+        while (x < fbw) {
+            var word = load32(base + x * 4);        # 0x00RRGGBB
+            store8(o, (word >> 16) & 255);          # R
+            store8(o + 1, (word >> 8) & 255);       # G
+            store8(o + 2, word & 255);              # B
+            o = o + 3;
+            x = x + 1;
+        }
+        file_write(fd, row, fbw * 3);
+        y = y + 1;
+    }
+    file_close(fd);
+    return JLW_ERR_NONE;
+}

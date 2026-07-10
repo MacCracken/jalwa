@@ -1,0 +1,168 @@
+# gui_raster.tcyr -- tests for the GUI CPU rasterizer (src/gui/raster.cyr).
+# The draw-command IR is headless-testable at the geometry level (gui_draw.tcyr);
+# this suite proves the *pixel* layer: fill_rect/border/glyph/text primitives and
+# the jlw_gui_raster executor, read back via load32. Still no display -- exact
+# XRGB8888 pixels are asserted directly out of the buffer.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/gui/theme.cyr"
+include "src/gui/app.cyr"
+include "src/gui/views.cyr"
+include "src/gui/draw.cyr"
+include "src/gui/raster.cyr"
+
+fn rm(path) { syscall(87, path); return 0; }
+fn fresh_plib() { rm("/tmp/jalwa_gui_raster.db"); return jlw_plib_open("/tmp/jalwa_gui_raster.db"); }
+fn eng() { return jlw_engine_new(jlw_engine_config_default()); }
+fn cat3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var d = alloc(la + lb + lc + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); memcpy(d + la + lb, c, lc); store8(d + la + lb + lc, 0);
+    return d;
+}
+fn mk(app, title, artist) {
+    var it = jlw_media_item_new(cat3("/m/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    jlw_library_add_item(jlw_gui_app_lib(app), it);
+    return it;
+}
+# read one XRGB8888 pixel
+fn px(buf, fbw, x, y) { return load32(buf + (y * fbw + x) * 4); }
+# count pixels == val in a w*h region rooted at (x0,y0)
+fn count_px(buf, fbw, x0, y0, w, h, val) {
+    var n = 0; var yy = 0;
+    while (yy < h) {
+        var xx = 0;
+        while (xx < w) { if (px(buf, fbw, x0 + xx, y0 + yy) == val) { n = n + 1; } xx = xx + 1; }
+        yy = yy + 1;
+    }
+    return n;
+}
+# count pixels != val in a region
+fn count_neq(buf, fbw, x0, y0, w, h, val) {
+    var n = 0; var yy = 0;
+    while (yy < h) {
+        var xx = 0;
+        while (xx < w) { if (px(buf, fbw, x0 + xx, y0 + yy) != val) { n = n + 1; } xx = xx + 1; }
+        yy = yy + 1;
+    }
+    return n;
+}
+
+var W = 64;
+var H = 48;
+var bg = jlw_gui_color_to_xrgb(JLW_GUI_BG_DARK);
+var ac = jlw_gui_color_to_xrgb(JLW_GUI_ACCENT);
+var buf = jlw_gui_fb_new(W, H);
+
+# ---- clear + fill_rect exact pixels + clipping ----
+test_group("fill_rect");
+jlw_gui_fb_clear(buf, W, H, bg);
+assert_eq(px(buf, W, 0, 0), bg, "clear sets first pixel");
+assert_eq(px(buf, W, 63, 47), bg, "clear sets last pixel");
+jlw_gui_fb_fill_rect(buf, W, H, 5, 5, 10, 8, ac);
+assert_eq(px(buf, W, 5, 5), ac, "rect top-left inside");
+assert_eq(px(buf, W, 14, 12), ac, "rect bottom-right inside");
+assert_eq(px(buf, W, 4, 5), bg, "left of rect untouched");
+assert_eq(px(buf, W, 15, 5), bg, "right of rect untouched");
+assert_eq(px(buf, W, 5, 13), bg, "below rect untouched");
+assert_eq(count_px(buf, W, 5, 5, 10, 8, ac), 80, "exactly 10*8 accent pixels");
+# clip: rect extending past right+bottom must clamp, not corrupt memory
+jlw_gui_fb_fill_rect(buf, W, H, 60, 44, 20, 20, ac);
+assert_eq(px(buf, W, 63, 47), ac, "clipped rect fills far corner");
+assert_eq(count_px(buf, W, 60, 44, 4, 4, ac), 16, "clipped rect fills the on-screen 4x4");
+# negative origin clamps to (0,0)
+jlw_gui_fb_fill_rect(buf, W, H, 0 - 3, 0 - 3, 6, 6, ac);
+assert_eq(px(buf, W, 0, 0), ac, "negative-origin rect fills (0,0)");
+assert_eq(count_px(buf, W, 0, 0, 3, 3, ac), 9, "negative-origin rect fills visible 3x3");
+
+# ---- border: outline set, interior hollow ----
+test_group("border");
+jlw_gui_fb_clear(buf, W, H, bg);
+jlw_gui_fb_border(buf, W, H, 10, 10, 20, 12, ac);
+assert_eq(px(buf, W, 10, 10), ac, "border top-left corner");
+assert_eq(px(buf, W, 29, 10), ac, "border top-right corner");
+assert_eq(px(buf, W, 10, 21), ac, "border bottom-left corner");
+assert_eq(px(buf, W, 29, 21), ac, "border bottom-right corner");
+assert_eq(px(buf, W, 20, 10), ac, "border top edge");
+assert_eq(px(buf, W, 10, 15), ac, "border left edge");
+assert_eq(px(buf, W, 15, 15), bg, "border interior hollow");
+
+# ---- glyph / text (kashi VGA 8x16) ----
+test_group("text");
+jlw_gui_raster_ensure_font();
+jlw_gui_fb_clear(buf, W, H, bg);
+jlw_gui_fb_glyph(buf, W, H, 2, 2, 65, ac);          # 'A' -- some, not all, pixels set
+assert_eq(count_neq(buf, W, 2, 2, 8, 16, bg) > 0, 1, "glyph 'A' sets pixels");
+assert_eq(count_neq(buf, W, 2, 2, 8, 16, bg) < 128, 1, "glyph 'A' is not a solid block");
+jlw_gui_fb_clear(buf, W, H, bg);
+jlw_gui_fb_glyph(buf, W, H, 2, 2, 32, ac);          # space -- blank
+assert_eq(count_neq(buf, W, 2, 2, 8, 16, bg), 0, "space glyph draws nothing");
+# text advances 8px/glyph and returns the end pen x
+jlw_gui_fb_clear(buf, W, H, bg);
+var endx = jlw_gui_fb_text(buf, W, H, 0, 2, "AB", ac, 0);
+assert_eq(endx, 16, "text pen advanced 2*8");
+assert_eq(count_neq(buf, W, 0, 2, 8, 16, bg) > 0, 1, "first char drawn");
+assert_eq(count_neq(buf, W, 8, 2, 8, 16, bg) > 0, 1, "second char drawn");
+# max_chars caps the glyph count
+jlw_gui_fb_clear(buf, W, H, bg);
+jlw_gui_fb_text(buf, W, H, 0, 2, "AB", ac, 1);
+assert_eq(count_neq(buf, W, 0, 2, 8, 16, bg) > 0, 1, "max_chars=1 draws first cell");
+assert_eq(count_neq(buf, W, 8, 2, 8, 16, bg), 0, "max_chars=1 leaves second cell blank");
+# UTF-8: a multi-byte codepoint advances exactly one cell (not one per byte)
+jlw_gui_fb_clear(buf, W, H, bg);
+var s = alloc(6);                                    # "A" + U+2013 en-dash + "B" + NUL
+store8(s, 65); store8(s + 1, 226); store8(s + 2, 128); store8(s + 3, 147);
+store8(s + 4, 66); store8(s + 5, 0);
+var e2 = jlw_gui_fb_text(buf, W, H, 0, 2, s, ac, 0);
+assert_eq(e2, 24, "UTF-8: A + en-dash + B = 3 cells (24px), not per-byte");
+assert_eq(count_neq(buf, W, 8, 2, 8, 16, bg) > 0, 1, "en-dash folded to a visible glyph");
+assert_eq(count_neq(buf, W, 16, 2, 8, 16, bg) > 0, 1, "third cell 'B' drawn after multi-byte");
+# max_chars now counts codepoints: cap 2 stops before 'B'
+jlw_gui_fb_clear(buf, W, H, bg);
+jlw_gui_fb_text(buf, W, H, 0, 2, s, ac, 2);
+assert_eq(count_neq(buf, W, 16, 2, 8, 16, bg), 0, "max_chars=2 (codepoints) leaves 'B' cell blank");
+
+# ---- executor: draw-command list -> pixels ----
+test_group("raster");
+jlw_gui_fb_clear(buf, W, H, bg);
+var cmds = vec_new();
+jlw_gui_draw_rect(cmds, 4, 4, 12, 10, JLW_GUI_ACCENT);            # x4..16  y4..14
+jlw_gui_draw_text(cmds, 4, 40, JLW_GUI_TEXT_PRIMARY, "X", 0);    # glyph top 40-14=26
+jlw_gui_draw_border(cmds, 30, 4, 10, 10, JLW_GUI_TEXT_MUTED);
+jlw_gui_raster(cmds, buf, W, H);
+assert_eq(px(buf, W, 4, 4), ac, "raster RECT painted");
+assert_eq(count_px(buf, W, 4, 4, 12, 10, ac), 120, "raster RECT full area (no overdraw)");
+var tp = jlw_gui_color_to_xrgb(JLW_GUI_TEXT_PRIMARY);
+assert_eq(count_px(buf, W, 4, 26, 8, 16, tp) > 0, 1, "raster TEXT painted its glyph");
+var mu = jlw_gui_color_to_xrgb(JLW_GUI_TEXT_MUTED);
+assert_eq(px(buf, W, 30, 4), mu, "raster BORDER corner painted");
+assert_eq(px(buf, W, 35, 9), bg, "raster BORDER interior hollow");
+
+# ---- full-frame integration: build_frame -> raster, no crash, sidebar painted ----
+test_group("frame_raster");
+var app = jlw_gui_app_new(fresh_plib(), eng());
+mk(app, "RasterTrack", "RA");
+JlwGuiApp_set_view(app, JLW_GUI_VIEW_LIBRARY);
+var FW = 320;
+var FH = 240;
+var fbuf = jlw_gui_fb_new(FW, FH);
+jlw_gui_fb_clear(fbuf, FW, FH, bg);
+var fcmds = vec_new();
+jlw_gui_build_frame(app, FW, FH, fcmds);
+jlw_gui_raster(fcmds, fbuf, FW, FH);
+var pan = jlw_gui_color_to_xrgb(JLW_GUI_BG_PANEL);
+assert_eq(px(fbuf, FW, 2, 2), pan, "frame raster: sidebar panel at top-left");
+assert_eq(count_neq(fbuf, FW, 0, 0, FW, FH, bg) > 0, 1, "frame raster painted over clear bg");
+assert_eq(count_px(fbuf, FW, 0, 0, JLW_GUI_SIDEBAR_W, 8, pan) > 0, 1, "sidebar column is panel bg");
+# dump a viewable PPM artifact of the rendered library frame
+assert_eq(jlw_gui_fb_dump_ppm(fbuf, FW, FH, "/tmp/jalwa_gui_raster.db.ppm"), JLW_ERR_NONE, "PPM dump ok");
+
+rm("/tmp/jalwa_gui_raster.db");
+var rc = assert_summary();
+syscall(60, rc);

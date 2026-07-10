@@ -46,3 +46,10 @@ modules = ["dist/shravan.cyr"]
 path = "../vani"
 tag = "1.0.0"
 modules = ["dist/vani.cyr"]
+
+# kashi — freestanding VGA 8x16 font-data core (zero stdlib: load8/store8 + arithmetic).
+# Provides kashi_glyph_row(font_id, ch, row) for the GUI CPU rasterizer (src/gui/raster.cyr).
+[deps.kashi]
+path = "../kashi"
+tag = "1.0.2"
+modules = ["src/font_data.cyr"]
