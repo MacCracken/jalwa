@@ -129,6 +129,7 @@ var JLW_STATE_BUFFERING = 3;
 # engine audio-backend ctl seam + playback/audio.cyr jlw_audio_play_ctl).
 var JLW_PLAY_CMD_PAUSE  = 0;   # arg: 1 = pause, 0 = resume
 var JLW_PLAY_CMD_VOLUME = 1;   # arg: volume percent (0-100)
+var JLW_PLAY_CMD_SEEK   = 2;   # arg: absolute position in milliseconds
 
 #must_use
 fn jlw_playback_state_name(code) {

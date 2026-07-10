@@ -169,7 +169,13 @@ fn jlw_engine_seek(e, position) {
     if (jlw_is_finite(d) == 1) {
         if (f64_gt(position, d) == 1) { return JLW_ERR_PLAYBACK; }
     }
-    JlwPlaybackEngine_set_position(e, position);
+    var p = position;
+    if (f64_lt(p, 0) == 1) { p = 0; }
+    JlwPlaybackEngine_set_position(e, p);
+    var h = JlwPlaybackEngine_play_handle(e);
+    if (h != 0 && JLW_ENG_CTL_FP != 0) {   # seek the live decode thread (ms)
+        fncall3(JLW_ENG_CTL_FP, h, JLW_PLAY_CMD_SEEK, f64_to(f64_mul(p, 1000.0)));
+    }
     return JLW_ERR_NONE;
 }
 # seek_relative(offset_secs): clamp to [0, duration] and seek.

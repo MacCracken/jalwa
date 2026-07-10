@@ -103,6 +103,21 @@ fn jlw_audio_play_file_h(path, volume, h) {
         }
         if (cancelled == 1) { i = count; }
         else {
+            # apply a pending seek: jump the sample index, flush queued audio for
+            # responsiveness (audio_drop discards the buffer; prepare re-arms it).
+            if (h != 0) {
+                var st = JlwPlayHandle_seek_to(h);
+                if (st >= 0) {
+                    var ts = (st * rate / 1000) * channels;   # ms -> frame -> interleaved sample
+                    if (ts < 0) { ts = 0; }
+                    if (ts > count) { ts = count; }
+                    i = ts;
+                    JlwPlayHandle_set_seek_to(h, 0 - 1);
+                    audio_drop(dev);
+                    audio_prepare(dev);
+                    if (rate > 0) { JlwPlayHandle_set_position(h, f64_div(f64_from(i / channels), f64_from(rate))); }
+                }
+            }
             if (paused == 1) {
                 # keep the device fed with silence (no ALSA underrun); hold position
                 var pw = 0;
@@ -142,7 +157,7 @@ fn jlw_audio_play_file(path, volume) { return jlw_audio_play_file_h(path, volume
 # thread. Single-word fields -> aligned load64/store64 are atomic on x86_64/agnos,
 # so `stop`/`done`/`position` need no lock for this producer/consumer pattern.
 #derive(accessors)
-struct JlwPlayHandle { path; volume; stop; done; position; rc; paused; }
+struct JlwPlayHandle { path; volume; stop; done; position; rc; paused; seek_to; }
 
 # the thread body: play the file (cancellable via the handle), then mark done.
 fn jlw_audio_play_worker(h) {
@@ -153,8 +168,8 @@ fn jlw_audio_play_worker(h) {
 
 # start playback on a background thread; returns the JlwPlayHandle immediately
 # (non-blocking). Poll jlw_audio_play_is_done / read position; cancel via
-# jlw_audio_play_stop; pause + live volume via jlw_audio_play_ctl. Mirrors rust-old's
-# spawned decode thread (seek-during-play + gapless are a follow-up).
+# jlw_audio_play_stop; pause / live volume / seek via jlw_audio_play_ctl. Mirrors
+# rust-old's spawned decode thread (gapless / prepare_next is a follow-up).
 #must_use
 fn jlw_audio_play_async(path, volume) {
     var h = alloc(sizeof(JlwPlayHandle));
@@ -165,6 +180,7 @@ fn jlw_audio_play_async(path, volume) {
     JlwPlayHandle_set_position(h, 0.0);
     JlwPlayHandle_set_rc(h, JLW_ERR_NONE);
     JlwPlayHandle_set_paused(h, 0);
+    JlwPlayHandle_set_seek_to(h, 0 - 1);   # no pending seek
     thread_create(&jlw_audio_play_worker, h);
     return h;
 }
@@ -175,6 +191,7 @@ fn jlw_audio_play_async(path, volume) {
 fn jlw_audio_play_ctl(h, code, arg) {
     if (code == JLW_PLAY_CMD_PAUSE)  { JlwPlayHandle_set_paused(h, arg); }
     if (code == JLW_PLAY_CMD_VOLUME) { JlwPlayHandle_set_volume(h, f64_div(f64_from(arg), 100.0)); }
+    if (code == JLW_PLAY_CMD_SEEK)   { JlwPlayHandle_set_seek_to(h, arg); }   # arg = target ms
     return 0;
 }
 #inline

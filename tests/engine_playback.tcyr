@@ -90,5 +90,19 @@ assert_eq(jlw_engine_state(e4), JLW_STATE_STOPPED, "state reset by open");
 assert_eq(JlwPlayHandle_stop(h4), 1, "old handle received stop signal (not orphaned)");
 assert_streq(JlwPlaybackEngine_current_path(e4), "tests/fixtures/probe.mp3", "current_path updated");
 
+# ---- seek reaches the thread as a millisecond target ----
+test_group("transport seek");
+var e5 = jlw_engine_new(jlw_engine_config_default());
+jlw_engine_open(e5, "tests/fixtures/probe.flac");
+jlw_engine_play(e5);
+var h5 = JlwPlaybackEngine_play_handle(e5);
+jlw_engine_seek(e5, f64_from(2));                 # 2.0 s
+assert_eq(JlwPlayHandle_seek_to(h5), 2000, "seek 2s -> handle 2000ms");
+jlw_engine_seek(e5, f64_neg(5.0));                # negative clamps to 0
+assert_eq(JlwPlayHandle_seek_to(h5), 0, "negative seek clamps to 0");
+jlw_engine_seek_relative(e5, f64_from(3));        # from live pos (0) + 3s
+assert_eq(JlwPlayHandle_seek_to(h5), 3000, "seek_relative +3s -> 3000ms");
+jlw_engine_stop(e5);
+
 var rc = assert_summary();
 syscall(60, rc);
