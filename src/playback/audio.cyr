@@ -26,7 +26,8 @@ fn jlw_audio_ensure_init() {
 # decode an audio file to a shravan decode_result (>0), or 0 on failure. Bypasses
 # shravan codec_open (its internal detect_format collides with sankoch's) by
 # dispatching on jalwa's own magic-byte detector to the per-format decoder.
-# Reads the whole file (one alloc); OGG/AAC/MP4/OPUS decode is deferred.
+# Reads the whole file (one alloc). Supports WAV/FLAC/MP3 (shravan's OGG/AAC/MP4
+# decoders are not production-ready -- see jlw_audio_decode).
 #must_use
 fn jlw_audio_decode(path) {
     jlw_audio_ensure_init();
@@ -37,9 +38,13 @@ fn jlw_audio_decode(path) {
     if (n <= 0) { return 0; }
     var sf = jlw_detect_audio_format(buf, n);
     var dr = 0;
-    if (sf == 0) { dr = wav_decode(buf, n); }
-    if (sf == 1) { dr = flac_decode(buf, n); }
-    if (sf == 5) { dr = mp3_decode(buf, n); }
+    if (sf == 0) { dr = wav_decode(buf, n); }   # WAV (PCM)
+    if (sf == 1) { dr = flac_decode(buf, n); }  # FLAC
+    if (sf == 5) { dr = mp3_decode(buf, n); }   # MP3
+    # OGG/AAC/MP4 are DELIBERATELY excluded: shravan's ogg_decode errors and
+    # mp4_decode SEGFAULTS on standard files (verified 2026-07-09) -- they are not
+    # production-ready, so those formats return "cannot decode" rather than crash.
+    # flac_init + shravan_init_constants run once in jlw_audio_ensure_init; mp3_decode self-inits.
     if (dr <= 0) { return 0; }
     return dr;
 }

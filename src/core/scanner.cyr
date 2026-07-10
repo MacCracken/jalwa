@@ -417,3 +417,36 @@ fn jlw_scanner_scanned_to_media_item(scanned) {
     JlwMediaItem_set_art_data(item, JlwScannedFile_art_data(scanned));
     return item;
 }
+
+# probe a file and format a human summary for `jalwa info` (File/Format/Duration/
+# Codec + any tags). The Cyrius audio-stack replacement for rust-old cmd_info's
+# tarang probe. A field is omitted when the probe couldn't determine it.
+#must_use
+fn jlw_scanner_probe_summary(path) {
+    var scanned = jlw_scanner_scan_file(path);
+    var info = JlwScannedFile_info(scanned);
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "File:     "); str_builder_add_cstr(sb, path); str_builder_putc(sb, 10);
+    str_builder_add_cstr(sb, "Format:   ");
+    str_builder_add_cstr(sb, jlw_container_format_name(JlwMediaInfo_format(info)));
+    str_builder_putc(sb, 10);
+    var dur = JlwMediaInfo_duration(info);
+    if (jlw_is_finite(dur) == 1) {
+        str_builder_add_cstr(sb, "Duration: ");
+        str_builder_add_cstr(sb, jlw_format_duration(f64_to(dur)));
+        str_builder_putc(sb, 10);
+    }
+    var codec = JlwMediaInfo_audio_codec(info);
+    if (codec != (0 - 1)) {
+        str_builder_add_cstr(sb, "Codec:    ");
+        str_builder_add_cstr(sb, jlw_audio_codec_name(codec));
+        str_builder_putc(sb, 10);
+    }
+    var title = JlwScannedFile_title(scanned);
+    if (title != 0) { str_builder_add_cstr(sb, "Title:    "); str_builder_add_cstr(sb, title); str_builder_putc(sb, 10); }
+    var artist = JlwScannedFile_artist(scanned);
+    if (artist != 0) { str_builder_add_cstr(sb, "Artist:   "); str_builder_add_cstr(sb, artist); str_builder_putc(sb, 10); }
+    var album = JlwScannedFile_album(scanned);
+    if (album != 0) { str_builder_add_cstr(sb, "Album:    "); str_builder_add_cstr(sb, album); str_builder_putc(sb, 10); }
+    return str_cstr(str_builder_build(sb));
+}

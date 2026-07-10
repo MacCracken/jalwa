@@ -104,10 +104,11 @@ fn jlw_cmd_play(engine, path) {
     return jlw_mcp_cat("Played: ", path);
 }
 #must_use
+# info: real audio probe summary (shravan header probe -- tarang is video-only).
+#must_use
 fn jlw_cmd_info(path) {
     if (file_exists(path) == 0) { return jlw_mcp_cat("error: cannot open: ", path); }
-    # tarang probe stubbed -- report the path only for now.
-    return jlw_mcp_cat("File: ", path);
+    return jlw_scanner_probe_summary(path);
 }
 # scan a directory (real, via shravan audio probe -- tarang is video-only), add
 # new files to the library, and report. Ports rust-old cmd_scan (backed by

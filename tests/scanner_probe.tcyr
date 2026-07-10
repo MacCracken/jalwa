@@ -107,6 +107,20 @@ assert_eq(res != 0, 1, "scan_directory ok");
 assert_eq(vec_len(JlwScanResult_files(res)), 2, "found 2 wav files");
 assert_eq(JlwScanResult_dirs_walked(res) >= 1, 1, "walked >=1 dir");
 
+# ---- probe summary (jalwa info) ----
+test_group("probe_summary");
+fn has(hay, needle) { if (strstr(hay, needle) >= 0) { return 1; } return 0; }
+var fsum = jlw_scanner_probe_summary("tests/fixtures/probe.flac");
+assert_eq(has(fsum, "Format:   Flac"), 1, "summary shows FLAC format");
+assert_eq(has(fsum, "Duration: 0:01"), 1, "summary shows duration");
+assert_eq(has(fsum, "Codec:    Flac"), 1, "summary shows codec");
+assert_eq(has(fsum, "Title:    Probe Title"), 1, "summary shows title");
+assert_eq(has(fsum, "Artist:   Probe Artist"), 1, "summary shows artist");
+var wsum = jlw_scanner_probe_summary("/tmp/jalwa_sp2.wav");
+assert_eq(has(wsum, "Format:   Wav"), 1, "wav summary format");
+assert_eq(has(wsum, "Duration: 0:02"), 1, "wav summary duration");
+assert_eq(has(wsum, "Title:"), 0, "wav (untagged) has no Title line");
+
 rm("/tmp/jalwa_sp.wav"); rm("/tmp/jalwa_sp2.wav");
 rm("/tmp/jalwa_sp_scandir/a.wav"); rm("/tmp/jalwa_sp_scandir/b.wav");
 var rc = assert_summary();
