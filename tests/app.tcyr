@@ -1,0 +1,130 @@
+# app.tcyr -- parity tests for src/ui/app.cyr (TUI app state).
+# Ports all 21 #[test]s from jalwa-ui/src/app.rs.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/ui/app.cyr"
+
+fn cstr3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var d = alloc(la + lb + lc + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); memcpy(d + la + lb, c, lc);
+    store8(d + la + lb + lc, 0);
+    return d;
+}
+fn rm(path) { syscall(87, path); return 0; }
+fn make_item(title, artist) {
+    var it = jlw_media_item_new(cstr3("/music/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    JlwMediaItem_set_album(it, "Album");
+    JlwMediaItem_set_duration(it, f64_from(200));
+    return it;
+}
+# fresh app on a fresh temp db (rm makes a new inode each call -> no handle clash).
+fn make_test_app() {
+    rm("/tmp/jalwa_app_test.db");
+    return jlw_app_new(jlw_plib_open("/tmp/jalwa_app_test.db"), jlw_engine_new(jlw_engine_config_default()));
+}
+fn add(a, title, artist) { jlw_library_add_item(jlw_app_lib(a), make_item(title, artist)); return 0; }
+
+alloc_init();
+
+# ---- view_cycle ----
+test_group("view cycle");
+assert_eq(jlw_view_cycle(JLW_VIEW_LIBRARY), JLW_VIEW_NOW_PLAYING, "lib->now");
+assert_eq(jlw_view_cycle(JLW_VIEW_NOW_PLAYING), JLW_VIEW_QUEUE, "now->queue");
+assert_eq(jlw_view_cycle(JLW_VIEW_QUEUE), JLW_VIEW_EQUALIZER, "queue->eq");
+assert_eq(jlw_view_cycle(JLW_VIEW_EQUALIZER), JLW_VIEW_LIBRARY, "eq->lib");
+
+# ---- app_new_defaults + no_error ----
+test_group("app new defaults");
+var a1 = make_test_app();
+assert_eq(JlwApp_view(a1), JLW_VIEW_LIBRARY, "view Library");
+assert_eq(JlwApp_selected_index(a1), 0, "selected 0");
+assert_eq(strlen(JlwApp_search_query(a1)), 0, "empty query");
+assert_eq(JlwApp_input_mode(a1), JLW_INPUT_NORMAL, "Normal mode");
+assert_eq(JlwApp_running(a1), 1, "running");
+assert_eq(JlwApp_last_error(a1), 0, "no error");
+assert_eq(JlwApp_last_error_at(a1), (0 - 1), "no error time");
+
+# ---- list_len variants ----
+test_group("list_len");
+assert_eq(jlw_app_list_len(make_test_app()), 0, "empty library");
+var a2 = make_test_app(); add(a2, "A", "X"); add(a2, "B", "Y");
+assert_eq(jlw_app_list_len(a2), 2, "2 items");
+var a3 = make_test_app(); JlwApp_set_view(a3, JLW_VIEW_QUEUE); jlw_queue_enqueue(JlwApp_queue(a3), jlw_uuid_v4());
+assert_eq(jlw_app_list_len(a3), 1, "queue 1");
+var a4 = make_test_app(); JlwApp_set_view(a4, JLW_VIEW_NOW_PLAYING);
+assert_eq(jlw_app_list_len(a4), 0, "now playing 0");
+
+# ---- select prev/next ----
+test_group("select nav");
+var a5 = make_test_app();
+jlw_app_select_prev(a5);
+assert_eq(JlwApp_selected_index(a5), 0, "prev at 0 stays");
+var a6 = make_test_app(); add(a6, "A", "X"); add(a6, "B", "Y");
+jlw_app_select_next(a6);
+assert_eq(JlwApp_selected_index(a6), 1, "next -> 1");
+jlw_app_select_next(a6);
+assert_eq(JlwApp_selected_index(a6), 1, "clamps at 1");
+var a7 = make_test_app(); add(a7, "A", "X"); add(a7, "B", "Y"); add(a7, "C", "Z");
+jlw_app_select_next(a7); jlw_app_select_next(a7);
+assert_eq(JlwApp_selected_index(a7), 2, "down to 2");
+jlw_app_select_prev(a7);
+assert_eq(JlwApp_selected_index(a7), 1, "up to 1");
+
+# ---- update_search ----
+test_group("update_search");
+var a8 = make_test_app();
+JlwApp_set_search_results(a8, vec_new());
+vec_push(JlwApp_search_results(a8), 0); vec_push(JlwApp_search_results(a8), 1);
+jlw_app_update_search(a8);
+assert_eq(vec_len(JlwApp_search_results(a8)), 0, "empty query clears");
+var a9 = make_test_app(); add(a9, "Bohemian Rhapsody", "Queen"); add(a9, "Time", "Pink Floyd");
+JlwApp_set_search_query(a9, "queen");
+jlw_app_update_search(a9);
+assert_eq(vec_len(JlwApp_search_results(a9)), 1, "1 match");
+assert_eq(vec_get(JlwApp_search_results(a9), 0), 0, "index 0");
+var a10 = make_test_app(); add(a10, "A", "X");
+JlwApp_set_selected_index(a10, 5);
+JlwApp_set_search_query(a10, "A");
+jlw_app_update_search(a10);
+assert_eq(JlwApp_selected_index(a10), 0, "selection clamped");
+var a11 = make_test_app(); add(a11, "Unique", "X"); add(a11, "Other", "Y");
+JlwApp_set_search_query(a11, "Unique");
+jlw_app_update_search(a11);
+assert_eq(jlw_app_list_len(a11), 1, "list_len with search = 1");
+
+# ---- selected_library_index ----
+test_group("selected_library_index");
+var a12 = make_test_app(); add(a12, "A", "X"); JlwApp_set_selected_index(a12, 0);
+assert_eq(jlw_app_selected_library_index(a12), 0, "normal -> 0");
+assert_eq(jlw_app_selected_library_index(make_test_app()), (0 - 1), "empty -> None");
+var a13 = make_test_app(); add(a13, "Alpha", "X"); add(a13, "Beta", "Y");
+JlwApp_set_search_query(a13, "Beta"); jlw_app_update_search(a13); JlwApp_set_selected_index(a13, 0);
+assert_eq(jlw_app_selected_library_index(a13), 1, "search maps to index 1");
+var a14 = make_test_app(); JlwApp_set_view(a14, JLW_VIEW_QUEUE);
+assert_eq(jlw_app_selected_library_index(a14), (0 - 1), "wrong view -> None");
+
+# ---- error handling ----
+test_group("error handling");
+var a15 = make_test_app();
+assert_eq(JlwApp_last_error(a15), 0, "no error initially");
+jlw_app_set_error(a15, "decoder failed");
+assert_streq(JlwApp_last_error(a15), "decoder failed", "stored message");
+assert_eq(JlwApp_last_error_at(a15) != (0 - 1), 1, "error time set");
+jlw_app_clear_error(a15);
+assert_eq(JlwApp_last_error(a15), 0, "cleared message");
+assert_eq(JlwApp_last_error_at(a15), (0 - 1), "cleared time");
+var a16 = make_test_app();
+jlw_app_set_error(a16, "fresh error");
+jlw_app_clear_stale_error(a16);
+assert_eq(JlwApp_last_error(a16) != 0, 1, "fresh error kept");
+
+rm("/tmp/jalwa_app_test.db");
+var rc = assert_summary();
+syscall(60, rc);
