@@ -1,0 +1,41 @@
+# ai/fingerprint.cyr -- local audio-fingerprint similarity.
+# Ports rust-old/crates/jalwa-ai/src/fingerprint.rs. L2: depends on error.cyr +
+# core/types.cyr. serde dropped.
+#
+# STUB (BLOCKED): the tarang-ai fingerprint kernel (FileDecoder / compute_
+# fingerprint / fingerprint_match) and the rayon par_iter have no Cyrius target.
+# jlw_fingerprint_file returns 0 (unavailable) -- so a missing file is an error
+# (the tested path) and find_similar_local always returns empty (seed fingerprint
+# fails). When a Cyrius tarang lands: decode ~30s -> dhvani buffer, compute the
+# fingerprint, and fan out the per-item match over lib/thread (+ atomic).
+
+# ---- FingerprintMatch ----
+#derive(accessors)
+struct JlwFingerprintMatch { item_id; score; path; }
+#must_use
+fn jlw_fingerprint_match_new(item_id, score, path) {
+    var m = alloc(sizeof(JlwFingerprintMatch));
+    JlwFingerprintMatch_set_item_id(m, item_id);
+    JlwFingerprintMatch_set_score(m, score);
+    JlwFingerprintMatch_set_path(m, path);
+    return m;
+}
+
+# fingerprint_file(path): compute an audio fingerprint. STUBBED -- returns 0
+# (None/error). A missing file is an error either way; a real file needs the
+# (blocked) tarang kernel.
+#must_use
+fn jlw_fingerprint_file(path) {
+    if (file_exists(path) == 0) { return 0; }   # missing -> error
+    return 0;                                     # kernel unavailable (stub)
+}
+
+# find_similar_local(library, seed_path, max_results, threshold): matches sorted
+# by score. STUBBED -- the seed fingerprint is unavailable, so this returns empty
+# (mirrors the Rust "failed to fingerprint seed -> return empty" path).
+#must_use
+fn jlw_ai_find_similar_local(library, seed_path, max_results, threshold) {
+    var seed_fp = jlw_fingerprint_file(seed_path);
+    if (seed_fp == 0) { return vec_new(); }
+    return vec_new();   # per-item fingerprint_match fan-out stubbed
+}

@@ -1,0 +1,33 @@
+# fingerprint.tcyr -- parity tests for src/ai/fingerprint.cyr.
+# Ports the non-serde #[test]s from jalwa-ai/src/fingerprint.rs. DROPPED:
+# fingerprint_match_serialization (no serde). The real fingerprint kernel is
+# tarang-stubbed, so the compute path isn't exercised.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/ai/fingerprint.cyr"
+
+alloc_init();
+
+# ---- fingerprint_nonexistent_file -> Err (0) ----
+test_group("fingerprint nonexistent file");
+assert_eq(jlw_fingerprint_file("/nonexistent/file.flac"), 0, "missing file -> error");
+
+# ---- find_similar_empty_library ----
+test_group("find_similar empty library");
+assert_eq(vec_len(jlw_ai_find_similar_local(jlw_library_new(), "/some/seed.flac", 5, 0.5)), 0, "empty");
+
+# ---- fingerprint_match_score_range (struct fields) ----
+test_group("FingerprintMatch fields");
+var id = jlw_uuid_v4();
+var m = jlw_fingerprint_match_new(id, 0.95, "/music/similar.flac");
+assert_eq(jlw_uuid_eq(JlwFingerprintMatch_item_id(m), id), 1, "item_id");
+assert_eq(f64_lt(f64_abs(f64_sub(JlwFingerprintMatch_score(m), 0.95)), 0.0001), 1, "score 0.95");
+assert_streq(JlwFingerprintMatch_path(m), "/music/similar.flac", "path");
+
+# ---- find_similar_max_results_zero ----
+test_group("find_similar max_results zero");
+assert_eq(vec_len(jlw_ai_find_similar_local(jlw_library_new(), "/some/seed.flac", 0, 0)), 0, "max 0 -> empty");
+
+var rc = assert_summary();
+syscall(60, rc);
