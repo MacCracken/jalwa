@@ -1,0 +1,99 @@
+# gui_draw.tcyr -- tests for the GUI draw-command layer (src/gui/draw.cyr).
+# The whole point of the command IR is headless testability: assert the emitted
+# command list (kinds, geometry, colors, text) for given GuiApp states -- no pixels,
+# no window. Phase 1 covers the sidebar + transport builders + the color bridge.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/gui/theme.cyr"
+include "src/gui/app.cyr"
+include "src/gui/views.cyr"
+include "src/gui/draw.cyr"
+
+fn rm(path) { syscall(87, path); return 0; }
+fn fresh_plib() { rm("/tmp/jalwa_gui_draw.db"); return jlw_plib_open("/tmp/jalwa_gui_draw.db"); }
+fn eng() { return jlw_engine_new(jlw_engine_config_default()); }
+fn contains(hay, needle) { if (strstr(hay, needle) >= 0) { return 1; } return 0; }
+# first command of `kind` whose text contains `needle`, or 0
+fn find_text(cmds, needle) {
+    for (var i = 0; i < vec_len(cmds); i = i + 1) {
+        var c = vec_get(cmds, i);
+        if (JlwDrawCmd_kind(c) == JLW_DRAW_TEXT) {
+            if (JlwDrawCmd_text(c) != 0) { if (contains(JlwDrawCmd_text(c), needle) == 1) { return c; } }
+        }
+    }
+    return 0;
+}
+# count commands of a kind with a given color
+fn count_rect_color(cmds, color) {
+    var n = 0;
+    for (var i = 0; i < vec_len(cmds); i = i + 1) {
+        var c = vec_get(cmds, i);
+        if (JlwDrawCmd_kind(c) == JLW_DRAW_RECT) { if (JlwDrawCmd_color(c) == color) { n = n + 1; } }
+    }
+    return n;
+}
+
+alloc_init();
+
+# ---- color bridge: 0xRRGGBBAA -> XRGB8888 ----
+test_group("color_to_xrgb");
+assert_eq(jlw_gui_color_to_xrgb(JLW_GUI_ACCENT), 0x00BCD4, "accent -> 0x00BCD4");
+assert_eq(jlw_gui_color_to_xrgb(JLW_GUI_BG_DARK), 0x18181C, "bg dark -> 0x18181C");
+assert_eq(jlw_gui_color_to_xrgb(JLW_GUI_TEXT_PRIMARY), 0xE6E6EB, "text -> 0xE6E6EB");
+
+# ---- sidebar builder ----
+test_group("build_sidebar");
+var app = jlw_gui_app_new(fresh_plib(), eng());
+JlwGuiApp_set_view(app, JLW_GUI_VIEW_LIBRARY);
+var c1 = vec_new();
+jlw_gui_build_sidebar(app, 0, 0, JLW_GUI_SIDEBAR_W, 600, c1);
+# first command is the panel background rect over the full sidebar
+var bg = vec_get(c1, 0);
+assert_eq(JlwDrawCmd_kind(bg), JLW_DRAW_RECT, "first cmd is a rect");
+assert_eq(JlwDrawCmd_color(bg), JLW_GUI_BG_PANEL, "sidebar bg = panel color");
+assert_eq(JlwDrawCmd_w(bg), JLW_GUI_SIDEBAR_W, "sidebar full width");
+# 5 entries (no video) -> a Library label present
+assert_eq(find_text(c1, "Library") != 0, 1, "Library entry drawn");
+assert_eq(find_text(c1, "Queue") != 0, 1, "Queue entry drawn");
+# the active (Library) row draws a widget-bg highlight rect; inactive rows do not
+assert_eq(count_rect_color(c1, JLW_GUI_BG_WIDGET), 1, "exactly one active-row highlight");
+# active entry text uses the accent color
+var libtxt = find_text(c1, "Library");
+assert_eq(JlwDrawCmd_color(libtxt), JLW_GUI_ACCENT, "active entry text = accent");
+var qtxt = find_text(c1, "Queue");
+assert_eq(JlwDrawCmd_color(qtxt), JLW_GUI_TEXT_SECONDARY, "inactive entry = secondary");
+
+# switching the active view moves the highlight
+JlwGuiApp_set_view(app, JLW_GUI_VIEW_QUEUE);
+var c2 = vec_new();
+jlw_gui_build_sidebar(app, 0, 0, JLW_GUI_SIDEBAR_W, 600, c2);
+assert_eq(JlwDrawCmd_color(find_text(c2, "Queue")), JLW_GUI_ACCENT, "Queue now active (accent)");
+assert_eq(JlwDrawCmd_color(find_text(c2, "Library")), JLW_GUI_TEXT_SECONDARY, "Library now inactive");
+
+# ---- transport builder ----
+test_group("build_transport");
+var app2 = jlw_gui_app_new(fresh_plib(), eng());
+var ct = vec_new();
+jlw_gui_build_transport(app2, 0, 536, 800, JLW_GUI_TRANSPORT_H, ct);
+# transport bg rect first
+assert_eq(JlwDrawCmd_color(vec_get(ct, 0)), JLW_GUI_BG_PANEL, "transport bg = panel");
+# stopped engine -> play glyph "|>" (not pause)
+assert_eq(find_text(ct, "|>") != 0, 1, "stopped -> play glyph");
+assert_eq(find_text(ct, "||"), 0, "not the pause glyph when stopped");
+# no media loaded
+assert_eq(find_text(ct, "No media loaded") != 0, 1, "no-media title");
+# volume 100% (default volume 1.0)
+assert_eq(find_text(ct, "100%") != 0, 1, "volume 100%");
+# progress bar track (BG_WIDGET rect of height 3) present; no fill at position 0
+assert_eq(count_rect_color(ct, JLW_GUI_BG_WIDGET), 1, "seek track drawn");
+# the accent progress fill is absent at position 0 (ratio 0 -> no fill rect)
+assert_eq(count_rect_color(ct, JLW_GUI_ACCENT), 0, "no progress fill at start");
+
+rm("/tmp/jalwa_gui_draw.db");
+var rc = assert_summary();
+syscall(60, rc);

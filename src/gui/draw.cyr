@@ -1,0 +1,143 @@
+# gui/draw.cyr -- the GUI draw-command layer (Phase 1 of the Wayland GUI).
+# Ports the egui immediate-mode view bodies of rust-old/crates/jalwa-gui/src/views/*
+# as a PURE "GuiApp state -> ordered draw-command list" -- no pixels, no syscalls,
+# no window. This is the headless-TESTABLE core (assert the command list for a given
+# app state); a later CPU rasterizer (raster.cyr) executes the list and a quarantined
+# present shell (present.cyr) blits it to a Wayland surface.
+#
+# dhancha (retained-mode toolkit) is the design template but NOT a dep: it needs a
+# newer toolchain + drags in setu/sadish/rekha and lacks jalwa's widgets (slider/
+# image/list/scroll), so the command IR + builders are hand-rolled here. Builders
+# reuse the already-tested jlw_gui_* helpers (theme colors, sidebar_entries, nav
+# color, play_label/mute codes, format_track_title/volume, progress_ratio, ...).
+
+# ---- draw-command kinds ----
+var JLW_DRAW_RECT   = 0;   # filled rectangle (color)
+var JLW_DRAW_TEXT   = 1;   # text: cstr at (x,y), color; aux = max_chars (0 = no cap)
+var JLW_DRAW_BORDER = 2;   # 1px rectangle outline (color)
+var JLW_DRAW_IMAGE  = 3;   # album art: text = art id/path, (x,y,w,h)
+var JLW_DRAW_CLIP_PUSH = 4;  # push a clip rect (x,y,w,h) for scroll viewports
+var JLW_DRAW_CLIP_POP  = 5;
+
+# ---- layout constants (px) ----
+var JLW_GUI_SIDEBAR_W   = 180;
+var JLW_GUI_TRANSPORT_H = 64;
+var JLW_GUI_ROW_H       = 32;   # sidebar / list row height
+var JLW_GUI_PAD         = 8;
+var JLW_GUI_TEXT_DY     = 20;   # text baseline offset within a row
+
+#derive(accessors)
+struct JlwDrawCmd { kind; x; y; w; h; color; text; aux; }
+
+#must_use
+fn jlw_draw_cmd_new(kind, x, y, w, h, color, text, aux) {
+    var c = alloc(sizeof(JlwDrawCmd));
+    JlwDrawCmd_set_kind(c, kind);
+    JlwDrawCmd_set_x(c, x);   JlwDrawCmd_set_y(c, y);
+    JlwDrawCmd_set_w(c, w);   JlwDrawCmd_set_h(c, h);
+    JlwDrawCmd_set_color(c, color);
+    JlwDrawCmd_set_text(c, text);
+    JlwDrawCmd_set_aux(c, aux);
+    return c;
+}
+
+# 0xRRGGBBAA theme color -> XRGB8888 (0x00RRGGBB) word for the raster/present format.
+#inline
+#must_use
+fn jlw_gui_color_to_xrgb(c) {
+    return (jlw_gui_color_r(c) * 65536) + (jlw_gui_color_g(c) * 256) + jlw_gui_color_b(c);
+}
+
+# ---- command push helpers ----
+fn jlw_gui_draw_rect(cmds, x, y, w, h, color) {
+    vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_RECT, x, y, w, h, color, 0, 0));
+    return 0;
+}
+fn jlw_gui_draw_border(cmds, x, y, w, h, color) {
+    vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_BORDER, x, y, w, h, color, 0, 0));
+    return 0;
+}
+fn jlw_gui_draw_text(cmds, x, y, color, text, max_chars) {
+    vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_TEXT, x, y, 0, 0, color, text, max_chars));
+    return 0;
+}
+
+# icon + " " + label as one cstr (sidebar / button labels).
+#must_use
+fn jlw_gui_icon_label(icon, label) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, icon);
+    str_builder_putc(sb, 32);
+    str_builder_add_cstr(sb, label);
+    return str_cstr(str_builder_build(sb));
+}
+
+# ---- sidebar (views/sidebar.rs) ----
+# left nav column: panel bg, then one row per nav entry (active row gets a widget-bg
+# tint + accent text; others secondary text). Emits into `cmds`. Returns the count.
+fn jlw_gui_build_sidebar(app, x, y, w, h, cmds) {
+    jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_PANEL);
+    var entries = jlw_gui_sidebar_entries(jlw_engine_is_video(JlwGuiApp_engine(app)));
+    var view = JlwGuiApp_view(app);
+    var ry = y + JLW_GUI_PAD;
+    for (var i = 0; i < vec_len(entries); i = i + 1) {
+        var e = vec_get(entries, i);
+        var active = 0;
+        if (JlwGuiNavEntry_view_code(e) == view) { active = 1; }
+        if (active == 1) { jlw_gui_draw_rect(cmds, x, ry, w, JLW_GUI_ROW_H, JLW_GUI_BG_WIDGET); }
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, ry + JLW_GUI_TEXT_DY,
+                          jlw_gui_nav_active_color(active),
+                          jlw_gui_icon_label(JlwGuiNavEntry_icon(e), JlwGuiNavEntry_label(e)), 0);
+        ry = ry + JLW_GUI_ROW_H;
+    }
+    return vec_len(cmds);
+}
+
+# ---- transport bar (views/transport.rs) ----
+# bottom bar: bg, play/pause + prev/next glyph buttons, track title, volume %, and a
+# progress/seek bar (bg track + accent fill by progress_ratio). Pure geometry over the
+# ported transport helpers. Emits into `cmds`.
+fn jlw_gui_build_transport(app, x, y, w, h, cmds) {
+    var engine = JlwGuiApp_engine(app);
+    jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_PANEL);
+
+    var by = y + JLW_GUI_PAD;
+    var bsz = JLW_GUI_ROW_H;
+    # transport glyph buttons (prev / play-or-pause / next)
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_PRIMARY, "|<", 0);
+    var play_glyph = "|>";
+    if (jlw_gui_play_label_code(jlw_engine_state(engine)) == JLW_GUI_ICON_PAUSE) { play_glyph = "||"; }
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD + bsz, by + JLW_GUI_TEXT_DY, JLW_GUI_ACCENT, play_glyph, 0);
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD + bsz * 2, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_PRIMARY, ">|", 0);
+
+    # track title (artist -- title, or "No media loaded")
+    var artist = 0;
+    var title = "";
+    var has_item = 0;
+    var cid = JlwGuiApp_current_playing_id(app);
+    if (cid != 0) {
+        var item = jlw_library_find_by_id(jlw_gui_app_lib(app), cid);
+        if (item != 0) { title = JlwMediaItem_title(item); artist = JlwMediaItem_artist(item); has_item = 1; }
+    }
+    var tx = x + JLW_GUI_PAD + bsz * 3 + JLW_GUI_PAD;
+    jlw_gui_draw_text(cmds, tx, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_PRIMARY,
+                      jlw_gui_format_track_title(artist, title, has_item), 0);
+
+    # volume % (right-aligned area)
+    var vx = x + w - 120;
+    jlw_gui_draw_text(cmds, vx, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_SECONDARY,
+                      jlw_gui_format_volume_pct(jlw_engine_volume(engine)), 0);
+    if (jlw_gui_mute_icon_code(jlw_engine_muted(engine)) == JLW_GUI_ICON_SPEAKER_MUTED) {
+        jlw_gui_draw_text(cmds, vx + 48, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_MUTED, "x", 0);
+    }
+
+    # progress / seek bar along the bottom of the transport strip
+    var barx = x + JLW_GUI_PAD;
+    var bary = y + h - JLW_GUI_PAD;
+    var barw = w - JLW_GUI_PAD * 2;
+    jlw_gui_draw_rect(cmds, barx, bary, barw, 3, JLW_GUI_BG_WIDGET);
+    var ratio = jlw_gui_progress_ratio(jlw_engine_position(engine), JlwPlaybackEngine_duration(engine));
+    var fillw = f64_to(f64_mul(ratio, f64_from(barw)));
+    if (fillw > 0) { jlw_gui_draw_rect(cmds, barx, bary, fillw, 3, JLW_GUI_ACCENT); }
+    return vec_len(cmds);
+}

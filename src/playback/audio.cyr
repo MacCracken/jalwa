@@ -83,10 +83,11 @@ fn jlw_audio_play_file_h(path, volume, h) {
     if (count == 0) { return JLW_ERR_PLAYBACK; }
     if (channels <= 0) { channels = 1; }
 
-    # graphic EQ (upfront, whole-track): applies the handle's dhvani settings if a
-    # non-flat EQ is enabled. A mid-track band change takes effect on the next track.
+    # DSP chain (upfront, whole-track): graphic EQ then loudness-normalize, each a
+    # no-op when disabled. A mid-track EQ/normalize change takes effect on the next track.
     if (h != 0) {
         samples = jlw_audio_apply_eq(samples, channels, rate, JlwPlayHandle_eq(h));
+        samples = jlw_audio_apply_normalize(samples, channels, rate, JlwPlayHandle_normalize(h));
         count = vec_len(samples);
     }
 
@@ -164,7 +165,7 @@ fn jlw_audio_play_file(path, volume) { return jlw_audio_play_file_h(path, volume
 # thread. Single-word fields -> aligned load64/store64 are atomic on x86_64/agnos,
 # so `stop`/`done`/`position` need no lock for this producer/consumer pattern.
 #derive(accessors)
-struct JlwPlayHandle { path; volume; stop; done; position; rc; paused; seek_to; eq; }
+struct JlwPlayHandle { path; volume; stop; done; position; rc; paused; seek_to; eq; normalize; }
 
 # the thread body: play the file (cancellable via the handle), then mark done.
 fn jlw_audio_play_worker(h) {
@@ -178,7 +179,7 @@ fn jlw_audio_play_worker(h) {
 # read position; cancel via _stop; pause / live volume / seek via _ctl. Mirrors
 # rust-old's spawned decode thread (gapless / prepare_next is a follow-up).
 #must_use
-fn jlw_audio_play_async_full(path, volume, eq) {
+fn jlw_audio_play_async_full(path, volume, eq, normalize) {
     var h = alloc(sizeof(JlwPlayHandle));
     JlwPlayHandle_set_path(h, path);
     JlwPlayHandle_set_volume(h, volume);
@@ -189,12 +190,13 @@ fn jlw_audio_play_async_full(path, volume, eq) {
     JlwPlayHandle_set_paused(h, 0);
     JlwPlayHandle_set_seek_to(h, 0 - 1);   # no pending seek
     JlwPlayHandle_set_eq(h, eq);           # dhvani geq settings ptr, or 0
+    JlwPlayHandle_set_normalize(h, normalize);   # loudness-normalize on/off
     thread_create(&jlw_audio_play_worker, h);
     return h;
 }
 #inline
 #must_use
-fn jlw_audio_play_async(path, volume) { return jlw_audio_play_async_full(path, volume, 0); }
+fn jlw_audio_play_async(path, volume) { return jlw_audio_play_async_full(path, volume, 0, 0); }
 
 # transport control from the main thread -> the decode thread (atomic single-word
 # flags; the loop re-reads them between chunks). code/arg use the JLW_PLAY_CMD_*
@@ -215,11 +217,24 @@ fn jlw_audio_play_stop(h) { JlwPlayHandle_set_stop(h, 1); return 0; }
 fn jlw_audio_play_position(h) { return JlwPlayHandle_position(h); }   # f64 seconds
 
 # engine-backend adapter: volume arrives as an integer percent (0-100) across the
-# fnptr seam. Registered via jlw_engine_set_audio_backend(&jlw_audio_play_async_eq,
+# fnptr seam. Registered via jlw_engine_set_audio_backend(&jlw_audio_play_async_dsp,
 # &jlw_audio_play_is_done, &jlw_audio_play_stop, &jlw_audio_play_position).
 #must_use
-fn jlw_audio_play_async_eq(path, vol_pct, eq) {
-    return jlw_audio_play_async_full(path, f64_div(f64_from(vol_pct), 100.0), eq);
+fn jlw_audio_play_async_dsp(path, vol_pct, eq, normalize) {
+    return jlw_audio_play_async_full(path, f64_div(f64_from(vol_pct), 100.0), eq, normalize);
+}
+
+# apply loudness normalization (dhvani analysis -> peak-limited gain) to decoded
+# samples, or return them unchanged when disabled. Like EQ, this is upfront/whole-track
+# (RMS analysis needs the full buffer). Returns the (possibly new) sample vec.
+#must_use
+fn jlw_audio_apply_normalize(samples, channels, rate, enabled) {
+    if (enabled == 0) { return samples; }
+    if (vec_len(samples) == 0) { return samples; }
+    var buf = jlw_audio_buffer_new(samples, channels, rate);
+    var loud = jlw_dsp_analyze_loudness(buf);
+    var nbuf = jlw_dsp_normalize(buf, JlwLoudnessInfo_gain(loud));
+    return JlwAudioBuffer_samples(nbuf);
 }
 
 # apply the graphic EQ (dhvani jlw_dsp) to decoded samples, returning the EQ'd

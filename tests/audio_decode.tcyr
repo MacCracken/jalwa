@@ -109,5 +109,19 @@ for (var i = 200; i < 400; i = i + 1) {
 }
 assert_eq(changed, 1, "EQ actually altered the audio");
 
+# ---- loudness-normalize (upfront, jlw_audio_apply_normalize) ----
+test_group("normalize apply");
+var ndr = jlw_audio_decode("tests/fixtures/probe.wav");
+var ns = decode_result_samples(ndr);
+assert_eq(jlw_audio_apply_normalize(ns, 1, 44100, 0) == ns, 1, "disabled -> same samples");
+var nn = jlw_audio_apply_normalize(ns, 1, 44100, 1);
+assert_eq(vec_len(nn), vec_len(ns), "normalized same length");
+# the 440Hz tone (RMS below target 0.125) gets gained up -> samples differ + grow
+var nchanged = 0;
+for (var i = 200; i < 400; i = i + 1) {
+    if (f64_to(f64_mul(f64_abs(f64_sub(vec_get(nn, i), vec_get(ns, i))), 1000.0)) > 0) { nchanged = 1; }
+}
+assert_eq(nchanged, 1, "normalize altered the audio");
+
 var rc = assert_summary();
 syscall(60, rc);
