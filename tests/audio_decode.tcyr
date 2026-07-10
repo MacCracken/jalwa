@@ -1,0 +1,67 @@
+# audio_decode.tcyr -- tests for the testable seam of src/playback/audio.cyr:
+# jlw_audio_decode (shravan decode via jalwa's own format dispatch) and
+# jlw_audio_f64_to_i16 (sample conversion). The vani output loop
+# (jlw_audio_play_file) needs a real device -> smoke-tested via the binary, not here.
+# Fixtures: tests/fixtures/probe.{wav,flac,mp3} (all 440Hz mono @ 44100).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/core/scanner.cyr"
+include "src/playback/audio.cyr"
+
+alloc_init();
+
+# ---- WAV decode (0.25s = 11025 samples) ----
+test_group("WAV decode");
+var wdr = jlw_audio_decode("tests/fixtures/probe.wav");
+assert_eq(wdr > 0, 1, "wav decode ok");
+var wfi = decode_result_info(wdr);
+assert_eq(fmtinfo_sample_rate(wfi), 44100, "wav rate 44100");
+assert_eq(fmtinfo_channels(wfi), 1, "wav mono");
+assert_eq(vec_len(decode_result_samples(wdr)), 11025, "wav 11025 samples (0.25s)");
+
+# ---- FLAC decode (1s = 44100 samples, normalized f64) ----
+test_group("FLAC decode");
+var fdr = jlw_audio_decode("tests/fixtures/probe.flac");
+assert_eq(fdr > 0, 1, "flac decode ok");
+var ffi = decode_result_info(fdr);
+assert_eq(fmtinfo_sample_rate(ffi), 44100, "flac rate 44100");
+assert_eq(fmtinfo_channels(ffi), 1, "flac mono");
+assert_eq(vec_len(decode_result_samples(fdr)), 44100, "flac 44100 samples (1s)");
+# samples are normalized f64 in [-1, 1]
+var fs = decode_result_samples(fdr);
+assert_eq(f64_to(f64_mul(f64_abs(vec_get(fs, 200)), 1000.0)) <= 1000, 1, "sample |x|<=1");
+
+# ---- MP3 decode (1s, encoder delay/padding -> ~44100+ samples) ----
+test_group("MP3 decode");
+var mdr = jlw_audio_decode("tests/fixtures/probe.mp3");
+assert_eq(mdr > 0, 1, "mp3 decode ok");
+assert_eq(fmtinfo_sample_rate(decode_result_info(mdr)), 44100, "mp3 rate 44100");
+assert_eq(vec_len(decode_result_samples(mdr)) > 40000, 1, "mp3 ~1s of samples");
+
+# ---- unknown/undecodable path ----
+test_group("decode failure");
+assert_eq(jlw_audio_decode("/nonexistent.flac"), 0, "missing file -> 0");
+
+# ---- f64 -> i16 conversion (volume + clamp) ----
+test_group("f64_to_i16 conversion");
+var sv = vec_new();
+vec_push(sv, 0.0); vec_push(sv, 1.0); vec_push(sv, f64_neg(1.0)); vec_push(sv, 0.5);
+var out = alloc(8);                         # 4 samples x 2 bytes
+jlw_audio_f64_to_i16(sv, 0, 4, 1.0, out);
+assert_eq(load16(out + 0), 0, "0.0 -> 0");
+assert_eq(load16(out + 2), 32767, "1.0 -> 32767 (clamped)");
+assert_eq(load16(out + 4), 32768, "-1.0 -> -32768 (0x8000)");
+assert_eq(load16(out + 6), 16384, "0.5 -> 16384");
+# volume scaling
+jlw_audio_f64_to_i16(sv, 0, 4, 0.5, out);
+assert_eq(load16(out + 2), 16384, "1.0 @ vol0.5 -> 16384");
+assert_eq(load16(out + 6), 8192, "0.5 @ vol0.5 -> 8192");
+# clamp negative beyond range stays at -32768
+var sv2 = vec_new(); vec_push(sv2, f64_neg(2.0));
+jlw_audio_f64_to_i16(sv2, 0, 1, 1.0, out);
+assert_eq(load16(out + 0), 32768, "-2.0 -> clamped -32768");
+
+var rc = assert_summary();
+syscall(60, rc);

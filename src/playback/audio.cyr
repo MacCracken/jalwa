@@ -1,0 +1,100 @@
+# playback/audio.cyr -- real audio playback: shravan decode -> volume -> vani out.
+# tarang is VIDEO-only; audio decodes through shravan and plays through vani
+# (ALSA / agnos snd band). This replaces the tarang-stubbed decode path for the
+# CLI `jalwa play` (synchronous blocking playback -- no decode thread yet).
+#
+# Depends on core/scanner.cyr (jlw_detect_audio_format, jlw_file_size) + the
+# shravan and vani deps. dhvani DSP/EQ is available (jlw_dsp) but not yet wired
+# into the live loop -- volume is applied; EQ is a follow-up.
+#
+# TESTABLE seam: jlw_audio_decode (decode a fixture -> rate/channels/samples) and
+# jlw_audio_f64_to_i16 (sample conversion). SMOKE-only: jlw_audio_play_file needs
+# a real audio device (absent under cyrius test / headless CI -> returns cleanly).
+
+# shravan decoders read the F64 conversion constants (shravan_init_constants) and
+# FLAC needs its CRC tables (flac_init); mp3_decode self-inits its tables. Once.
+var JLW_AUDIO_INIT = 0;
+fn jlw_audio_ensure_init() {
+    if (JLW_AUDIO_INIT == 0) {
+        shravan_init_constants();
+        flac_init();
+        JLW_AUDIO_INIT = 1;
+    }
+    return 0;
+}
+
+# decode an audio file to a shravan decode_result (>0), or 0 on failure. Bypasses
+# shravan codec_open (its internal detect_format collides with sankoch's) by
+# dispatching on jalwa's own magic-byte detector to the per-format decoder.
+# Reads the whole file (one alloc); OGG/AAC/MP4/OPUS decode is deferred.
+#must_use
+fn jlw_audio_decode(path) {
+    jlw_audio_ensure_init();
+    var size = jlw_file_size(path);
+    if (size <= 0) { return 0; }
+    var buf = alloc(size);
+    var n = file_read_all(path, buf, size);
+    if (n <= 0) { return 0; }
+    var sf = jlw_detect_audio_format(buf, n);
+    var dr = 0;
+    if (sf == 0) { dr = wav_decode(buf, n); }
+    if (sf == 1) { dr = flac_decode(buf, n); }
+    if (sf == 5) { dr = mp3_decode(buf, n); }
+    if (dr <= 0) { return 0; }
+    return dr;
+}
+
+# convert `count` normalized-f64 samples starting at `start` to interleaved S16_LE
+# in `out` (2 bytes/sample), applying `volume` and clamping to [-32768, 32767].
+fn jlw_audio_f64_to_i16(samples, start, count, volume, out) {
+    var neg = f64_neg(32768.0);
+    for (var j = 0; j < count; j = j + 1) {
+        var v = f64_mul(f64_mul(vec_get(samples, start + j), volume), 32768.0);
+        if (f64_gt(v, 32767.0) == 1) { v = 32767.0; }
+        if (f64_lt(v, neg) == 1) { v = neg; }
+        store16(out + j * 2, f64_to(v));
+    }
+    return 0;
+}
+
+# play a decoded file synchronously to the default device. Returns JLW_ERR_NONE on
+# a completed playback, JLW_ERR_UNSUPPORTED_FORMAT if decode fails, or
+# JLW_ERR_PLAYBACK if no audio device is available (headless/CI). Blocks until the
+# track finishes (vani audio_write is kernel-paced).
+fn jlw_audio_play_file(path, volume) {
+    var dr = jlw_audio_decode(path);
+    if (dr == 0) { return JLW_ERR_UNSUPPORTED_FORMAT; }
+    var fi = decode_result_info(dr);
+    var rate = fmtinfo_sample_rate(fi);
+    var channels = fmtinfo_channels(fi);
+    var samples = decode_result_samples(dr);
+    var count = vec_len(samples);
+    if (count == 0) { return JLW_ERR_PLAYBACK; }
+    if (channels <= 0) { channels = 1; }
+
+    var dev = audio_open_playback(0, 0);
+    if (dev == 0) { return JLW_ERR_PLAYBACK; }   # no device
+    audio_set_params(dev, rate, channels, 16);
+    audio_prepare(dev);
+
+    var chunk_frames = 4096;
+    var chunk_samples = chunk_frames * channels;
+    var outbuf = alloc(chunk_samples * 2);       # reused per chunk (no per-frame alloc)
+    var i = 0;
+    while (i < count) {
+        var m = count - i;
+        if (m > chunk_samples) { m = chunk_samples; }
+        jlw_audio_f64_to_i16(samples, i, m, volume, outbuf);
+        var frames = m / channels;
+        var written = 0;
+        while (written < frames) {
+            var w = audio_write(dev, outbuf + written * channels * 2, frames - written);
+            if (w <= 0) { written = frames; i = count; }   # write error -> stop
+            else { written = written + w; }
+        }
+        i = i + m;
+    }
+    audio_drain(dev);
+    audio_close(dev);
+    return JLW_ERR_NONE;
+}

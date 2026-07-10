@@ -11,7 +11,7 @@ entry = "src/main.cyr"
 output = "jalwa"
 
 [deps]
-stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert", "math", "random", "chrono", "patra", "fs", "yukti", "hashmap", "tagged", "process", "ganita", "thread", "fnptr", "bayan"]
+stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert", "math", "random", "chrono", "patra", "fs", "yukti", "hashmap", "tagged", "process", "ganita", "thread", "fnptr", "bayan", "freelist", "sakshi", "atomic", "sync", "thread_local"]
 
 [deps.dhvani]
 path = "../dhvani"
@@ -39,3 +39,10 @@ modules = ["dist/sankoch.cyr"]
 path = "../shravan"
 tag = "2.6.7"
 modules = ["dist/shravan.cyr"]
+
+# vani = ALSA/agnos audio OUTPUT (playback sink). Audio pipeline:
+# shravan decode -> dhvani DSP -> vani out. Not tarang (video-only).
+[deps.vani]
+path = "../vani"
+tag = "1.0.0"
+modules = ["dist/vani.cyr"]

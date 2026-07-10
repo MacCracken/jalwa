@@ -19,6 +19,7 @@ include "src/playback/dsp.cyr"
 include "src/playback/decode_thread.cyr"
 include "src/playback/engine.cyr"
 include "src/playback/mpris.cyr"
+include "src/playback/audio.cyr"
 include "src/ai/reco.cyr"
 include "src/ai/daimon.cyr"
 include "src/ai/fingerprint.cyr"
@@ -91,11 +92,16 @@ fn jlw_cmd_library(plib) {
     return str_cstr(str_builder_build(sb));
 }
 #must_use
+# play a file: open (probe) + decode+output synchronously (blocks until done).
+# Real audio via shravan->vani; falls back to a message when no device/decoder.
+#must_use
 fn jlw_cmd_play(engine, path) {
     if (file_exists(path) == 0) { return jlw_mcp_cat("error: file not found: ", path); }
     jlw_engine_open(engine, path);
-    jlw_engine_play(engine);
-    return jlw_mcp_cat("Loaded: ", path);
+    var rc = jlw_audio_play_file(path, JlwPlaybackEngine_volume(engine));
+    if (rc == JLW_ERR_UNSUPPORTED_FORMAT) { return jlw_mcp_cat("error: cannot decode: ", path); }
+    if (rc != JLW_ERR_NONE) { return jlw_mcp_cat("Loaded (no audio device): ", path); }
+    return jlw_mcp_cat("Played: ", path);
 }
 #must_use
 fn jlw_cmd_info(path) {
