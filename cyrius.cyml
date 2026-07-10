@@ -14,42 +14,42 @@ output = "jalwa"
 stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert", "math", "random", "chrono", "patra", "fs", "yukti", "hashmap", "tagged", "process", "ganita", "thread", "fnptr", "bayan", "freelist", "sakshi", "atomic", "sync", "thread_local"]
 
 [deps.dhvani]
-path = "../dhvani"
+git = "https://github.com/MacCracken/dhvani.git"
 tag = "2.2.1"
 modules = ["dist/dhvani.cyr"]
 
 [deps.abaco]
-path = "../abaco"
+git = "https://github.com/MacCracken/abaco.git"
 tag = "2.3.2"
 modules = ["dist/abaco.cyr"]
 
 [deps.darshana]
-path = "../darshana"
+git = "https://github.com/MacCracken/darshana.git"
 tag = "0.9.0"
 modules = ["dist/darshana.cyr"]
 
 # sankoch before shravan (shravan depends on sankoch). Audio codecs (decode/probe/
 # tags) go through shravan -- tarang is video-only.
 [deps.sankoch]
-path = "../sankoch"
+git = "https://github.com/MacCracken/sankoch.git"
 tag = "2.4.9"
 modules = ["dist/sankoch.cyr"]
 
 [deps.shravan]
-path = "../shravan"
+git = "https://github.com/MacCracken/shravan.git"
 tag = "2.6.7"
 modules = ["dist/shravan.cyr"]
 
 # vani = ALSA/agnos audio OUTPUT (playback sink). Audio pipeline:
 # shravan decode -> dhvani DSP -> vani out. Not tarang (video-only).
 [deps.vani]
-path = "../vani"
+git = "https://github.com/MacCracken/vani.git"
 tag = "1.0.0"
 modules = ["dist/vani.cyr"]
 
 # kashi — freestanding VGA 8x16 font-data core (zero stdlib: load8/store8 + arithmetic).
 # Provides kashi_glyph_row(font_id, ch, row) for the GUI CPU rasterizer (src/gui/raster.cyr).
 [deps.kashi]
-path = "../kashi"
+git = "https://github.com/MacCracken/kashi.git"
 tag = "1.0.2"
 modules = ["src/font_data.cyr"]

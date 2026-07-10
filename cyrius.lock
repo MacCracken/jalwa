@@ -1,3 +1,10 @@
+commit	d4af3eeb15400bd1e8aa92f4737a727acd84068b	dhvani	https://github.com/MacCracken/dhvani.git	2.2.1
+commit	f229966c601da9528d383d6d2816f386083eabb6	abaco	https://github.com/MacCracken/abaco.git	2.3.2
+commit	6c900238c87c34897aa19fe320553e83c3417df0	darshana	https://github.com/MacCracken/darshana.git	0.9.0
+commit	9fa963e6aa885033545cb3338cc9c4017c7b00bf	sankoch	https://github.com/MacCracken/sankoch.git	2.4.9
+commit	961aebb07e61d3dbe664a02a3f3608e37ee2ebfa	shravan	https://github.com/MacCracken/shravan.git	2.6.7
+commit	0ae38d818d2e3cc2cd14f2e653a96e76c8d51635	vani	https://github.com/MacCracken/vani.git	1.0.0
+commit	ccd2b46bad710c38d70c07e420480e5e476a54f5	kashi	https://github.com/MacCracken/kashi.git	1.0.2
 d9f3b17ddbbe1bba48917c3a679807b01c39c4a1ce776efdbdfbb7a1680e86e4  lib/tagged.cyr
 d7a14f337a9e8c67ac95023cddf58614a21d8aacd2eb1736da798843ccf0deba  lib/syscalls_macos.cyr
 3b816192a2db1f48401891d1d020c607081e0af52033d8f4f00c96d8660a0580  lib/bayan.cyr
