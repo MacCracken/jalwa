@@ -22,3 +22,8 @@ modules = ["dist/dhvani.cyr"]
 path = "../abaco"
 tag = "2.3.2"
 modules = ["dist/abaco.cyr"]
+
+[deps.darshana]
+path = "../darshana"
+tag = "0.9.0"
+modules = ["dist/darshana.cyr"]

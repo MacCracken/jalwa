@@ -1,12 +1,14 @@
-# ui/tui.cyr -- TUI input handling (crossterm keys / MPRIS commands -> app state).
-# Ports rust-old/crates/jalwa-ui/src/tui.rs. L3: depends on error.cyr +
-# core/types.cyr + core/db.cyr + playback/{engine,mpris}.cyr + ui/app.cyr.
+# ui/tui.cyr -- TUI input handling + interactive run loop (keys/watcher -> state).
+# Ports rust-old/crates/jalwa-ui/src/tui.rs. Depends on error.cyr + core/types.cyr
+# + core/db.cyr + core/watcher.cyr + playback/{decode_thread,engine,mpris}.cyr +
+# ui/{app,widgets}.cyr, and (for jlw_tui_run only) the darshana tty dist.
 #
 # The run() event loop + terminal control (crossterm alt-screen/raw-mode +
-# ratatui draw) is DEFERRED -- reimplement over darshana (tty) + ui/widgets
-# text rendering. The TESTED core -- the key-dispatch + MPRIS-command handlers
-# that mutate app state -- ports faithfully. KeyCode: printable chars ride their
-# ASCII byte (< 256); special keys use the JLW_KEY_* sentinels below.
+# ratatui draw) is reimplemented over darshana (tty control) + ui/widgets text
+# rendering + a hand-rolled CSI key decoder (see jlw_tui_run / jlw_tui_decode_key
+# at the bottom). KeyCode: printable chars ride their ASCII byte (< 256); special
+# keys use the JLW_KEY_* sentinels below. crossterm's `event::poll(50ms)` becomes
+# a raw poll(2) tick gate; ratatui's diffed draw becomes a full-screen repaint.
 
 var JLW_KEY_LEFT      = 256;
 var JLW_KEY_RIGHT     = 257;
@@ -16,6 +18,11 @@ var JLW_KEY_ENTER     = 260;
 var JLW_KEY_TAB       = 261;
 var JLW_KEY_ESC       = 262;
 var JLW_KEY_BACKSPACE = 263;
+var JLW_KEY_CTRL_C    = 264;   # 0x03 in raw mode -> quit (crossterm CONTROL+'c')
+var JLW_KEY_EOF       = 265;   # stdin closed (read==0) -> quit (Rust event::read()? errors out)
+var JLW_KEY_UNKNOWN_CSI = 266; # a recognised-but-unmapped CSI/SS3 seq (Home/End/PgUp/...) -> no-op,
+                               # NOT ESC: crossterm delivers these as distinct KeyCodes that hit the
+                               # handlers' `_ => {}` arm, so they must NOT cancel/clear search.
 
 # append a char (byte) to a cstring -> fresh cstring.
 #must_use
@@ -209,4 +216,197 @@ fn jlw_tui_handle_mpris_command(app, cmd, payload, current_id) {
 
 # run(app): the event loop + terminal control -- DEFERRED (crossterm/ratatui ->
 # darshana + ui/widgets). Returns 0.
-fn jlw_tui_run(app) { return 0; }
+# ---- CSI key decoder (the tested, tty-independent core) ----
+# decode a keypress from b0 + (for an ESC sequence) the introducer b1 ('[' or 'O')
+# and the sequence's FINAL byte b2 (b1/b2 = -1 when absent). Arrows (final A/B/C/D)
+# map to JLW_KEY_*; any other complete CSI/SS3 sequence -> JLW_KEY_UNKNOWN_CSI (a
+# no-op, NOT ESC, so Home/End/PgUp/etc. don't cancel search); a lone Esc (no
+# introducer) -> JLW_KEY_ESC. Non-ESC bytes map to Enter/Tab/Backspace/Ctrl-C or
+# ride through as themselves. jlw_tui_read_key fully consumes the sequence and
+# passes the final byte here, so no CSI tail bytes leak into the next keypress.
+#must_use
+fn jlw_tui_decode_key(b0, b1, b2) {
+    if (b0 == 27) {                               # ESC
+        if (b1 == 91 || b1 == 79) {               # '[' (CSI) or 'O' (SS3, app-cursor mode)
+            if (b2 == 65) { return JLW_KEY_UP; }     # 'A'
+            if (b2 == 66) { return JLW_KEY_DOWN; }   # 'B'
+            if (b2 == 67) { return JLW_KEY_RIGHT; }  # 'C'
+            if (b2 == 68) { return JLW_KEY_LEFT; }   # 'D'
+            return JLW_KEY_UNKNOWN_CSI;            # Home/End/PgUp/Del/F-keys/... -> no-op
+        }
+        return JLW_KEY_ESC;                        # lone Esc (or Alt-<key>) -> cancel
+    }
+    if (b0 == 13 || b0 == 10) { return JLW_KEY_ENTER; }
+    if (b0 == 9)              { return JLW_KEY_TAB; }
+    if (b0 == 127 || b0 == 8) { return JLW_KEY_BACKSPACE; }
+    if (b0 == 3)              { return JLW_KEY_CTRL_C; }
+    return b0;                                     # printable ASCII byte
+}
+
+# ---- raw tty I/O helpers (poll-gated so a bare read never freezes the tick) ----
+# poll(2) on a single fd. pfd = caller's reusable 8-byte pollfd; returns >0 ready.
+#must_use
+fn jlw_tui_poll_fd(pfd, fd, timeout_ms) {
+    store32(pfd, fd);
+    store16(pfd + 4, 1);         # events = POLLIN
+    store16(pfd + 6, 0);         # revents
+    return syscall(7, pfd, 1, timeout_ms);   # poll(&pfd, 1, timeout)
+}
+# read one byte from fd into the caller's reusable 1-byte buffer. Returns the
+# byte (0-255), -2 on EOF (read==0), or -1 on a transient error/no-data. EOF is
+# kept distinct so the loop can quit instead of spinning (Rust's read()? errors out).
+#must_use
+fn jlw_tui_read_byte(rdbuf, fd) {
+    var r = file_read(fd, rdbuf, 1);
+    if (r == 0) { return (0 - 2); }   # EOF (stdin closed)
+    if (r < 0)  { return (0 - 1); }   # EAGAIN / transient
+    return load8(rdbuf);
+}
+# read a full keypress. On EOF -> JLW_KEY_EOF. On ESC, poll(0) for a CSI/SS3
+# introducer (a lone Esc must not block), then drain parameter/intermediate bytes
+# up to the final byte (0x40-0x7E) so the WHOLE sequence is consumed and no tail
+# byte (e.g. the '~' of ESC[5~) leaks into the next keypress; the final byte is
+# handed to decode_key. A truncated/foreign sequence degrades to Esc.
+#must_use
+fn jlw_tui_read_key(fd, rdbuf, pfd) {
+    var b0 = jlw_tui_read_byte(rdbuf, fd);
+    if (b0 == (0 - 2)) { return JLW_KEY_EOF; }
+    if (b0 < 0) { return JLW_KEY_ESC; }
+    if (b0 != 27) { return jlw_tui_decode_key(b0, (0 - 1), (0 - 1)); }
+    # ESC: is a CSI ('[') or SS3 ('O') introducer following?
+    if (jlw_tui_poll_fd(pfd, fd, 0) <= 0) { return JLW_KEY_ESC; }   # lone Esc
+    var b1 = jlw_tui_read_byte(rdbuf, fd);
+    if (b1 != 91 && b1 != 79) { return JLW_KEY_ESC; }               # not a CSI/SS3 -> treat as Esc
+    # drain up to the final byte (0x40..0x7E); guard bounds a malformed stream.
+    var final = (0 - 1);
+    var guard = 0;
+    while (final < 0 && guard < 16) {
+        if (jlw_tui_poll_fd(pfd, fd, 0) <= 0) { guard = 16; }       # sequence truncated
+        else {
+            var c = jlw_tui_read_byte(rdbuf, fd);
+            if (c < 0) { guard = 16; }
+            else { if (c >= 64 && c <= 126) { final = c; } guard = guard + 1; }
+        }
+    }
+    if (final < 0) { return JLW_KEY_ESC; }                          # incomplete CSI -> Esc
+    return jlw_tui_decode_key(27, b1, final);
+}
+
+# ---- engine-event handler (forward-ready; poll_events is tarang-stubbed empty) ----
+# Faithful port of tui.rs's EngineEvent match. current_id is an 8-byte slot
+# (load64/store64; 0 = None) tracking the playing item for play-count updates.
+fn jlw_tui_handle_engine_event(app, ev, current_id) {
+    var code = JlwEngineEvent_code(ev);
+    var engine = JlwApp_engine(app);
+    var queue = JlwApp_queue(app);
+    if (code == JLW_EVT_TRACK_FINISHED) {
+        jlw_app_clear_error(app);
+        var cid = load64(current_id);
+        if (cid != 0) { jlw_plib_update_play_count(JlwApp_library(app), cid); store64(current_id, 0); }
+        var next = jlw_queue_advance(queue);
+        if (next != 0) {
+            var item = jlw_library_find_by_id(jlw_app_lib(app), next);
+            if (item != 0) {
+                store64(current_id, next);
+                jlw_engine_open(engine, JlwMediaItem_path(item));
+                jlw_engine_play(engine);
+            }
+        }
+        return 0;
+    }
+    if (code == JLW_EVT_TRACK_CHANGED) {
+        jlw_app_clear_error(app);
+        var cid2 = load64(current_id);
+        if (cid2 != 0) { jlw_plib_update_play_count(JlwApp_library(app), cid2); store64(current_id, 0); }
+        if (jlw_queue_advance(queue) != 0) { store64(current_id, jlw_queue_current(queue)); }
+        return 0;
+    }
+    if (code == JLW_EVT_NEAR_END) {
+        var pos = JlwPlayQueue_position(queue);
+        if (pos != (0 - 1)) {
+            var items = JlwPlayQueue_items(queue);
+            var np = pos + 1;
+            if (np < vec_len(items)) {
+                var it2 = jlw_library_find_by_id(jlw_app_lib(app), vec_get(items, np));
+                if (it2 != 0) { jlw_engine_prepare_next(engine, JlwMediaItem_path(it2)); }
+            }
+        }
+        return 0;
+    }
+    if (code == JLW_EVT_ERROR) { jlw_app_set_error(app, JlwEngineEvent_msg(ev)); return 0; }
+    return 0;   # StateChanged / PositionUpdate / PrepareNextFailed -> ignored (as in Rust)
+}
+
+# ---- watcher-event handler (real inotify) ----
+# FileRemoved -> drop the item from the library; FileCreated auto-add requires
+# the tarang scan feature (no-op here, matching #[cfg(not(feature="tarang"))]);
+# FileModified -> no-op.
+fn jlw_tui_handle_watch_event(app, ev) {
+    if (JlwWatchEvent_code(ev) == JLW_WATCH_REMOVED) {
+        var item = jlw_library_find_by_path(jlw_app_lib(app), JlwWatchEvent_path(ev));
+        if (item != 0) { jlw_plib_remove_item(JlwApp_library(app), JlwMediaItem_id(item)); }
+    }
+    return 0;
+}
+
+# ---- the run loop ----
+# Reimplements tui.rs::run over darshana. Non-interactive (no tty) -> no-op,
+# matching darshana's agnos contract. The MPRIS drain is omitted: spawn_mpris_server
+# is D-Bus-stubbed, so no command source is wired to the TUI (deferred with samvada).
+fn jlw_tui_run(app) {
+    if (tty_isatty(0) == 0) { return 0; }
+    var engine = JlwApp_engine(app);
+    var w = jlw_watcher_new(JlwLibrary_scan_paths(jlw_app_lib(app)));   # 0-safe below
+    var current_id = alloc(8);
+    store64(current_id, 0);
+    var rdbuf = alloc(1);
+    var pfd = alloc(8);
+
+    tty_raw(0);
+    tty_alt_enter();
+    tty_cursor_hide();
+
+    while (JlwApp_running(app) == 1) {
+        jlw_app_clear_stale_error(app);
+
+        # full-screen repaint (ratatui's diffed draw -> simple full paint)
+        tty_clear();
+        tty_cursor_home();
+        var screen = jlw_widgets_render(app);
+        file_write(1, screen, strlen(screen));
+
+        # engine events (empty until tarang lands; drain kept for forward-compat)
+        var evs = jlw_engine_poll_events(engine);
+        for (var i = 0; i < vec_len(evs); i = i + 1) {
+            jlw_tui_handle_engine_event(app, vec_get(evs, i), current_id);
+        }
+
+        # library watcher (real): auto-remove deleted media files
+        if (w != 0) {
+            if (JlwWatcher_fd(w) >= 0) {
+                var wevs = jlw_watcher_poll(w);
+                for (var j = 0; j < vec_len(wevs); j = j + 1) {
+                    jlw_tui_handle_watch_event(app, vec_get(wevs, j));
+                }
+            }
+        }
+
+        # keyboard: 50ms tick gate; only read when a byte is actually ready.
+        # EOF (stdin closed) exits the loop instead of spinning at 100% CPU --
+        # poll reports a dead fd readable forever, so a 0-byte read must quit.
+        if (jlw_tui_poll_fd(pfd, 0, 50) > 0) {
+            var k = jlw_tui_read_key(0, rdbuf, pfd);
+            if (k == JLW_KEY_CTRL_C || k == JLW_KEY_EOF) { JlwApp_set_running(app, 0); }
+            else {
+                if (JlwApp_input_mode(app) == JLW_INPUT_SEARCH) { jlw_tui_handle_search_input(app, k); }
+                else { jlw_tui_handle_normal_input(app, k, current_id); }
+            }
+        }
+    }
+
+    tty_cooked();          # disable_raw_mode
+    tty_alt_leave();       # LeaveAlternateScreen
+    tty_cursor_show();     # show_cursor
+    jlw_engine_stop(engine);
+    return 0;
+}

@@ -1,0 +1,140 @@
+# tui_runloop.tcyr -- tests for the newly-ported TUI run-loop cores in tui.cyr.
+# The run loop itself (jlw_tui_run) needs a controlling terminal, so it can't run
+# under `cyrius test`; its logic lives in the tty-independent pieces tested here:
+# the CSI key decoder (jlw_tui_decode_key) + the watcher/engine event handlers.
+# Oracle: rust-old/crates/jalwa-ui/src/tui.rs (KeyCode mapping + the poll match arms).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/core/watcher.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/playback/mpris.cyr"
+include "src/ui/app.cyr"
+include "src/ui/tui.cyr"
+
+fn rm(path) { syscall(87, path); return 0; }
+fn fresh_plib() { rm("/tmp/jalwa_tui_runloop.db"); return jlw_plib_open("/tmp/jalwa_tui_runloop.db"); }
+fn eng() { return jlw_engine_new(jlw_engine_config_default()); }
+fn mkitem(path, title) {
+    var it = jlw_media_item_new(path, title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    return it;
+}
+
+alloc_init();
+
+# ============================================================================
+# jlw_tui_decode_key -- the CSI key decoder (crossterm KeyCode mapping)
+# ============================================================================
+test_group("decode_key arrows");
+assert_eq(jlw_tui_decode_key(27, 91, 65), JLW_KEY_UP, "ESC [ A -> UP");
+assert_eq(jlw_tui_decode_key(27, 91, 66), JLW_KEY_DOWN, "ESC [ B -> DOWN");
+assert_eq(jlw_tui_decode_key(27, 91, 67), JLW_KEY_RIGHT, "ESC [ C -> RIGHT");
+assert_eq(jlw_tui_decode_key(27, 91, 68), JLW_KEY_LEFT, "ESC [ D -> LEFT");
+
+test_group("decode_key SS3 arrows (app-cursor mode)");
+assert_eq(jlw_tui_decode_key(27, 79, 65), JLW_KEY_UP, "ESC O A -> UP");
+assert_eq(jlw_tui_decode_key(27, 79, 68), JLW_KEY_LEFT, "ESC O D -> LEFT");
+
+test_group("decode_key non-arrow CSI -> UNKNOWN (not ESC)");
+# Home/End/PgUp/Del/etc. must NOT decode to ESC (which would cancel search).
+assert_eq(jlw_tui_decode_key(27, 91, 72), JLW_KEY_UNKNOWN_CSI, "ESC [ H (Home) -> UNKNOWN");
+assert_eq(jlw_tui_decode_key(27, 91, 70), JLW_KEY_UNKNOWN_CSI, "ESC [ F (End) -> UNKNOWN");
+assert_eq(jlw_tui_decode_key(27, 91, 126), JLW_KEY_UNKNOWN_CSI, "ESC [ ... ~ (PgUp/Del final) -> UNKNOWN");
+assert_eq(jlw_tui_decode_key(27, 91, 90), JLW_KEY_UNKNOWN_CSI, "ESC [ Z (Shift-Tab) -> UNKNOWN");
+
+test_group("decode_key esc/special");
+assert_eq(jlw_tui_decode_key(27, 0 - 1, 0 - 1), JLW_KEY_ESC, "lone ESC (no introducer)");
+assert_eq(jlw_tui_decode_key(13, 0 - 1, 0 - 1), JLW_KEY_ENTER, "CR -> ENTER");
+assert_eq(jlw_tui_decode_key(10, 0 - 1, 0 - 1), JLW_KEY_ENTER, "LF -> ENTER");
+assert_eq(jlw_tui_decode_key(9, 0 - 1, 0 - 1), JLW_KEY_TAB, "TAB");
+assert_eq(jlw_tui_decode_key(127, 0 - 1, 0 - 1), JLW_KEY_BACKSPACE, "DEL -> BACKSPACE");
+assert_eq(jlw_tui_decode_key(8, 0 - 1, 0 - 1), JLW_KEY_BACKSPACE, "BS -> BACKSPACE");
+assert_eq(jlw_tui_decode_key(3, 0 - 1, 0 - 1), JLW_KEY_CTRL_C, "Ctrl-C");
+
+test_group("decode_key printable ride-through");
+assert_eq(jlw_tui_decode_key(97, 0 - 1, 0 - 1), 97, "'a' rides through");
+assert_eq(jlw_tui_decode_key(47, 0 - 1, 0 - 1), 47, "'/' rides through (search key)");
+assert_eq(jlw_tui_decode_key(113, 0 - 1, 0 - 1), 113, "'q' rides through (quit key)");
+assert_eq(jlw_tui_decode_key(32, 0 - 1, 0 - 1), 32, "space rides through (play/pause)");
+
+# ============================================================================
+# search-mode key handling: non-arrow CSI (Home/End/PgUp/...) must NOT wipe the
+# query; only a lone Esc cancels+clears (regression lock for the CSI-conflation bug)
+# ============================================================================
+test_group("search mode: UNKNOWN_CSI preserves query, ESC clears");
+var apps = jlw_app_new(fresh_plib(), eng());
+JlwApp_set_input_mode(apps, JLW_INPUT_SEARCH);
+JlwApp_set_search_query(apps, "beatles");
+jlw_tui_handle_search_input(apps, JLW_KEY_UNKNOWN_CSI);   # e.g. End key
+assert_streq(JlwApp_search_query(apps), "beatles", "Home/End/PgUp keep the query");
+assert_eq(JlwApp_input_mode(apps), JLW_INPUT_SEARCH, "still in search mode");
+jlw_tui_handle_search_input(apps, JLW_KEY_ESC);           # real Esc cancels
+assert_streq(JlwApp_search_query(apps), "", "Esc clears the query");
+assert_eq(JlwApp_input_mode(apps), JLW_INPUT_NORMAL, "Esc exits search mode");
+
+# UNKNOWN_CSI is a no-op in normal mode too (falls through, no crash)
+test_group("normal mode: UNKNOWN_CSI is a no-op");
+var appn = jlw_app_new(fresh_plib(), eng());
+jlw_tui_handle_normal_input(appn, JLW_KEY_UNKNOWN_CSI, alloc(8));
+assert_eq(JlwApp_running(appn), 1, "UNKNOWN_CSI does not quit / crash");
+
+# ============================================================================
+# jlw_tui_handle_watch_event -- real inotify FileRemoved auto-drop
+# ============================================================================
+test_group("watch event FileRemoved");
+var app1 = jlw_app_new(fresh_plib(), eng());
+var it1 = mkitem("/music/keep.flac", "Keep");
+var itdel = mkitem("/music/gone.flac", "Gone");
+jlw_library_add_item(jlw_app_lib(app1), it1);
+jlw_library_add_item(jlw_app_lib(app1), itdel);
+assert_eq(vec_len(JlwLibrary_items(jlw_app_lib(app1))), 2, "2 items before");
+jlw_tui_handle_watch_event(app1, jlw_watch_event_new(JLW_WATCH_REMOVED, "/music/gone.flac"));
+assert_eq(vec_len(JlwLibrary_items(jlw_app_lib(app1))), 1, "1 item after remove");
+assert_eq(jlw_library_find_by_path(jlw_app_lib(app1), "/music/gone.flac"), 0, "gone.flac dropped");
+assert_eq(jlw_library_find_by_path(jlw_app_lib(app1), "/music/keep.flac") != 0, 1, "keep.flac stays");
+
+test_group("watch event no-op branches");
+jlw_tui_handle_watch_event(app1, jlw_watch_event_new(JLW_WATCH_REMOVED, "/music/unknown.flac"));
+assert_eq(vec_len(JlwLibrary_items(jlw_app_lib(app1))), 1, "remove unknown path -> no-op");
+jlw_tui_handle_watch_event(app1, jlw_watch_event_new(JLW_WATCH_CREATED, "/music/keep.flac"));
+assert_eq(vec_len(JlwLibrary_items(jlw_app_lib(app1))), 1, "FileCreated -> no-op (tarang-gated)");
+jlw_tui_handle_watch_event(app1, jlw_watch_event_new(JLW_WATCH_MODIFIED, "/music/keep.flac"));
+assert_eq(vec_len(JlwLibrary_items(jlw_app_lib(app1))), 1, "FileModified -> no-op");
+
+# ============================================================================
+# jlw_tui_handle_engine_event -- forward-ready EngineEvent match
+# ============================================================================
+test_group("engine event Error");
+var app2 = jlw_app_new(fresh_plib(), eng());
+jlw_tui_handle_engine_event(app2, jlw_engine_event_new(JLW_EVT_ERROR, "decode failed"), alloc(8));
+assert_streq(JlwApp_last_error(app2), "decode failed", "EVT_ERROR sets app error");
+
+test_group("engine event TrackFinished advances + counts");
+var app3 = jlw_app_new(fresh_plib(), eng());
+var a3 = mkitem("/m/a.flac", "A");
+var b3 = mkitem("/m/b.flac", "B");
+jlw_library_add_item(jlw_app_lib(app3), a3);
+jlw_library_add_item(jlw_app_lib(app3), b3);
+var q3 = JlwApp_queue(app3);
+jlw_queue_enqueue(q3, JlwMediaItem_id(a3));
+jlw_queue_enqueue(q3, JlwMediaItem_id(b3));   # position now 0
+var cid = alloc(8);
+store64(cid, JlwMediaItem_id(a3));
+jlw_tui_handle_engine_event(app3, jlw_engine_event_new(JLW_EVT_TRACK_FINISHED, 0), cid);
+assert_eq(jlw_uuid_eq(load64(cid), JlwMediaItem_id(b3)), 1, "current advanced to B");
+assert_eq(JlwMediaItem_play_count(a3), 1, "A play_count incremented");
+assert_eq(JlwPlayQueue_position(q3), 1, "queue position advanced to 1");
+
+test_group("engine event safety (empty queue)");
+var app4 = jlw_app_new(fresh_plib(), eng());
+var cid4 = alloc(8);
+store64(cid4, 0);
+jlw_tui_handle_engine_event(app4, jlw_engine_event_new(JLW_EVT_TRACK_FINISHED, 0), cid4);
+assert_eq(load64(cid4), 0, "no current, empty queue -> stays None (no crash)");
+
+rm("/tmp/jalwa_tui_runloop.db");
+var rc = assert_summary();
+syscall(60, rc);
