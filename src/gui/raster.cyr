@@ -132,16 +132,19 @@ fn jlw_gui__utf8_at(cstr, i) {
         return ((b0 & 31) * 64 + (n1 & 63)) * 8 + 2;
     }
     if ((b0 & 240) == 224) {                          # 1110xxxx  3-byte
-        var n1 = load8(cstr + i + 1);
-        var n2 = load8(cstr + i + 2);
-        if ((n1 & 192) != 128 || (n2 & 192) != 128) { return b0 * 8 + 1; }
+        var n1 = load8(cstr + i + 1);                 # validate each continuation byte
+        if ((n1 & 192) != 128) { return b0 * 8 + 1; } # BEFORE loading the next, so a lead
+        var n2 = load8(cstr + i + 2);                 # byte just before NUL never reads past it
+        if ((n2 & 192) != 128) { return b0 * 8 + 1; }
         return ((b0 & 15) * 4096 + (n1 & 63) * 64 + (n2 & 63)) * 8 + 3;
     }
     if ((b0 & 248) == 240) {                          # 11110xxx  4-byte
         var n1 = load8(cstr + i + 1);
+        if ((n1 & 192) != 128) { return b0 * 8 + 1; }
         var n2 = load8(cstr + i + 2);
+        if ((n2 & 192) != 128) { return b0 * 8 + 1; }
         var n3 = load8(cstr + i + 3);
-        if ((n1 & 192) != 128 || (n2 & 192) != 128 || (n3 & 192) != 128) { return b0 * 8 + 1; }
+        if ((n3 & 192) != 128) { return b0 * 8 + 1; }
         return ((b0 & 7) * 262144 + (n1 & 63) * 4096 + (n2 & 63) * 64 + (n3 & 63)) * 8 + 4;
     }
     return b0 * 8 + 1;                                 # stray continuation -> raw

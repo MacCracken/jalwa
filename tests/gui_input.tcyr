@@ -1,0 +1,71 @@
+# gui_input.tcyr -- tests for the GUI evdev->key mapper (src/gui/input.cyr).
+# The Wayland present shell (Phase 3) is unverifiable headless, but its input decode
+# is pure: raw evdev keycode + shift -> jalwa key. This suite proves that mapping and
+# the end-to-end evdev -> key -> action chain (composing jlw_gui_key_to_action), so
+# the whole keyboard path is validated without a display.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/gui/theme.cyr"
+include "src/gui/app.cyr"
+include "src/gui/views.cyr"
+include "src/gui/draw.cyr"
+include "src/gui/input.cyr"
+
+# ---- letters (shift = uppercase) ----
+test_group("evdev_letters");
+assert_eq(jlw_gui_evdev_to_key(16, 0), 113, "q -> 'q'");
+assert_eq(jlw_gui_evdev_to_key(16, 1), 81, "shift+q -> 'Q'");
+assert_eq(jlw_gui_evdev_to_key(30, 0), 97, "a -> 'a'");
+assert_eq(jlw_gui_evdev_to_key(44, 0), 122, "z -> 'z'");
+assert_eq(jlw_gui_evdev_to_key(18, 0), 101, "e -> 'e'");
+assert_eq(jlw_gui_evdev_to_key(49, 0), 110, "n -> 'n'");
+assert_eq(jlw_gui_evdev_to_key(49, 1), 78, "shift+n -> 'N'");
+assert_eq(jlw_gui_evdev_to_key(50, 0), 109, "m -> 'm'");
+
+# ---- digits + punctuation (shift = symbol) ----
+test_group("evdev_digits_punct");
+assert_eq(jlw_gui_evdev_to_key(2, 0), 49, "1 -> '1'");
+assert_eq(jlw_gui_evdev_to_key(2, 1), 33, "shift+1 -> '!'");
+assert_eq(jlw_gui_evdev_to_key(11, 0), 48, "0 -> '0'");
+assert_eq(jlw_gui_evdev_to_key(53, 0), 47, "slash -> '/'");
+assert_eq(jlw_gui_evdev_to_key(53, 1), 63, "shift+slash -> '?'");
+assert_eq(jlw_gui_evdev_to_key(57, 0), 32, "space -> 0x20");
+assert_eq(jlw_gui_evdev_to_key(12, 0), 45, "minus -> '-'");
+
+# ---- named navigation / editing keys ----
+test_group("evdev_named");
+assert_eq(jlw_gui_evdev_to_key(103, 0), JLW_KEY_UP, "up");
+assert_eq(jlw_gui_evdev_to_key(108, 0), JLW_KEY_DOWN, "down");
+assert_eq(jlw_gui_evdev_to_key(105, 0), JLW_KEY_LEFT, "left");
+assert_eq(jlw_gui_evdev_to_key(106, 0), JLW_KEY_RIGHT, "right");
+assert_eq(jlw_gui_evdev_to_key(28, 0), JLW_KEY_ENTER, "enter");
+assert_eq(jlw_gui_evdev_to_key(96, 0), JLW_KEY_ENTER, "keypad enter");
+assert_eq(jlw_gui_evdev_to_key(15, 0), JLW_KEY_TAB, "tab");
+assert_eq(jlw_gui_evdev_to_key(1, 0), JLW_KEY_ESC, "esc");
+assert_eq(jlw_gui_evdev_to_key(14, 0), JLW_KEY_BACKSPACE, "backspace");
+assert_eq(jlw_gui_evdev_to_key(102, 0), JLW_KEY_UNKNOWN_CSI, "home -> unmapped csi (not esc)");
+assert_eq(jlw_gui_evdev_to_key(111, 0), JLW_KEY_UNKNOWN_CSI, "delete -> unmapped csi");
+assert_eq(jlw_gui_evdev_to_key(200, 0), JLW_KEY_UNKNOWN, "unbound code -> unknown");
+
+# ---- end-to-end: raw evdev keycode -> jalwa key -> GUI action ----
+test_group("evdev_to_action");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(57, 0)), JLW_GUI_ACT_PLAY_PAUSE, "space -> play/pause");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(103, 0)), JLW_GUI_ACT_NAV_UP, "up -> nav up");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(108, 0)), JLW_GUI_ACT_NAV_DOWN, "down -> nav down");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(15, 0)), JLW_GUI_ACT_NEXT_VIEW, "tab -> next view");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(53, 0)), JLW_GUI_ACT_SEARCH, "slash -> search");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(16, 0)), JLW_GUI_ACT_QUIT, "q -> quit");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(18, 0)), JLW_GUI_ACT_EQ_TOGGLE, "e -> eq toggle");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(49, 0)), JLW_GUI_ACT_NEXT_TRACK, "n -> next track");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(49, 1)), JLW_GUI_ACT_NORMALIZE, "shift+n -> normalize");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(102, 0)), JLW_GUI_ACT_NONE, "home -> no action");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(30, 0)), JLW_GUI_ACT_ENQUEUE, "a -> enqueue");
+assert_eq(jlw_gui_key_to_action(jlw_gui_evdev_to_key(32, 0)), JLW_GUI_ACT_REMOVE, "d -> remove");
+
+var rc = assert_summary();
+syscall(60, rc);

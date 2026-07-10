@@ -127,6 +127,16 @@ assert_eq(count_neq(buf, W, 16, 2, 8, 16, bg) > 0, 1, "third cell 'B' drawn afte
 jlw_gui_fb_clear(buf, W, H, bg);
 jlw_gui_fb_text(buf, W, H, 0, 2, s, ac, 2);
 assert_eq(count_neq(buf, W, 16, 2, 8, 16, bg), 0, "max_chars=2 (codepoints) leaves 'B' cell blank");
+# truncated multi-byte lead byte immediately before NUL: decode as a raw single byte,
+# advance one cell, and NEVER read past the terminator (review finding, raster.cyr).
+jlw_gui_fb_clear(buf, W, H, bg);
+var t = alloc(3);                                    # {0xE0, 0x00} : 3-byte lead, then NUL
+store8(t, 224); store8(t + 1, 0); store8(t + 2, 0);
+var te = jlw_gui_fb_text(buf, W, H, 0, 2, t, ac, 0);
+assert_eq(te, 8, "truncated 3-byte lead before NUL -> one cell, no hang/over-read");
+var t4 = alloc(3);                                   # {0xF0, 0x00} : 4-byte lead, then NUL
+store8(t4, 240); store8(t4 + 1, 0); store8(t4 + 2, 0);
+assert_eq(jlw_gui_fb_text(buf, W, H, 0, 2, t4, ac, 0), 8, "truncated 4-byte lead before NUL -> one cell");
 
 # ---- executor: draw-command list -> pixels ----
 test_group("raster");

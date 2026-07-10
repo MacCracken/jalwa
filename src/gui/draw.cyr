@@ -191,6 +191,14 @@ fn jlw_gui_lib_item_at(app, di) {
 fn jlw_gui_build_library(app, x, y, w, h, cmds) {
     jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
     var count = jlw_gui_lib_count(app);
+    if (count == 0) {                                       # library.rs:74-88 empty state
+        var msg = "No matches";                            # search active, filtered to nothing
+        if (vec_len(JlwLibrary_items(jlw_gui_app_lib(app))) == 0) {
+            msg = "Library is empty. Use 'jalwa scan <dir>' to add files.";
+        }
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + h / 2, JLW_GUI_TEXT_MUTED, msg, 0);
+        return vec_len(cmds);
+    }
     var visible = h / JLW_GUI_ROW_H;
     if (visible < 1) { visible = 1; }
     var sel = JlwGuiApp_selected_index(app);
@@ -223,8 +231,10 @@ fn jlw_gui_build_now_playing(app, x, y, w, h, cmds) {
     var cid = JlwGuiApp_current_playing_id(app);
     var item = 0;
     if (cid != 0) { item = jlw_library_find_by_id(jlw_gui_app_lib(app), cid); }
-    if (item == 0) {
+    if (item == 0) {                                       # now_playing.rs:16-18 (two lines)
         jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + h / 2, JLW_GUI_TEXT_MUTED, "Nothing playing", 0);
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + h / 2 + 20, JLW_GUI_TEXT_MUTED,
+                          "Select a track from the Library and press Enter", 0);
         return vec_len(cmds);
     }
     var artsz = 200;
@@ -255,8 +265,10 @@ fn jlw_gui_build_queue(app, x, y, w, h, cmds) {
     var pos = JlwPlayQueue_position(q);
     var lib = jlw_gui_app_lib(app);
     var count = vec_len(items);
-    if (count == 0) {
+    if (count == 0) {                                      # queue.rs:47-51 (two lines)
         jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_MUTED, "Queue is empty", 0);
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_TEXT_DY + 20, JLW_GUI_TEXT_MUTED,
+                          "Press 'a' in Library view to enqueue tracks", 0);
         return vec_len(cmds);
     }
     var visible = h / JLW_GUI_ROW_H;
@@ -375,6 +387,8 @@ var JLW_GUI_ACT_NEXT_TRACK = 13;
 var JLW_GUI_ACT_PREV_TRACK = 14;
 var JLW_GUI_ACT_EQ_TOGGLE  = 15;
 var JLW_GUI_ACT_NORMALIZE  = 16;
+var JLW_GUI_ACT_ENQUEUE    = 17;   # 'a' on selected library row (library.rs:148)
+var JLW_GUI_ACT_REMOVE     = 18;   # 'd' on selected queue row (queue.rs:102)
 
 #must_use
 fn jlw_gui_key_to_action(key) {
@@ -395,5 +409,7 @@ fn jlw_gui_key_to_action(key) {
     if (key == 112)             { return JLW_GUI_ACT_PREV_TRACK; }   # 'p'
     if (key == 101)             { return JLW_GUI_ACT_EQ_TOGGLE; }    # 'e'
     if (key == 78)              { return JLW_GUI_ACT_NORMALIZE; }    # 'N'
+    if (key == 97)              { return JLW_GUI_ACT_ENQUEUE; }      # 'a' (library: enqueue row)
+    if (key == 100)             { return JLW_GUI_ACT_REMOVE; }       # 'd' (queue: remove row)
     return JLW_GUI_ACT_NONE;
 }

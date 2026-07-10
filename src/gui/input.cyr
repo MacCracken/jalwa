@@ -1,0 +1,103 @@
+# input.cyr — GUI input decode (Wave F, Phase 3 seam; PURE + headless-testable).
+#
+# The Wayland keyboard (gui/present.cyr, smoke-only) delivers RAW evdev keycodes +
+# a shift flag; this file maps them into jalwa's key space — printable ASCII plus the
+# JLW_KEY_* sentinels (core/types.cyr) — the SAME space the TUI's CSI decoder feeds
+# jlw_gui_key_to_action. So the action map (gui/draw.cyr) stays backend-agnostic and
+# this mapper is unit-testable with no display. Keycode table = US QWERTY, ported
+# from puka/src/input/evdev.cyr (US-only until a keymap-fd path lands).
+
+# evdev keycode -> lowercase ASCII letter, or 0 if the code is not a letter.
+#must_use
+fn jlw_gui__evdev_letter_lower(code) {
+    if (code == 30) { return 0x61; }   # a
+    if (code == 48) { return 0x62; }   # b
+    if (code == 46) { return 0x63; }   # c
+    if (code == 32) { return 0x64; }   # d
+    if (code == 18) { return 0x65; }   # e
+    if (code == 33) { return 0x66; }   # f
+    if (code == 34) { return 0x67; }   # g
+    if (code == 35) { return 0x68; }   # h
+    if (code == 23) { return 0x69; }   # i
+    if (code == 36) { return 0x6A; }   # j
+    if (code == 37) { return 0x6B; }   # k
+    if (code == 38) { return 0x6C; }   # l
+    if (code == 50) { return 0x6D; }   # m
+    if (code == 49) { return 0x6E; }   # n
+    if (code == 24) { return 0x6F; }   # o
+    if (code == 25) { return 0x70; }   # p
+    if (code == 16) { return 0x71; }   # q
+    if (code == 19) { return 0x72; }   # r
+    if (code == 31) { return 0x73; }   # s
+    if (code == 20) { return 0x74; }   # t
+    if (code == 22) { return 0x75; }   # u
+    if (code == 47) { return 0x76; }   # v
+    if (code == 17) { return 0x77; }   # w
+    if (code == 45) { return 0x78; }   # x
+    if (code == 21) { return 0x79; }   # y
+    if (code == 44) { return 0x7A; }   # z
+    return 0;
+}
+
+# evdev keycode + shift -> printable ASCII (shift selects the upper glyph), or 0 if
+# the code is not a printable key. US QWERTY.
+#must_use
+fn jlw_gui__evdev_ascii(code, shift) {
+    var lo = jlw_gui__evdev_letter_lower(code);
+    if (lo != 0) {
+        if (shift != 0) { return lo - 32; }   # 'a'(0x61) -> 'A'(0x41)
+        return lo;
+    }
+    # digit row (shift -> symbol)
+    if (code == 2)  { if (shift != 0) { return 0x21; } return 0x31; }   # 1 !
+    if (code == 3)  { if (shift != 0) { return 0x40; } return 0x32; }   # 2 @
+    if (code == 4)  { if (shift != 0) { return 0x23; } return 0x33; }   # 3 #
+    if (code == 5)  { if (shift != 0) { return 0x24; } return 0x34; }   # 4 $
+    if (code == 6)  { if (shift != 0) { return 0x25; } return 0x35; }   # 5 %
+    if (code == 7)  { if (shift != 0) { return 0x5E; } return 0x36; }   # 6 ^
+    if (code == 8)  { if (shift != 0) { return 0x26; } return 0x37; }   # 7 &
+    if (code == 9)  { if (shift != 0) { return 0x2A; } return 0x38; }   # 8 *
+    if (code == 10) { if (shift != 0) { return 0x28; } return 0x39; }   # 9 (
+    if (code == 11) { if (shift != 0) { return 0x29; } return 0x30; }   # 0 )
+    if (code == 12) { if (shift != 0) { return 0x5F; } return 0x2D; }   # - _
+    if (code == 13) { if (shift != 0) { return 0x2B; } return 0x3D; }   # = +
+    # punctuation
+    if (code == 26) { if (shift != 0) { return 0x7B; } return 0x5B; }   # [ {
+    if (code == 27) { if (shift != 0) { return 0x7D; } return 0x5D; }   # ] }
+    if (code == 39) { if (shift != 0) { return 0x3A; } return 0x3B; }   # ; :
+    if (code == 40) { if (shift != 0) { return 0x22; } return 0x27; }   # ' "
+    if (code == 41) { if (shift != 0) { return 0x7E; } return 0x60; }   # ` ~
+    if (code == 43) { if (shift != 0) { return 0x7C; } return 0x5C; }   # \ |
+    if (code == 51) { if (shift != 0) { return 0x3C; } return 0x2C; }   # , <
+    if (code == 52) { if (shift != 0) { return 0x3E; } return 0x2E; }   # . >
+    if (code == 53) { if (shift != 0) { return 0x3F; } return 0x2F; }   # / ?
+    if (code == 57) { return 0x20; }                                   # space
+    return 0;
+}
+
+# evdev keycode + shift -> a jalwa key: a printable ASCII code, or a JLW_KEY_*
+# sentinel. Named navigation/editing keys resolve first; then printables; anything
+# jalwa has no binding for returns JLW_KEY_UNKNOWN. Home/End/PgUp/PgDn/Ins/Del are
+# recognised-but-unmapped (JLW_KEY_UNKNOWN_CSI -> a no-op in key_to_action, never a
+# stray ESC).
+#must_use
+fn jlw_gui_evdev_to_key(code, shift) {
+    if (code == 103) { return JLW_KEY_UP; }
+    if (code == 108) { return JLW_KEY_DOWN; }
+    if (code == 105) { return JLW_KEY_LEFT; }
+    if (code == 106) { return JLW_KEY_RIGHT; }
+    if (code == 28)  { return JLW_KEY_ENTER; }
+    if (code == 96)  { return JLW_KEY_ENTER; }              # keypad enter
+    if (code == 15)  { return JLW_KEY_TAB; }
+    if (code == 1)   { return JLW_KEY_ESC; }
+    if (code == 14)  { return JLW_KEY_BACKSPACE; }
+    if (code == 102) { return JLW_KEY_UNKNOWN_CSI; }        # Home
+    if (code == 107) { return JLW_KEY_UNKNOWN_CSI; }        # End
+    if (code == 104) { return JLW_KEY_UNKNOWN_CSI; }        # PgUp
+    if (code == 109) { return JLW_KEY_UNKNOWN_CSI; }        # PgDn
+    if (code == 110) { return JLW_KEY_UNKNOWN_CSI; }        # Insert
+    if (code == 111) { return JLW_KEY_UNKNOWN_CSI; }        # Delete
+    var ch = jlw_gui__evdev_ascii(code, shift);
+    if (ch != 0) { return ch; }
+    return JLW_KEY_UNKNOWN;
+}

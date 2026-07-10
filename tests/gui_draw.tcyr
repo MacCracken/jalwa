@@ -244,6 +244,39 @@ assert_eq(jlw_gui_key_to_action(110), JLW_GUI_ACT_NEXT_TRACK, "n -> next");
 assert_eq(jlw_gui_key_to_action(78), JLW_GUI_ACT_NORMALIZE, "N -> normalize");
 assert_eq(jlw_gui_key_to_action(65), JLW_GUI_ACT_NONE, "unmapped 'A' -> none");
 
+# ---- empty states (parity: library.rs / now_playing.rs / queue.rs) ----
+test_group("empty_states");
+var le = jlw_gui_app_new(fresh_plib(), eng());                 # empty library
+JlwGuiApp_set_view(le, JLW_GUI_VIEW_LIBRARY);
+var cle = vec_new();
+jlw_gui_build_library(le, 0, 0, 600, 400, cle);
+assert_eq(find_text(cle, "Library is empty") != 0, 1, "empty library -> scan hint");
+# search active over a non-empty library, zero matches -> "No matches"
+var lm = jlw_gui_app_new(fresh_plib(), eng());
+mk(lm, "SomeTrack", "SA");
+JlwGuiApp_set_search_query(lm, "zzzz");
+JlwGuiApp_set_search_results(lm, vec_new());
+var clm = vec_new();
+jlw_gui_build_library(lm, 0, 0, 600, 400, clm);
+assert_eq(find_text(clm, "No matches") != 0, 1, "search miss -> No matches");
+assert_eq(find_text(clm, "Library is empty"), 0, "no scan hint when library non-empty");
+# now_playing / queue two-line guidance
+var npe = jlw_gui_app_new(fresh_plib(), eng());
+var cnp = vec_new();
+jlw_gui_build_now_playing(npe, 0, 0, 600, 400, cnp);
+assert_eq(find_text(cnp, "Nothing playing") != 0, 1, "now_playing line 1");
+assert_eq(find_text(cnp, "and press Enter") != 0, 1, "now_playing line 2 guidance");
+var qe = jlw_gui_app_new(fresh_plib(), eng());
+var cqe = vec_new();
+jlw_gui_build_queue(qe, 0, 0, 600, 400, cqe);
+assert_eq(find_text(cqe, "Queue is empty") != 0, 1, "queue line 1");
+assert_eq(find_text(cqe, "enqueue tracks") != 0, 1, "queue line 2 guidance");
+
+# ---- key_to_action: 'a' enqueue / 'd' remove (library.rs:148 / queue.rs:102) ----
+test_group("key_enqueue_remove");
+assert_eq(jlw_gui_key_to_action(97), JLW_GUI_ACT_ENQUEUE, "a -> enqueue");
+assert_eq(jlw_gui_key_to_action(100), JLW_GUI_ACT_REMOVE, "d -> remove");
+
 rm("/tmp/jalwa_gui_draw.db");
 var rc = assert_summary();
 syscall(60, rc);

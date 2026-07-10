@@ -144,6 +144,7 @@ var JLW_KEY_BACKSPACE   = 263;
 var JLW_KEY_CTRL_C      = 264;   # 0x03 in raw mode -> quit
 var JLW_KEY_EOF         = 265;   # stdin closed (read==0) -> quit
 var JLW_KEY_UNKNOWN_CSI = 266;   # recognised-but-unmapped CSI/SS3 (Home/End/PgUp/...) -> no-op (NOT ESC)
+var JLW_KEY_UNKNOWN     = 267;   # unrecognised key (unbound evdev code) -> no-op
 
 #must_use
 fn jlw_playback_state_name(code) {
