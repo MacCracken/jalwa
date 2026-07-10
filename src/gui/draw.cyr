@@ -61,6 +61,23 @@ fn jlw_gui_draw_text(cmds, x, y, color, text, max_chars) {
     vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_TEXT, x, y, 0, 0, color, text, max_chars));
     return 0;
 }
+fn jlw_gui_draw_image(cmds, x, y, w, h, art_id) {
+    vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_IMAGE, x, y, w, h, 0, art_id, 0));
+    return 0;
+}
+
+# first visible row index to keep `sel` on-screen in a `visible`-row window over
+# `count` rows (bottom-anchored auto-scroll). The virtualization jalwa must own.
+#must_use
+fn jlw_gui_scroll_start(sel, visible, count) {
+    var start = 0;
+    if (sel >= visible) { start = sel - visible + 1; }
+    var maxstart = count - visible;
+    if (maxstart < 0) { maxstart = 0; }
+    if (start > maxstart) { start = maxstart; }
+    if (start < 0) { start = 0; }
+    return start;
+}
 
 # icon + " " + label as one cstr (sidebar / button labels).
 #must_use
@@ -139,5 +156,128 @@ fn jlw_gui_build_transport(app, x, y, w, h, cmds) {
     var ratio = jlw_gui_progress_ratio(jlw_engine_position(engine), JlwPlaybackEngine_duration(engine));
     var fillw = f64_to(f64_mul(ratio, f64_from(barw)));
     if (fillw > 0) { jlw_gui_draw_rect(cmds, barx, bary, fillw, 3, JLW_GUI_ACCENT); }
+    return vec_len(cmds);
+}
+
+# ---- library list helpers (respecting the search filter) ----
+# number of rows in the current library view (all items, or search results).
+#must_use
+fn jlw_gui_lib_count(app) {
+    if (strlen(JlwGuiApp_search_query(app)) > 0) { return vec_len(JlwGuiApp_search_results(app)); }
+    return vec_len(JlwLibrary_items(jlw_gui_app_lib(app)));
+}
+# the item at display row `di`, honoring the search filter, or 0.
+#must_use
+fn jlw_gui_lib_item_at(app, di) {
+    var items = JlwLibrary_items(jlw_gui_app_lib(app));
+    if (strlen(JlwGuiApp_search_query(app)) > 0) {
+        var sr = JlwGuiApp_search_results(app);
+        if (di < 0) { return 0; }
+        if (di >= vec_len(sr)) { return 0; }
+        var idx = vec_get(sr, di);
+        if (idx < 0) { return 0; }
+        if (idx >= vec_len(items)) { return 0; }
+        return vec_get(items, idx);
+    }
+    if (di < 0) { return 0; }
+    if (di >= vec_len(items)) { return 0; }
+    return vec_get(items, di);
+}
+
+# ---- library view (views/library.rs), list mode ----
+# scrollable/virtualized track list: only the visible rows are emitted; the selected
+# row gets a widget-bg tint, and the playing/selected/default text color comes from
+# jlw_gui_row_color_code. Grid mode is deferred (falls back to the list here).
+fn jlw_gui_build_library(app, x, y, w, h, cmds) {
+    jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
+    var count = jlw_gui_lib_count(app);
+    var visible = h / JLW_GUI_ROW_H;
+    if (visible < 1) { visible = 1; }
+    var sel = JlwGuiApp_selected_index(app);
+    var start = jlw_gui_scroll_start(sel, visible, count);
+    var end = start + visible;
+    if (end > count) { end = count; }
+    var pid = JlwGuiApp_current_playing_id(app);
+    for (var di = start; di < end; di = di + 1) {
+        var item = jlw_gui_lib_item_at(app, di);
+        if (item != 0) {
+            var ry = y + (di - start) * JLW_GUI_ROW_H;
+            var is_playing = 0;
+            if (pid != 0) { if (jlw_uuid_eq(JlwMediaItem_id(item), pid) == 1) { is_playing = 1; } }
+            var is_selected = 0;
+            if (di == sel) { is_selected = 1; }
+            if (is_selected == 1) { jlw_gui_draw_rect(cmds, x, ry, w, JLW_GUI_ROW_H, JLW_GUI_BG_WIDGET); }
+            jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, ry + JLW_GUI_TEXT_DY,
+                              jlw_gui_row_color_code(is_playing, is_selected),
+                              jlw_gui_format_library_row(di, JlwMediaItem_title(item), JlwMediaItem_artist(item), JlwMediaItem_duration(item)), 0);
+        }
+    }
+    return vec_len(cmds);
+}
+
+# ---- now playing view (views/now_playing.rs) ----
+# album-art placeholder + title/artist/album + details/stats lines, or a muted
+# "Nothing playing" when no track is loaded.
+fn jlw_gui_build_now_playing(app, x, y, w, h, cmds) {
+    jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
+    var cid = JlwGuiApp_current_playing_id(app);
+    var item = 0;
+    if (cid != 0) { item = jlw_library_find_by_id(jlw_gui_app_lib(app), cid); }
+    if (item == 0) {
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + h / 2, JLW_GUI_TEXT_MUTED, "Nothing playing", 0);
+        return vec_len(cmds);
+    }
+    var artsz = 200;
+    var ax = x + (w - artsz) / 2;
+    var ay = y + JLW_GUI_PAD * 2;
+    jlw_gui_draw_image(cmds, ax, ay, artsz, artsz, "");            # album art (id resolved by raster)
+    var ty = ay + artsz + JLW_GUI_PAD;
+    jlw_gui_draw_text(cmds, ax, ty,       JLW_GUI_TEXT_PRIMARY,   JlwMediaItem_title(item), 0);
+    jlw_gui_draw_text(cmds, ax, ty + 24,  JLW_GUI_TEXT_SECONDARY, jlw_gui_np_artist(JlwMediaItem_artist(item)), 0);
+    jlw_gui_draw_text(cmds, ax, ty + 44,  JLW_GUI_TEXT_MUTED,     jlw_gui_np_album(JlwMediaItem_album(item)), 0);
+    jlw_gui_draw_text(cmds, ax, ty + 72,  JLW_GUI_TEXT_MUTED,
+                      jlw_gui_np_details_line(jlw_gui_np_duration(JlwMediaItem_duration(item)),
+                                              jlw_gui_np_codec(JlwMediaItem_audio_codec(item)),
+                                              jlw_container_format_name(JlwMediaItem_format(item))), 0);
+    jlw_gui_draw_text(cmds, ax, ty + 92,  JLW_GUI_TEXT_MUTED,
+                      jlw_gui_np_stats_line(JlwMediaItem_play_count(item),
+                                            jlw_gui_np_rating(JlwMediaItem_rating(item))), 0);
+    return vec_len(cmds);
+}
+
+# ---- queue view (views/queue.rs) ----
+# scrollable queue list: the current-position row is accent, the selected row gets a
+# widget-bg tint; row labels via jlw_gui_queue_row_label (resolving each id's tags).
+fn jlw_gui_build_queue(app, x, y, w, h, cmds) {
+    jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
+    var q = JlwGuiApp_queue(app);
+    var items = JlwPlayQueue_items(q);
+    var pos = JlwPlayQueue_position(q);
+    var lib = jlw_gui_app_lib(app);
+    var count = vec_len(items);
+    if (count == 0) {
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_MUTED, "Queue is empty", 0);
+        return vec_len(cmds);
+    }
+    var visible = h / JLW_GUI_ROW_H;
+    if (visible < 1) { visible = 1; }
+    var sel = JlwGuiApp_selected_index(app);
+    var start = jlw_gui_scroll_start(sel, visible, count);
+    var end = start + visible;
+    if (end > count) { end = count; }
+    for (var i = start; i < end; i = i + 1) {
+        var item = jlw_library_find_by_id(lib, vec_get(items, i));
+        var artist = 0;
+        var title = 0;
+        if (item != 0) { artist = JlwMediaItem_artist(item); title = JlwMediaItem_title(item); }
+        var is_current = 0;
+        if (i == pos) { is_current = 1; }
+        var ry = y + (i - start) * JLW_GUI_ROW_H;
+        if (i == sel) { jlw_gui_draw_rect(cmds, x, ry, w, JLW_GUI_ROW_H, JLW_GUI_BG_WIDGET); }
+        var color = JLW_GUI_TEXT_SECONDARY;
+        if (is_current == 1) { color = JLW_GUI_ACCENT; }
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, ry + JLW_GUI_TEXT_DY, color,
+                          jlw_gui_queue_row_label(i, artist, title, is_current), 0);
+    }
     return vec_len(cmds);
 }

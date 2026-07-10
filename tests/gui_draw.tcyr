@@ -37,6 +37,23 @@ fn count_rect_color(cmds, color) {
     }
     return n;
 }
+fn count_kind(cmds, kind) {
+    var n = 0;
+    for (var i = 0; i < vec_len(cmds); i = i + 1) { if (JlwDrawCmd_kind(vec_get(cmds, i)) == kind) { n = n + 1; } }
+    return n;
+}
+fn cat3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var d = alloc(la + lb + lc + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); memcpy(d + la + lb, c, lc); store8(d + la + lb + lc, 0);
+    return d;
+}
+fn mk(app, title, artist) {
+    var it = jlw_media_item_new(cat3("/m/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    jlw_library_add_item(jlw_gui_app_lib(app), it);
+    return it;
+}
 
 alloc_init();
 
@@ -93,6 +110,85 @@ assert_eq(find_text(ct, "100%") != 0, 1, "volume 100%");
 assert_eq(count_rect_color(ct, JLW_GUI_BG_WIDGET), 1, "seek track drawn");
 # the accent progress fill is absent at position 0 (ratio 0 -> no fill rect)
 assert_eq(count_rect_color(ct, JLW_GUI_ACCENT), 0, "no progress fill at start");
+
+# ---- scroll/virtualization math ----
+test_group("scroll_start");
+assert_eq(jlw_gui_scroll_start(0, 10, 100), 0, "sel 0 -> start 0");
+assert_eq(jlw_gui_scroll_start(5, 10, 100), 0, "sel within first window -> 0");
+assert_eq(jlw_gui_scroll_start(12, 10, 100), 3, "sel 12, 10 visible -> start 3 (bottom-anchored)");
+assert_eq(jlw_gui_scroll_start(99, 10, 100), 90, "sel last -> start 90");
+assert_eq(jlw_gui_scroll_start(5, 10, 4), 0, "fewer rows than window -> 0");
+
+# ---- library builder (list, scroll, selection, search) ----
+test_group("build_library");
+var la = jlw_gui_app_new(fresh_plib(), eng());
+var it0 = mk(la, "Alpha", "A");
+mk(la, "Beta", "B"); mk(la, "Gamma", "C");
+for (var k = 0; k < 40; k = k + 1) { mk(la, cat3("Trk", "X", "Y"), "Z"); }   # 43 items total
+JlwGuiApp_set_view(la, JLW_GUI_VIEW_LIBRARY);
+JlwGuiApp_set_selected_index(la, 0);
+var cl = vec_new();
+# viewport 300px tall -> 300/32 = 9 visible rows; only those emit text
+jlw_gui_build_library(la, JLW_GUI_SIDEBAR_W, 0, 620, 300, cl);
+assert_eq(JlwDrawCmd_color(vec_get(cl, 0)), JLW_GUI_BG_DARK, "content bg = dark");
+assert_eq(count_kind(cl, JLW_DRAW_TEXT), 9, "virtualized: only 9 visible rows drawn (not 43)");
+assert_eq(find_text(cl, "Alpha") != 0, 1, "row 0 Alpha visible");
+# selected row (0) gets a widget-bg tint; row 0 text is accent-or-primary (not playing -> primary)
+assert_eq(count_rect_color(cl, JLW_GUI_BG_WIDGET), 1, "one selected-row tint");
+assert_eq(JlwDrawCmd_color(find_text(cl, "Alpha")), JLW_GUI_TEXT_PRIMARY, "selected row text primary");
+# playing highlight: mark Alpha playing -> its row text is accent
+JlwGuiApp_set_current_playing_id(la, JlwMediaItem_id(it0));
+var cl2 = vec_new();
+jlw_gui_build_library(la, JLW_GUI_SIDEBAR_W, 0, 620, 300, cl2);
+assert_eq(JlwDrawCmd_color(find_text(cl2, "Alpha")), JLW_GUI_ACCENT, "playing row text accent");
+# scroll: select row 30 -> Alpha (row 0) no longer visible
+JlwGuiApp_set_selected_index(la, 30);
+var cl3 = vec_new();
+jlw_gui_build_library(la, JLW_GUI_SIDEBAR_W, 0, 620, 300, cl3);
+assert_eq(find_text(cl3, "Alpha"), 0, "scrolled: Alpha no longer drawn");
+
+# search filter: only matching rows
+JlwGuiApp_set_search_query(la, "beta");
+jlw_gui_app_update_search(la);
+JlwGuiApp_set_selected_index(la, 0);
+var cl4 = vec_new();
+jlw_gui_build_library(la, JLW_GUI_SIDEBAR_W, 0, 620, 300, cl4);
+assert_eq(count_kind(cl4, JLW_DRAW_TEXT), 1, "search 'beta' -> 1 row");
+assert_eq(find_text(cl4, "Beta") != 0, 1, "the Beta row");
+
+# ---- now playing builder ----
+test_group("build_now_playing");
+var na = jlw_gui_app_new(fresh_plib(), eng());
+var cn0 = vec_new();
+jlw_gui_build_now_playing(na, JLW_GUI_SIDEBAR_W, 0, 620, 500, cn0);
+assert_eq(find_text(cn0, "Nothing playing") != 0, 1, "no track -> Nothing playing");
+var npi = mk(na, "SongX", "BandY");
+JlwGuiApp_set_current_playing_id(na, JlwMediaItem_id(npi));
+var cn1 = vec_new();
+jlw_gui_build_now_playing(na, JLW_GUI_SIDEBAR_W, 0, 620, 500, cn1);
+assert_eq(find_text(cn1, "SongX") != 0, 1, "title drawn");
+assert_eq(find_text(cn1, "BandY") != 0, 1, "artist drawn");
+assert_eq(count_kind(cn1, JLW_DRAW_IMAGE), 1, "album-art image cmd emitted");
+
+# ---- queue builder ----
+test_group("build_queue");
+var qa = jlw_gui_app_new(fresh_plib(), eng());
+JlwGuiApp_set_view(qa, JLW_GUI_VIEW_QUEUE);
+var cq0 = vec_new();
+jlw_gui_build_queue(qa, JLW_GUI_SIDEBAR_W, 0, 620, 400, cq0);
+assert_eq(find_text(cq0, "Queue is empty") != 0, 1, "empty queue message");
+# enqueue two tracks
+var qi1 = mk(qa, "First", "AA");
+var qi2 = mk(qa, "Second", "BB");
+jlw_queue_enqueue(JlwGuiApp_queue(qa), JlwMediaItem_id(qi1));
+jlw_queue_enqueue(JlwGuiApp_queue(qa), JlwMediaItem_id(qi2));   # position -> 0
+var cq1 = vec_new();
+jlw_gui_build_queue(qa, JLW_GUI_SIDEBAR_W, 0, 620, 400, cq1);
+assert_eq(find_text(cq1, "First") != 0, 1, "queue row First");
+assert_eq(find_text(cq1, "Second") != 0, 1, "queue row Second");
+# current position (row 0) is accent
+assert_eq(JlwDrawCmd_color(find_text(cq1, "First")), JLW_GUI_ACCENT, "current queue row accent");
+assert_eq(JlwDrawCmd_color(find_text(cq1, "Second")), JLW_GUI_TEXT_SECONDARY, "non-current row secondary");
 
 rm("/tmp/jalwa_gui_draw.db");
 var rc = assert_summary();
