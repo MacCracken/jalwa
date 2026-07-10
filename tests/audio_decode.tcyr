@@ -63,5 +63,29 @@ var sv2 = vec_new(); vec_push(sv2, f64_neg(2.0));
 jlw_audio_f64_to_i16(sv2, 0, 1, 1.0, out);
 assert_eq(load16(out + 0), 32768, "-2.0 -> clamped -32768");
 
+# ---- threaded (async) playback: real background decode thread ----
+# No audio device under CI, so each thread decodes (real) then device-open fails
+# -> finishes fast. Bounded poll loop verifies the thread lifecycle + done flag.
+test_group("async playback");
+var h = jlw_audio_play_async("tests/fixtures/probe.flac", 1.0);
+var spins = 0;
+while (jlw_audio_play_is_done(h) == 0 && spins < 500) { sleep_ms(10); spins = spins + 1; }
+assert_eq(jlw_audio_play_is_done(h), 1, "async play finishes");
+assert_eq(spins < 500, 1, "finished within timeout");
+
+# stop signal: spawn + immediate cancel -> still terminates
+var h2 = jlw_audio_play_async("tests/fixtures/probe.mp3", 1.0);
+jlw_audio_play_stop(h2);
+var s2 = 0;
+while (jlw_audio_play_is_done(h2) == 0 && s2 < 500) { sleep_ms(10); s2 = s2 + 1; }
+assert_eq(jlw_audio_play_is_done(h2), 1, "cancelled play finishes");
+
+# decode-failure inside a thread still marks done, with the error rc
+var h3 = jlw_audio_play_async("/nonexistent.flac", 1.0);
+var s3 = 0;
+while (jlw_audio_play_is_done(h3) == 0 && s3 < 500) { sleep_ms(10); s3 = s3 + 1; }
+assert_eq(jlw_audio_play_is_done(h3), 1, "failed-decode thread marks done");
+assert_eq(JlwPlayHandle_rc(h3), JLW_ERR_UNSUPPORTED_FORMAT, "rc = unsupported (missing file)");
+
 var rc = assert_summary();
 syscall(60, rc);

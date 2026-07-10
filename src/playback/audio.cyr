@@ -1,7 +1,11 @@
 # playback/audio.cyr -- real audio playback: shravan decode -> volume -> vani out.
 # tarang is VIDEO-only; audio decodes through shravan and plays through vani
-# (ALSA / agnos snd band). This replaces the tarang-stubbed decode path for the
-# CLI `jalwa play` (synchronous blocking playback -- no decode thread yet).
+# (ALSA / agnos snd band). This replaces the tarang-stubbed decode path. CLI
+# `jalwa play` uses the synchronous blocking path; jlw_audio_play_async spawns a
+# real background decode thread (cancellable, polled) -- the primitive the engine
+# will build on to play while the TUI stays live. Cyrius threads are real and the
+# bump allocator is thread-safe (process-wide CAS lock), so a decode thread and
+# the main thread can both allocate safely.
 #
 # Depends on core/scanner.cyr (jlw_detect_audio_format, jlw_file_size) + the
 # shravan and vani deps. dhvani DSP/EQ is available (jlw_dsp) but not yet wired
@@ -62,11 +66,13 @@ fn jlw_audio_f64_to_i16(samples, start, count, volume, out) {
     return 0;
 }
 
-# play a decoded file synchronously to the default device. Returns JLW_ERR_NONE on
-# a completed playback, JLW_ERR_UNSUPPORTED_FORMAT if decode fails, or
-# JLW_ERR_PLAYBACK if no audio device is available (headless/CI). Blocks until the
-# track finishes (vani audio_write is kernel-paced).
-fn jlw_audio_play_file(path, volume) {
+# play a decoded file to the default device. `h` is an optional JlwPlayHandle
+# (0 = none): between chunks the loop checks JlwPlayHandle_stop(h) and, if set,
+# stops early -- the hook a background thread / the engine uses to cancel playback.
+# Also updates JlwPlayHandle_position(h) (seconds played). Returns JLW_ERR_NONE on
+# completion, JLW_ERR_UNSUPPORTED_FORMAT on decode failure, JLW_ERR_PLAYBACK when
+# no device is available. Blocks (vani audio_write is kernel-paced).
+fn jlw_audio_play_file_h(path, volume, h) {
     var dr = jlw_audio_decode(path);
     if (dr == 0) { return JLW_ERR_UNSUPPORTED_FORMAT; }
     var fi = decode_result_info(dr);
@@ -87,19 +93,63 @@ fn jlw_audio_play_file(path, volume) {
     var outbuf = alloc(chunk_samples * 2);       # reused per chunk (no per-frame alloc)
     var i = 0;
     while (i < count) {
-        var m = count - i;
-        if (m > chunk_samples) { m = chunk_samples; }
-        jlw_audio_f64_to_i16(samples, i, m, volume, outbuf);
-        var frames = m / channels;
-        var written = 0;
-        while (written < frames) {
-            var w = audio_write(dev, outbuf + written * channels * 2, frames - written);
-            if (w <= 0) { written = frames; i = count; }   # write error -> stop
-            else { written = written + w; }
+        if (h != 0) { if (JlwPlayHandle_stop(h) == 1) { i = count; } }   # cancelled
+        if (i < count) {
+            var m = count - i;
+            if (m > chunk_samples) { m = chunk_samples; }
+            jlw_audio_f64_to_i16(samples, i, m, volume, outbuf);
+            var frames = m / channels;
+            var written = 0;
+            while (written < frames) {
+                var w = audio_write(dev, outbuf + written * channels * 2, frames - written);
+                if (w <= 0) { written = frames; i = count; }   # write error -> stop
+                else { written = written + w; }
+            }
+            i = i + m;
+            if (h != 0) { if (rate > 0) { JlwPlayHandle_set_position(h, f64_div(f64_from(i / channels), f64_from(rate))); } }
         }
-        i = i + m;
     }
     audio_drain(dev);
     audio_close(dev);
     return JLW_ERR_NONE;
 }
+
+# synchronous, uncancellable playback (the CLI `jalwa play` path).
+#must_use
+fn jlw_audio_play_file(path, volume) { return jlw_audio_play_file_h(path, volume, 0); }
+
+# ---- background (threaded) playback ----
+# JlwPlayHandle is the shared control block between the main thread and a decode
+# thread. Single-word fields -> aligned load64/store64 are atomic on x86_64/agnos,
+# so `stop`/`done`/`position` need no lock for this producer/consumer pattern.
+#derive(accessors)
+struct JlwPlayHandle { path; volume; stop; done; position; rc; }
+
+# the thread body: play the file (cancellable via the handle), then mark done.
+fn jlw_audio_play_worker(h) {
+    JlwPlayHandle_set_rc(h, jlw_audio_play_file_h(JlwPlayHandle_path(h), JlwPlayHandle_volume(h), h));
+    JlwPlayHandle_set_done(h, 1);
+    return 0;
+}
+
+# start playback on a background thread; returns the JlwPlayHandle immediately
+# (non-blocking). Poll jlw_audio_play_is_done / read position; cancel via
+# jlw_audio_play_stop. Mirrors rust-old's spawned decode thread (minus a command
+# channel -- pause/seek during play are a follow-up).
+#must_use
+fn jlw_audio_play_async(path, volume) {
+    var h = alloc(sizeof(JlwPlayHandle));
+    JlwPlayHandle_set_path(h, path);
+    JlwPlayHandle_set_volume(h, volume);
+    JlwPlayHandle_set_stop(h, 0);
+    JlwPlayHandle_set_done(h, 0);
+    JlwPlayHandle_set_position(h, 0.0);
+    JlwPlayHandle_set_rc(h, JLW_ERR_NONE);
+    thread_create(&jlw_audio_play_worker, h);
+    return h;
+}
+#inline
+#must_use
+fn jlw_audio_play_is_done(h) { return JlwPlayHandle_done(h); }
+#inline
+fn jlw_audio_play_stop(h) { JlwPlayHandle_set_stop(h, 1); return 0; }
