@@ -281,3 +281,119 @@ fn jlw_gui_build_queue(app, x, y, w, h, cmds) {
     }
     return vec_len(cmds);
 }
+
+# ---- equalizer view (views/equalizer.rs) ----
+# 10 band columns: each a vertical gain bar from the 0 dB midline (up=boost,
+# down=cut, gain scaled to +/-12 dB), the band name below, and the selected band
+# column tinted. Header shows the enabled state.
+fn jlw_gui_build_equalizer(app, x, y, w, h, cmds) {
+    jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
+    var eq = jlw_engine_eq_settings(JlwGuiApp_engine(app));
+    var hdr = "Equalizer: OFF";
+    if (dhvani_geq_settings_enabled(eq) == 1) { hdr = "Equalizer: ON"; }
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_PRIMARY, hdr, 0);
+    var bands = 10;
+    var bandw = w / bands;
+    var sel = JlwGuiApp_selected_index(app);
+    var track_top = y + 48;
+    var track_h = h - 100;
+    if (track_h < 20) { track_h = 20; }
+    var half = track_h / 2;
+    var mid = track_top + half;
+    for (var i = 0; i < bands; i = i + 1) {
+        var bx = x + i * bandw;
+        if (i == sel) { jlw_gui_draw_rect(cmds, bx, track_top, bandw, track_h, JLW_GUI_BG_WIDGET); }
+        # gain (dB) -> bar length; clamp ratio to +/-1 at +/-12 dB
+        var gain = dhvani_geq_settings_band(eq, i);
+        var ratio = f64_div(gain, 12.0);
+        if (f64_gt(ratio, 1.0) == 1) { ratio = 1.0; }
+        if (f64_lt(ratio, f64_neg(1.0)) == 1) { ratio = f64_neg(1.0); }
+        var barlen = f64_to(f64_mul(f64_abs(ratio), f64_from(half)));
+        if (barlen > 0) {
+            if (f64_ge(gain, 0.0) == 1) { jlw_gui_draw_rect(cmds, bx + 4, mid - barlen, bandw - 8, barlen, JLW_GUI_ACCENT); }
+            else { jlw_gui_draw_rect(cmds, bx + 4, mid, bandw - 8, barlen, JLW_GUI_ACCENT_DIM); }
+        }
+        jlw_gui_draw_text(cmds, bx + 2, track_top + track_h + 16, JLW_GUI_TEXT_MUTED, dhvani_geq_band_name(i), 0);
+    }
+    return vec_len(cmds);
+}
+
+# ---- devices view (views/devices.rs) ----
+# The GuiApp holds no hardware source (Wave F dropped the yukti HardwareManager
+# field), so this mirrors the CLI stub. When device hotplug is wired, list here.
+fn jlw_gui_build_devices(app, x, y, w, h, cmds) {
+    jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_MUTED, "No media devices detected", 0);
+    return vec_len(cmds);
+}
+
+# ---- video view: aethersafta-blocked -> placeholder ----
+fn jlw_gui_build_video(app, x, y, w, h, cmds) {
+    jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + h / 2, JLW_GUI_TEXT_MUTED, "Video unavailable", 0);
+    return vec_len(cmds);
+}
+
+# ---- full frame: split the window into sidebar | content | transport, then
+# dispatch the content region to the active view's builder. Pure arithmetic.
+fn jlw_gui_build_frame(app, w, h, cmds) {
+    jlw_gui_draw_rect(cmds, 0, 0, w, h, JLW_GUI_BG_DARK);
+    var th = JLW_GUI_TRANSPORT_H;
+    var sbw = JLW_GUI_SIDEBAR_W;
+    var ch = h - th;
+    jlw_gui_build_sidebar(app, 0, 0, sbw, ch, cmds);
+    jlw_gui_build_transport(app, 0, h - th, w, th, cmds);
+    var cx = sbw;
+    var cw = w - sbw;
+    var view = JlwGuiApp_view(app);
+    if (view == JLW_GUI_VIEW_LIBRARY)     { jlw_gui_build_library(app, cx, 0, cw, ch, cmds); }
+    if (view == JLW_GUI_VIEW_NOW_PLAYING) { jlw_gui_build_now_playing(app, cx, 0, cw, ch, cmds); }
+    if (view == JLW_GUI_VIEW_QUEUE)       { jlw_gui_build_queue(app, cx, 0, cw, ch, cmds); }
+    if (view == JLW_GUI_VIEW_EQUALIZER)   { jlw_gui_build_equalizer(app, cx, 0, cw, ch, cmds); }
+    if (view == JLW_GUI_VIEW_DEVICES)     { jlw_gui_build_devices(app, cx, 0, cw, ch, cmds); }
+    if (view == JLW_GUI_VIEW_VIDEO)       { jlw_gui_build_video(app, cx, 0, cw, ch, cmds); }
+    return vec_len(cmds);
+}
+
+# ---- input mapping (pure): a key -> a GUI action code ----
+# Keys use the TUI's JLW_KEY_* sentinels (arrows/enter/tab) + ASCII bytes; the Phase-3
+# present shell translates Wayland keysyms into these. Mirrors rust-old app.rs shortcuts.
+var JLW_GUI_ACT_NONE       = 0;
+var JLW_GUI_ACT_PLAY_PAUSE = 1;
+var JLW_GUI_ACT_NAV_UP     = 2;
+var JLW_GUI_ACT_NAV_DOWN   = 3;
+var JLW_GUI_ACT_NAV_LEFT   = 4;
+var JLW_GUI_ACT_NAV_RIGHT  = 5;
+var JLW_GUI_ACT_ENTER      = 6;
+var JLW_GUI_ACT_NEXT_VIEW  = 7;
+var JLW_GUI_ACT_SEARCH     = 8;
+var JLW_GUI_ACT_QUIT       = 9;
+var JLW_GUI_ACT_VOL_UP     = 10;
+var JLW_GUI_ACT_VOL_DOWN   = 11;
+var JLW_GUI_ACT_MUTE       = 12;
+var JLW_GUI_ACT_NEXT_TRACK = 13;
+var JLW_GUI_ACT_PREV_TRACK = 14;
+var JLW_GUI_ACT_EQ_TOGGLE  = 15;
+var JLW_GUI_ACT_NORMALIZE  = 16;
+
+#must_use
+fn jlw_gui_key_to_action(key) {
+    if (key == 32)              { return JLW_GUI_ACT_PLAY_PAUSE; }   # space
+    if (key == JLW_KEY_UP)      { return JLW_GUI_ACT_NAV_UP; }
+    if (key == JLW_KEY_DOWN)    { return JLW_GUI_ACT_NAV_DOWN; }
+    if (key == JLW_KEY_LEFT)    { return JLW_GUI_ACT_NAV_LEFT; }
+    if (key == JLW_KEY_RIGHT)   { return JLW_GUI_ACT_NAV_RIGHT; }
+    if (key == JLW_KEY_ENTER)   { return JLW_GUI_ACT_ENTER; }
+    if (key == JLW_KEY_TAB)     { return JLW_GUI_ACT_NEXT_VIEW; }
+    if (key == 47)              { return JLW_GUI_ACT_SEARCH; }       # '/'
+    if (key == 113)             { return JLW_GUI_ACT_QUIT; }         # 'q'
+    if (key == 43)              { return JLW_GUI_ACT_VOL_UP; }       # '+'
+    if (key == 61)              { return JLW_GUI_ACT_VOL_UP; }       # '=' (unshifted +)
+    if (key == 45)              { return JLW_GUI_ACT_VOL_DOWN; }     # '-'
+    if (key == 109)             { return JLW_GUI_ACT_MUTE; }         # 'm'
+    if (key == 110)             { return JLW_GUI_ACT_NEXT_TRACK; }   # 'n'
+    if (key == 112)             { return JLW_GUI_ACT_PREV_TRACK; }   # 'p'
+    if (key == 101)             { return JLW_GUI_ACT_EQ_TOGGLE; }    # 'e'
+    if (key == 78)              { return JLW_GUI_ACT_NORMALIZE; }    # 'N'
+    return JLW_GUI_ACT_NONE;
+}

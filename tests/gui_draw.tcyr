@@ -190,6 +190,60 @@ assert_eq(find_text(cq1, "Second") != 0, 1, "queue row Second");
 assert_eq(JlwDrawCmd_color(find_text(cq1, "First")), JLW_GUI_ACCENT, "current queue row accent");
 assert_eq(JlwDrawCmd_color(find_text(cq1, "Second")), JLW_GUI_TEXT_SECONDARY, "non-current row secondary");
 
+# ---- equalizer builder ----
+test_group("build_equalizer");
+var ea = jlw_gui_app_new(fresh_plib(), eng());
+JlwGuiApp_set_view(ea, JLW_GUI_VIEW_EQUALIZER);
+JlwGuiApp_set_selected_index(ea, 3);
+var ce = vec_new();
+jlw_gui_build_equalizer(ea, JLW_GUI_SIDEBAR_W, 0, 620, 500, ce);
+assert_eq(find_text(ce, "Equalizer: OFF") != 0, 1, "eq header OFF (default)");
+assert_eq(count_rect_color(ce, JLW_GUI_BG_WIDGET), 1, "selected band column tinted");
+assert_eq(count_kind(ce, JLW_DRAW_TEXT) >= 11, 1, "header + 10 band names");
+# a flat EQ draws no accent bars; boosting band 3 draws one
+assert_eq(count_rect_color(ce, JLW_GUI_ACCENT), 0, "flat eq -> no boost bars");
+jlw_engine_set_eq_band(JlwGuiApp_engine(ea), 3, f64_from(6));   # +6 dB
+var ce2 = vec_new();
+jlw_gui_build_equalizer(ea, JLW_GUI_SIDEBAR_W, 0, 620, 500, ce2);
+assert_eq(count_rect_color(ce2, JLW_GUI_ACCENT), 1, "boosted band -> one accent bar");
+
+# ---- devices builder ----
+test_group("build_devices");
+var da = jlw_gui_app_new(fresh_plib(), eng());
+var cd = vec_new();
+jlw_gui_build_devices(da, JLW_GUI_SIDEBAR_W, 0, 620, 500, cd);
+assert_eq(find_text(cd, "No media devices detected") != 0, 1, "devices stub message");
+
+# ---- full frame: sidebar + transport + active-view content, view-switchable ----
+test_group("build_frame");
+var fa = jlw_gui_app_new(fresh_plib(), eng());
+mk(fa, "FrameTrack", "FA");
+JlwGuiApp_set_view(fa, JLW_GUI_VIEW_LIBRARY);
+var cf = vec_new();
+jlw_gui_build_frame(fa, 800, 600, cf);
+assert_eq(find_text(cf, "Library") != 0, 1, "frame has the sidebar");
+assert_eq(find_text(cf, "No media loaded") != 0, 1, "frame has the transport bar");
+assert_eq(find_text(cf, "FrameTrack") != 0, 1, "library content in frame");
+JlwGuiApp_set_view(fa, JLW_GUI_VIEW_NOW_PLAYING);
+var cf2 = vec_new();
+jlw_gui_build_frame(fa, 800, 600, cf2);
+assert_eq(find_text(cf2, "Nothing playing") != 0, 1, "content switches to now-playing");
+assert_eq(find_text(cf2, "FrameTrack"), 0, "old library content gone");
+
+# ---- input mapping ----
+test_group("key_to_action");
+assert_eq(jlw_gui_key_to_action(32), JLW_GUI_ACT_PLAY_PAUSE, "space -> play/pause");
+assert_eq(jlw_gui_key_to_action(JLW_KEY_UP), JLW_GUI_ACT_NAV_UP, "up");
+assert_eq(jlw_gui_key_to_action(JLW_KEY_DOWN), JLW_GUI_ACT_NAV_DOWN, "down");
+assert_eq(jlw_gui_key_to_action(JLW_KEY_ENTER), JLW_GUI_ACT_ENTER, "enter");
+assert_eq(jlw_gui_key_to_action(JLW_KEY_TAB), JLW_GUI_ACT_NEXT_VIEW, "tab -> next view");
+assert_eq(jlw_gui_key_to_action(47), JLW_GUI_ACT_SEARCH, "/ -> search");
+assert_eq(jlw_gui_key_to_action(113), JLW_GUI_ACT_QUIT, "q -> quit");
+assert_eq(jlw_gui_key_to_action(101), JLW_GUI_ACT_EQ_TOGGLE, "e -> eq");
+assert_eq(jlw_gui_key_to_action(110), JLW_GUI_ACT_NEXT_TRACK, "n -> next");
+assert_eq(jlw_gui_key_to_action(78), JLW_GUI_ACT_NORMALIZE, "N -> normalize");
+assert_eq(jlw_gui_key_to_action(65), JLW_GUI_ACT_NONE, "unmapped 'A' -> none");
+
 rm("/tmp/jalwa_gui_draw.db");
 var rc = assert_summary();
 syscall(60, rc);
