@@ -1,0 +1,184 @@
+# gui_views.tcyr -- parity tests for src/gui/views.cyr (portable view helpers).
+# Ports library.rs::truncate_str_tests + queue.rs cycle assertions, plus NEW
+# tests derived from the egui-free logic of now_playing/queue/transport/sidebar
+# (the Rust view tests are headless egui renders -- their draw invocations are
+# DROPPED, their pre-render / logic assertions are preserved here).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/gui/theme.cyr"
+include "src/gui/app.cyr"
+include "src/gui/views.cyr"
+
+fn rm(path) { syscall(87, path); return 0; }
+fn fresh_plib() { rm("/tmp/jalwa_gui_views_test.db"); return jlw_plib_open("/tmp/jalwa_gui_views_test.db"); }
+fn eng() { return jlw_engine_new(jlw_engine_config_default()); }
+
+alloc_init();
+
+# ============================================================================
+# library.rs::truncate_str_tests
+# ============================================================================
+test_group("truncate_str");
+assert_streq(jlw_gui_truncate_str("hello", 10), "hello", "within limit");
+assert_streq(jlw_gui_truncate_str("", 5), "", "empty string");
+assert_streq(jlw_gui_truncate_str("abcde", 5), "abcde", "exact length");
+assert_streq(jlw_gui_truncate_str("abcdefghijklmnop", 5), "abcd…", "long -> abcd…");
+# unicode: "éàüöäß" (6 chars, 12 bytes), max 4 -> first 3 chars + ellipsis
+assert_streq(jlw_gui_truncate_str("éàüöäß", 4), "éàü…", "unicode char-count truncation");
+
+# grid_columns / row_color_code / nav
+test_group("library layout helpers");
+assert_eq(jlw_gui_grid_columns(650), 5, "650/130 -> 5 cols");
+assert_eq(jlw_gui_grid_columns(50), 1, "narrow -> clamp 1");
+assert_eq(jlw_gui_row_color_code(1, 0), JLW_GUI_ACCENT, "playing -> accent");
+assert_eq(jlw_gui_row_color_code(0, 1), JLW_GUI_TEXT_PRIMARY, "selected -> primary");
+assert_eq(jlw_gui_row_color_code(0, 0), JLW_GUI_TEXT_SECONDARY, "default -> secondary");
+assert_eq(jlw_gui_row_color_code(1, 1), JLW_GUI_ACCENT, "playing beats selected");
+# nav_grid: 3 cols, 7 items, from index 4
+assert_eq(jlw_gui_nav_grid(4, 3, 7, JLW_GUI_NAV_RIGHT), 5, "grid right");
+assert_eq(jlw_gui_nav_grid(4, 3, 7, JLW_GUI_NAV_LEFT), 3, "grid left");
+assert_eq(jlw_gui_nav_grid(4, 3, 7, JLW_GUI_NAV_UP), 1, "grid up -columns");
+assert_eq(jlw_gui_nav_grid(4, 3, 7, JLW_GUI_NAV_DOWN), 4, "grid down clamped (7 no next row)");
+assert_eq(jlw_gui_nav_grid(1, 3, 7, JLW_GUI_NAV_DOWN), 4, "grid down +columns");
+assert_eq(jlw_gui_nav_grid(0, 3, 7, JLW_GUI_NAV_UP), 0, "grid up clamped");
+assert_eq(jlw_gui_nav_list(2, 5, JLW_GUI_NAV_DOWN), 3, "list down");
+assert_eq(jlw_gui_nav_list(0, 5, JLW_GUI_NAV_UP), 0, "list up clamped");
+
+# format_library_row
+test_group("format_library_row");
+assert_streq(jlw_gui_format_library_row(0, "Time", "Pink Floyd", f64_from(200)),
+             "  1. Pink Floyd – Time [3:20]", "row with artist+duration");
+assert_streq(jlw_gui_format_library_row(9, "X", 0, JLW_NAN),
+             " 10. Unknown – X [?:??]", "row None artist/duration");
+
+# ============================================================================
+# now_playing.rs -- art_display_size + metadata fallbacks
+# ============================================================================
+test_group("art_display_size");
+var v1 = jlw_gui_art_display_size(f64_from(400), f64_from(200), f64_from(300));
+assert_eq(f64_to(JlwGuiVec2_x(v1)), 300, "400x200@300 -> x=300");
+assert_eq(f64_to(JlwGuiVec2_y(v1)), 150, "400x200@300 -> y=150");
+var v2 = jlw_gui_art_display_size(f64_from(100), f64_from(100), f64_from(300));
+assert_eq(f64_to(JlwGuiVec2_x(v2)), 100, "small image not upscaled x");
+assert_eq(f64_to(JlwGuiVec2_y(v2)), 100, "small image not upscaled y");
+
+test_group("now_playing metadata fallbacks");
+assert_streq(jlw_gui_np_artist(0), "Unknown Artist", "artist None");
+assert_streq(jlw_gui_np_artist("Queen"), "Queen", "artist Some");
+assert_streq(jlw_gui_np_album(0), "Unknown Album", "album None");
+assert_streq(jlw_gui_np_duration(JLW_NAN), "?:??", "duration None");
+assert_streq(jlw_gui_np_duration(f64_from(65)), "1:05", "duration Some");
+assert_streq(jlw_gui_np_codec(0 - 1), "?", "codec None");
+assert_streq(jlw_gui_np_codec(JLW_ACODEC_FLAC), "Flac", "codec Some");
+assert_streq(jlw_gui_np_rating(0 - 1), "-", "rating None");
+assert_streq(jlw_gui_np_rating(4), "4/5", "rating Some");
+assert_streq(jlw_gui_np_details_line("3:20", "Flac", "FLAC"),
+             "Duration: 3:20  •  Codec: Flac  •  Format: FLAC", "details line");
+assert_streq(jlw_gui_np_stats_line(7, "4/5"), "Plays: 7  •  Rating: 4/5", "stats line");
+
+# ============================================================================
+# queue.rs -- repeat cycle, row label, after_remove, moves
+# ============================================================================
+test_group("queue repeat cycle");
+assert_eq(jlw_repeat_mode_cycle(JLW_REPEAT_OFF), JLW_REPEAT_ONE, "Off -> One");
+assert_eq(jlw_repeat_mode_cycle(JLW_REPEAT_ONE), JLW_REPEAT_ALL, "One -> All");
+assert_eq(jlw_repeat_mode_cycle(JLW_REPEAT_ALL), JLW_REPEAT_OFF, "All -> Off");
+
+test_group("queue_row_label");
+assert_streq(jlw_gui_queue_row_label(0, "Queen", "Bohemian Rhapsody", 1),
+             "▶   1. Queen – Bohemian Rhapsody", "current row");
+assert_streq(jlw_gui_queue_row_label(2, 0, "Solo", 0),
+             "    3. Unknown – Solo", "None artist, not current");
+assert_streq(jlw_gui_queue_row_label(4, 0, 0, 0),
+             "    5. (unknown)", "missing item");
+
+test_group("queue_after_remove");
+# queue [a,b,c], position=2, selected=2; remove index 0 -> len 2
+var q1 = jlw_queue_new();
+var ida = jlw_uuid_v4(); var idb = jlw_uuid_v4(); var idc = jlw_uuid_v4();
+jlw_queue_enqueue(q1, ida); jlw_queue_enqueue(q1, idb); jlw_queue_enqueue(q1, idc);
+JlwPlayQueue_set_position(q1, 2);
+vec_remove(JlwPlayQueue_items(q1), 0);          # caller removes first
+var ns1 = jlw_gui_queue_after_remove(q1, 2, 0);
+assert_eq(ns1, 1, "selection clamped to len-1");
+assert_eq(JlwPlayQueue_position(q1), 1, "position shifted left");
+# remove at index after position: position unchanged
+var q2 = jlw_queue_new();
+jlw_queue_enqueue(q2, jlw_uuid_v4()); jlw_queue_enqueue(q2, jlw_uuid_v4()); jlw_queue_enqueue(q2, jlw_uuid_v4());
+JlwPlayQueue_set_position(q2, 0);
+vec_remove(JlwPlayQueue_items(q2), 2);
+var ns2 = jlw_gui_queue_after_remove(q2, 0, 2);
+assert_eq(ns2, 0, "selection stays 0");
+assert_eq(JlwPlayQueue_position(q2), 0, "position unchanged (removed after pos)");
+
+test_group("queue moves");
+assert_eq(jlw_gui_queue_move_down(1, 4), 2, "down within range");
+assert_eq(jlw_gui_queue_move_down(3, 4), 3, "down clamped at end");
+assert_eq(jlw_gui_queue_move_up(2), 1, "up within range");
+assert_eq(jlw_gui_queue_move_up(0), 0, "up clamped at start");
+
+# ============================================================================
+# transport.rs -- icons, volume, title, duration/progress/seek
+# ============================================================================
+test_group("transport icons");
+assert_eq(jlw_gui_play_label_code(JLW_STATE_PLAYING), JLW_GUI_ICON_PAUSE, "playing -> pause icon");
+assert_eq(jlw_gui_play_label_code(JLW_STATE_PAUSED), JLW_GUI_ICON_PLAY, "paused -> play icon");
+assert_eq(jlw_gui_play_label_code(JLW_STATE_STOPPED), JLW_GUI_ICON_PLAY, "stopped -> play icon");
+assert_eq(jlw_gui_mute_icon_code(1), JLW_GUI_ICON_SPEAKER_MUTED, "muted icon");
+assert_eq(jlw_gui_mute_icon_code(0), JLW_GUI_ICON_SPEAKER_LOUD, "loud icon");
+
+test_group("format_volume_pct");
+assert_streq(jlw_gui_format_volume_pct(1.0), "100%", "1.0 -> 100%");
+assert_streq(jlw_gui_format_volume_pct(0.5), "50%", "0.5 -> 50%");
+assert_streq(jlw_gui_format_volume_pct(0.999), "99%", "0.999 truncates to 99%");
+assert_streq(jlw_gui_format_volume_pct(0.0), "0%", "0.0 -> 0%");
+
+test_group("format_track_title");
+assert_streq(jlw_gui_format_track_title(0, "AnyTitle", 0), "No media loaded", "no item");
+assert_streq(jlw_gui_format_track_title(0, "Solo", 1), "Solo", "None artist -> bare title");
+assert_streq(jlw_gui_format_track_title("", "Solo", 1), "Solo", "empty artist -> bare title");
+assert_streq(jlw_gui_format_track_title("Queen", "Bohemian", 1), "Queen – Bohemian", "artist – title");
+
+test_group("duration/progress/seek");
+assert_streq(jlw_gui_format_duration_or_dashes(0), "--:--", "zero -> dashes");
+assert_streq(jlw_gui_format_duration_or_dashes(200), "3:20", "nonzero -> format");
+assert_eq(f64_to(f64_mul(jlw_gui_progress_ratio(f64_from(50), f64_from(200)), f64_from(1000))), 250,
+          "progress 50/200 = 0.25");
+assert_eq(f64_to(jlw_gui_progress_ratio(f64_from(10), f64_from(0))), 0, "zero-duration guard -> 0");
+assert_eq(f64_to(jlw_gui_seek_target(0.5, f64_from(200))), 100, "seek 0.5*200 = 100");
+
+# ============================================================================
+# sidebar.rs -- entries + active color + select_view
+# ============================================================================
+test_group("sidebar_entries");
+var e0 = jlw_gui_sidebar_entries(0);
+assert_eq(vec_len(e0), 5, "no video -> 5 entries");
+assert_eq(JlwGuiNavEntry_view_code(vec_get(e0, 0)), JLW_GUI_VIEW_LIBRARY, "0 Library");
+assert_eq(JlwGuiNavEntry_view_code(vec_get(e0, 1)), JLW_GUI_VIEW_NOW_PLAYING, "1 NowPlaying");
+assert_eq(JlwGuiNavEntry_view_code(vec_get(e0, 2)), JLW_GUI_VIEW_QUEUE, "2 Queue (no video)");
+assert_eq(JlwGuiNavEntry_view_code(vec_get(e0, 4)), JLW_GUI_VIEW_DEVICES, "4 Devices last");
+assert_streq(JlwGuiNavEntry_label(vec_get(e0, 3)), "EQ", "3 EQ label");
+var ev = jlw_gui_sidebar_entries(1);
+assert_eq(vec_len(ev), 6, "video -> 6 entries");
+assert_eq(JlwGuiNavEntry_view_code(vec_get(ev, 2)), JLW_GUI_VIEW_VIDEO, "video inserted at index 2");
+assert_eq(JlwGuiNavEntry_view_code(vec_get(ev, 3)), JLW_GUI_VIEW_QUEUE, "queue shifts to 3");
+
+test_group("nav_active_color");
+assert_eq(jlw_gui_nav_active_color(1), JLW_GUI_ACCENT, "active -> accent");
+assert_eq(jlw_gui_nav_active_color(0), JLW_GUI_TEXT_SECONDARY, "inactive -> secondary");
+
+test_group("select_view resets selection");
+var app = jlw_gui_app_new(fresh_plib(), eng());
+JlwGuiApp_set_selected_index(app, 5);
+jlw_gui_select_view(app, JLW_GUI_VIEW_QUEUE);
+assert_eq(JlwGuiApp_view(app), JLW_GUI_VIEW_QUEUE, "view set to Queue");
+assert_eq(JlwGuiApp_selected_index(app), 0, "selection reset to 0");
+
+rm("/tmp/jalwa_gui_views_test.db");
+var rc = assert_summary();
+syscall(60, rc);

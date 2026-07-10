@@ -1,0 +1,107 @@
+# gui/app.cyr -- GuiApp state + portable logic.
+# Ports rust-old/crates/jalwa-gui/src/app.rs. L4 (needs core/types, db, engine).
+#
+# The eframe::App::update() draw/poll body (keyboard shortcuts, panels, MPRIS/
+# hardware/watcher channels, egui TextureHandle) is DEFERRED to dhancha. The
+# egui/IO-only fields are DROPPED: video_texture, mpris_rx, _watcher, hardware,
+# hardware_rx, hardware_notifications, art_cache (held separately). What ports is
+# the state machine the #[cfg(test)]s exercise: update_search, list_len, play_item.
+#
+#   View          -> int codes JLW_GUI_VIEW_*
+#   LibraryViewMode -> int codes JLW_GUI_LIBVIEW_*
+#   Option<Uuid> current_playing_id -> Uuid ptr, 0 (null) = None
+
+var JLW_GUI_VIEW_LIBRARY     = 0;
+var JLW_GUI_VIEW_NOW_PLAYING = 1;
+var JLW_GUI_VIEW_QUEUE       = 2;
+var JLW_GUI_VIEW_EQUALIZER   = 3;
+var JLW_GUI_VIEW_VIDEO       = 4;
+var JLW_GUI_VIEW_DEVICES     = 5;
+
+var JLW_GUI_LIBVIEW_LIST = 0;
+var JLW_GUI_LIBVIEW_GRID = 1;
+
+# library holds a PersistentLibrary (plib); library_view_mode/view are int codes;
+# search_results is an int vec of library indices; current_playing_id is a Uuid
+# ptr (0 = None).
+#derive(accessors)
+struct JlwGuiApp {
+    library; engine; queue; view; selected_index;
+    search_query; search_results; library_view_mode; current_playing_id;
+}
+
+# GuiApp::new_headless(library, engine) -- the egui-free constructor the tests use.
+#must_use
+fn jlw_gui_app_new(library, engine) {
+    var app = alloc(sizeof(JlwGuiApp));
+    JlwGuiApp_set_library(app, library);
+    JlwGuiApp_set_engine(app, engine);
+    JlwGuiApp_set_queue(app, jlw_queue_new());
+    JlwGuiApp_set_view(app, JLW_GUI_VIEW_LIBRARY);
+    JlwGuiApp_set_selected_index(app, 0);
+    JlwGuiApp_set_search_query(app, "");
+    JlwGuiApp_set_search_results(app, vec_new());
+    JlwGuiApp_set_library_view_mode(app, JLW_GUI_LIBVIEW_LIST);
+    JlwGuiApp_set_current_playing_id(app, 0);   # None
+    return app;
+}
+
+# inner Library behind the PersistentLibrary.
+#inline
+#must_use
+fn jlw_gui_app_lib(app) { return jlw_plib_library(JlwGuiApp_library(app)); }
+
+# update_search(): case-insensitive substring filter over title/artist/album,
+# collecting matching library indices; clamp selected_index into range.
+fn jlw_gui_app_update_search(app) {
+    var q = JlwGuiApp_search_query(app);
+    if (strlen(q) == 0) { JlwGuiApp_set_search_results(app, vec_new()); return 0; }
+    var ql = str_lower_cstr(q);
+    var results = vec_new();
+    var items = JlwLibrary_items(jlw_gui_app_lib(app));
+    var n = vec_len(items);
+    for (var i = 0; i < n; i = i + 1) {
+        var item = vec_get(items, i);
+        var matched = 0;
+        if (jlw_str_contains_ci(JlwMediaItem_title(item), ql) == 1) { matched = 1; }
+        var artist = JlwMediaItem_artist(item);
+        if (artist != 0) { if (jlw_str_contains_ci(artist, ql) == 1) { matched = 1; } }
+        var album = JlwMediaItem_album(item);
+        if (album != 0) { if (jlw_str_contains_ci(album, ql) == 1) { matched = 1; } }
+        if (matched == 1) { vec_push(results, i); }
+    }
+    JlwGuiApp_set_search_results(app, results);
+    if (JlwGuiApp_selected_index(app) >= vec_len(results)) {
+        if (vec_len(results) > 0) { JlwGuiApp_set_selected_index(app, vec_len(results) - 1); }
+    }
+    return 0;
+}
+
+# list_len(): row count for the active view.
+#must_use
+fn jlw_gui_app_list_len(app) {
+    var view = JlwGuiApp_view(app);
+    if (view == JLW_GUI_VIEW_LIBRARY) {
+        if (strlen(JlwGuiApp_search_query(app)) > 0) { return vec_len(JlwGuiApp_search_results(app)); }
+        return vec_len(JlwLibrary_items(jlw_gui_app_lib(app)));
+    }
+    if (view == JLW_GUI_VIEW_QUEUE) { return jlw_queue_len(JlwGuiApp_queue(app)); }
+    if (view == JLW_GUI_VIEW_EQUALIZER) { return 10; }
+    return 0;   # NowPlaying | Video | Devices
+}
+
+# play_item(lib_index): start playback of a library item; out-of-range = no-op.
+fn jlw_gui_app_play_item(app, lib_index) {
+    var items = JlwLibrary_items(jlw_gui_app_lib(app));
+    if (lib_index < 0) { return 0; }
+    if (lib_index >= vec_len(items)) { return 0; }
+    var item = vec_get(items, lib_index);
+    var id = JlwMediaItem_id(item);
+    JlwGuiApp_set_current_playing_id(app, id);
+    jlw_engine_open(JlwGuiApp_engine(app), JlwMediaItem_path(item));
+    jlw_engine_play(JlwGuiApp_engine(app));
+    if (jlw_queue_is_empty(JlwGuiApp_queue(app)) == 1) {
+        jlw_queue_enqueue(JlwGuiApp_queue(app), id);
+    }
+    return 0;
+}

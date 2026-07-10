@@ -1,0 +1,127 @@
+# gui_app.tcyr -- parity tests for src/gui/app.cyr (GuiApp state machine).
+# Ports the egui-free #[test]s from jalwa-gui/src/app.rs: view_variants,
+# update_search_empty_query, update_search_filters, list_len_library,
+# play_item_valid_index, play_item_invalid_index, view_switching.
+# DROPPED: headless_*_view (each builds an egui Context + CentralPanel and calls
+# a views:: draw fn -- deferred to dhancha; their only non-draw assertion,
+# list_len==0, is preserved by list_len_library).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/gui/app.cyr"
+
+fn rm(path) { syscall(87, path); return 0; }
+fn fresh_plib() { rm("/tmp/jalwa_gui_app_test.db"); return jlw_plib_open("/tmp/jalwa_gui_app_test.db"); }
+fn eng() { return jlw_engine_new(jlw_engine_config_default()); }
+fn fresh_app() { return jlw_gui_app_new(fresh_plib(), eng()); }
+fn cat3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var d = alloc(la + lb + lc + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); memcpy(d + la + lb, c, lc);
+    store8(d + la + lb + lc, 0);
+    return d;
+}
+# make an item with title + artist and push into the app's library.
+fn push_item(app, title, artist) {
+    var it = jlw_media_item_new(cat3("/music/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    jlw_library_add_item(jlw_gui_app_lib(app), it);
+    return it;
+}
+fn results_contains(app, idx) {
+    var r = JlwGuiApp_search_results(app);
+    for (var i = 0; i < vec_len(r); i = i + 1) { if (vec_get(r, i) == idx) { return 1; } }
+    return 0;
+}
+
+alloc_init();
+
+# ---- view_variants (distinct codes) ----
+test_group("view_variants");
+assert_eq(JLW_GUI_VIEW_LIBRARY != JLW_GUI_VIEW_QUEUE, 1, "Library != Queue");
+assert_eq(JLW_GUI_VIEW_NOW_PLAYING != JLW_GUI_VIEW_EQUALIZER, 1, "NowPlaying != Equalizer");
+
+# ---- update_search_empty_query ----
+test_group("update_search_empty_query");
+var a1 = fresh_app();
+JlwGuiApp_set_search_query(a1, "");
+jlw_gui_app_update_search(a1);
+assert_eq(vec_len(JlwGuiApp_search_results(a1)), 0, "empty query -> no results");
+
+# ---- update_search_filters ----
+test_group("update_search_filters");
+var a2 = fresh_app();
+push_item(a2, "Moonlight Sonata", "Beethoven");   # idx 0
+push_item(a2, "Clair de Lune", "Debussy");         # idx 1
+push_item(a2, "Moonriver", "Mancini");             # idx 2
+
+JlwGuiApp_set_search_query(a2, "moon");
+jlw_gui_app_update_search(a2);
+assert_eq(vec_len(JlwGuiApp_search_results(a2)), 2, "moon -> 2 matches");
+assert_eq(results_contains(a2, 0), 1, "contains 0");
+assert_eq(results_contains(a2, 2), 1, "contains 2");
+
+JlwGuiApp_set_search_query(a2, "debussy");
+jlw_gui_app_update_search(a2);
+assert_eq(vec_len(JlwGuiApp_search_results(a2)), 1, "debussy -> 1 (artist match)");
+assert_eq(results_contains(a2, 1), 1, "contains 1");
+
+JlwGuiApp_set_search_query(a2, "nonexistent");
+jlw_gui_app_update_search(a2);
+assert_eq(vec_len(JlwGuiApp_search_results(a2)), 0, "nonexistent -> 0");
+
+# ---- list_len_library ----
+test_group("list_len_library");
+var a3 = fresh_app();
+assert_eq(jlw_gui_app_list_len(a3), 0, "empty library -> 0");
+push_item(a3, "Track A", "Artist");
+push_item(a3, "Track B", "Artist");
+assert_eq(jlw_gui_app_list_len(a3), 2, "two items -> 2");
+JlwGuiApp_set_search_query(a3, "Track A");
+jlw_gui_app_update_search(a3);
+assert_eq(jlw_gui_app_list_len(a3), 1, "filtered -> 1");
+JlwGuiApp_set_view(a3, JLW_GUI_VIEW_QUEUE);
+assert_eq(jlw_gui_app_list_len(a3), 0, "queue empty -> 0");
+JlwGuiApp_set_view(a3, JLW_GUI_VIEW_NOW_PLAYING);
+assert_eq(jlw_gui_app_list_len(a3), 0, "now_playing -> 0");
+JlwGuiApp_set_view(a3, JLW_GUI_VIEW_EQUALIZER);
+assert_eq(jlw_gui_app_list_len(a3), 10, "equalizer -> 10 bands");
+
+# ---- play_item_valid_index (engine stubbed; state effects still apply) ----
+test_group("play_item_valid_index");
+var a4 = fresh_app();
+var it4 = push_item(a4, "Test WAV", "Test");
+var id4 = JlwMediaItem_id(it4);
+jlw_gui_app_play_item(a4, 0);
+assert_eq(jlw_uuid_eq(JlwGuiApp_current_playing_id(a4), id4), 1, "current_playing_id set to item id");
+assert_eq(jlw_queue_is_empty(JlwGuiApp_queue(a4)), 0, "queue no longer empty");
+
+# ---- play_item_invalid_index (silent no-op) ----
+test_group("play_item_invalid_index");
+var a5 = fresh_app();
+jlw_gui_app_play_item(a5, 999);
+assert_eq(JlwGuiApp_current_playing_id(a5), 0, "current_playing_id still None");
+assert_eq(jlw_queue_is_empty(JlwGuiApp_queue(a5)), 1, "queue still empty");
+
+# ---- view_switching (view + selected_index round-trip) ----
+test_group("view_switching");
+var a6 = fresh_app();
+push_item(a6, "Track", "Artist");
+JlwGuiApp_set_view(a6, JLW_GUI_VIEW_QUEUE);
+JlwGuiApp_set_selected_index(a6, 0);
+assert_eq(JlwGuiApp_view(a6), JLW_GUI_VIEW_QUEUE, "view Queue");
+assert_eq(JlwGuiApp_selected_index(a6), 0, "selected 0");
+JlwGuiApp_set_view(a6, JLW_GUI_VIEW_NOW_PLAYING);
+assert_eq(JlwGuiApp_view(a6), JLW_GUI_VIEW_NOW_PLAYING, "view NowPlaying");
+JlwGuiApp_set_view(a6, JLW_GUI_VIEW_EQUALIZER);
+assert_eq(JlwGuiApp_view(a6), JLW_GUI_VIEW_EQUALIZER, "view Equalizer");
+JlwGuiApp_set_view(a6, JLW_GUI_VIEW_LIBRARY);
+assert_eq(JlwGuiApp_view(a6), JLW_GUI_VIEW_LIBRARY, "view Library");
+
+rm("/tmp/jalwa_gui_app_test.db");
+var rc = assert_summary();
+syscall(60, rc);

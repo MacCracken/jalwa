@@ -1,0 +1,33 @@
+# gui_theme.tcyr -- parity tests for src/gui/theme.cyr.
+# Ports theme_constants from jalwa-gui/src/theme.rs. DROPPED: theme_apply
+# (sets Visuals on an egui Context -- no Cyrius egui).
+
+include "src/error.cyr"
+include "src/gui/theme.cyr"
+
+alloc_init();
+
+test_group("theme constants");
+# non-transparent (packed color != 0)
+assert_eq(JLW_GUI_BG_DARK != 0, 1, "BG_DARK non-transparent");
+assert_eq(JLW_GUI_BG_PANEL != 0, 1, "BG_PANEL non-transparent");
+assert_eq(JLW_GUI_BG_WIDGET != 0, 1, "BG_WIDGET non-transparent");
+assert_eq(JLW_GUI_ACCENT != 0, 1, "ACCENT non-transparent");
+assert_eq(JLW_GUI_ACCENT_DIM != 0, 1, "ACCENT_DIM non-transparent");
+assert_eq(JLW_GUI_TEXT_PRIMARY != 0, 1, "TEXT_PRIMARY non-transparent");
+assert_eq(JLW_GUI_TEXT_SECONDARY != 0, 1, "TEXT_SECONDARY non-transparent");
+assert_eq(JLW_GUI_TEXT_MUTED != 0, 1, "TEXT_MUTED non-transparent");
+# fully opaque (alpha == 255)
+assert_eq(jlw_gui_color_a(JLW_GUI_BG_DARK), 255, "BG_DARK alpha 255");
+assert_eq(jlw_gui_color_a(JLW_GUI_ACCENT), 255, "ACCENT alpha 255");
+assert_eq(jlw_gui_color_a(JLW_GUI_TEXT_PRIMARY), 255, "TEXT_PRIMARY alpha 255");
+# RGB round-trips
+assert_eq(jlw_gui_color_r(JLW_GUI_BG_DARK), 24, "BG_DARK r=24");
+assert_eq(jlw_gui_color_g(JLW_GUI_BG_DARK), 24, "BG_DARK g=24");
+assert_eq(jlw_gui_color_b(JLW_GUI_BG_DARK), 28, "BG_DARK b=28");
+assert_eq(jlw_gui_color_r(JLW_GUI_ACCENT), 0, "ACCENT r=0");
+assert_eq(jlw_gui_color_g(JLW_GUI_ACCENT), 188, "ACCENT g=188");
+assert_eq(jlw_gui_color_b(JLW_GUI_ACCENT), 212, "ACCENT b=212");
+
+var rc = assert_summary();
+syscall(60, rc);

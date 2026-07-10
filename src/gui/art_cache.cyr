@@ -1,0 +1,118 @@
+# gui/art_cache.cyr -- LRU album-art texture cache (portable core).
+# Ports rust-old/crates/jalwa-gui/src/art_cache.rs. L4 (needs core/types Uuid).
+#
+# The egui `TextureHandle` and `load_art()` (lofty/image decode + ctx.load_texture)
+# are DEFERRED to dhancha. The portable model keeps the LRU key (id, last_access)
+# as two parallel vecs plus the no_art set and the access counter -- everything
+# the #[cfg(test)] assertions actually exercise.
+#
+#   HashMap<Uuid, CacheEntry>  ->  tex_ids (Uuid ptrs) + tex_access (u64, parallel)
+#   HashSet<Uuid> no_art       ->  no_art (Uuid ptrs, looked up by value)
+# Uuid membership is a linear scan with jlw_uuid_eq (16-byte memeq), the db.cyr idiom.
+
+var JLW_GUI_ART_MAX_TEXTURES = 200;    # const MAX_TEXTURES
+var JLW_GUI_ART_MAX_NO_ART   = 1000;   # const MAX_NO_ART
+
+# tex_ids: vec of Uuid ptrs (16-byte). tex_access: parallel vec of u64
+# last_access, index-aligned with tex_ids. no_art: vec of Uuid ptrs as a set.
+# access_counter: u64, monotonically increasing.
+#derive(accessors)
+struct JlwGuiArtCache {
+    tex_ids; tex_access; no_art; access_counter;
+}
+
+# ArtCache::new()
+#must_use
+fn jlw_gui_art_cache_new() {
+    var self = alloc(sizeof(JlwGuiArtCache));
+    JlwGuiArtCache_set_tex_ids(self, vec_new());
+    JlwGuiArtCache_set_tex_access(self, vec_new());
+    JlwGuiArtCache_set_no_art(self, vec_new());
+    JlwGuiArtCache_set_access_counter(self, 0);
+    return self;
+}
+
+# no_art.contains(id) -- linear scan by value.
+#must_use
+fn jlw_gui_art_no_art_contains(self, id) {
+    var s = JlwGuiArtCache_no_art(self);
+    for (var i = 0; i < vec_len(s); i = i + 1) {
+        if (jlw_uuid_eq(vec_get(s, i), id) == 1) { return 1; }
+    }
+    return 0;
+}
+
+# no_art.len() / textures.len() (the #[cfg(test)] counters).
+#inline
+#must_use
+fn jlw_gui_art_no_art_count(self) { return vec_len(JlwGuiArtCache_no_art(self)); }
+#inline
+#must_use
+fn jlw_gui_art_texture_count(self) { return vec_len(JlwGuiArtCache_tex_ids(self)); }
+
+# evict_no_art_if_full(): clear the whole set once it grows past the threshold.
+fn jlw_gui_art_evict_no_art_if_full(self) {
+    if (vec_len(JlwGuiArtCache_no_art(self)) > JLW_GUI_ART_MAX_NO_ART) {
+        JlwGuiArtCache_set_no_art(self, vec_new());
+    }
+    return 0;
+}
+
+# evict_if_full(): LRU -- while at capacity, drop the min-last_access entry from
+# both parallel vecs (min_by_key over the HashMap becomes a linear scan).
+fn jlw_gui_art_evict_if_full(self) {
+    var ids = JlwGuiArtCache_tex_ids(self);
+    var acc = JlwGuiArtCache_tex_access(self);
+    while (vec_len(ids) >= JLW_GUI_ART_MAX_TEXTURES) {
+        var n = vec_len(acc);
+        var oldest = 0;
+        var oldest_at = vec_get(acc, 0);
+        for (var i = 1; i < n; i = i + 1) {
+            var a = vec_get(acc, i);
+            if (a < oldest_at) { oldest_at = a; oldest = i; }
+        }
+        vec_remove(ids, oldest);
+        vec_remove(acc, oldest);
+    }
+    return 0;
+}
+
+# invalidate(item_id): drop it from textures and no_art (kept-vec rebuild).
+fn jlw_gui_art_invalidate(self, item_id) {
+    var ids = JlwGuiArtCache_tex_ids(self);
+    var acc = JlwGuiArtCache_tex_access(self);
+    var n = vec_len(ids);
+    var kids = vec_new();
+    var kacc = vec_new();
+    for (var i = 0; i < n; i = i + 1) {
+        if (jlw_uuid_eq(vec_get(ids, i), item_id) == 0) {
+            vec_push(kids, vec_get(ids, i));
+            vec_push(kacc, vec_get(acc, i));
+        }
+    }
+    JlwGuiArtCache_set_tex_ids(self, kids);
+    JlwGuiArtCache_set_tex_access(self, kacc);
+
+    var s = JlwGuiArtCache_no_art(self);
+    var m = vec_len(s);
+    var ks = vec_new();
+    for (var j = 0; j < m; j = j + 1) {
+        if (jlw_uuid_eq(vec_get(s, j), item_id) == 0) { vec_push(ks, vec_get(s, j)); }
+    }
+    JlwGuiArtCache_set_no_art(self, ks);
+    return 0;
+}
+
+# get() on the load-failure path -- the only branch the portable tests exercise
+# (all test paths are nonexistent, so load_art always returns None). Mirrors
+# get()'s egui-independent effects: bump access_counter, short-circuit if the id
+# is already known no-art, else record it and evict the set if full. Returns 0
+# (None). The success path (decode + ctx.load_texture + textures.insert) is
+# deferred to dhancha.
+fn jlw_gui_art_get_miss(self, item_id) {
+    JlwGuiArtCache_set_access_counter(self, JlwGuiArtCache_access_counter(self) + 1);
+    if (jlw_gui_art_no_art_contains(self, item_id) == 1) { return 0; }
+    vec_push(JlwGuiArtCache_no_art(self), item_id);
+    jlw_gui_art_evict_no_art_if_full(self);
+    return 0;
+}

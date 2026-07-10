@@ -1,0 +1,27 @@
+# gui/theme.cyr -- dark theme palette for the jalwa GUI.
+# Ports rust-old/crates/jalwa-gui/src/theme.rs. L3. The egui `apply(ctx)` (sets
+# Visuals on an egui Context) is DEFERRED to the dhancha style API. The color
+# CONSTANTS port as packed 0xRRGGBBAA ints (alpha 0xFF = fully opaque), with
+# byte accessors -- the tested, egui-independent part.
+
+var JLW_GUI_BG_DARK        = 0x18181CFF;   # (24, 24, 28)
+var JLW_GUI_BG_PANEL       = 0x202026FF;   # (32, 32, 38)
+var JLW_GUI_BG_WIDGET      = 0x2C2C34FF;   # (44, 44, 52)
+var JLW_GUI_ACCENT         = 0x00BCD4FF;   # (0, 188, 212) cyan
+var JLW_GUI_ACCENT_DIM     = 0x008394FF;   # (0, 131, 148)
+var JLW_GUI_TEXT_PRIMARY   = 0xE6E6EBFF;   # (230, 230, 235)
+var JLW_GUI_TEXT_SECONDARY = 0xA0A0AAFF;   # (160, 160, 170)
+var JLW_GUI_TEXT_MUTED     = 0x64646EFF;   # (100, 100, 110)
+
+#inline
+#must_use
+fn jlw_gui_color_r(c) { return (c / 16777216) & 0xFF; }   # >> 24
+#inline
+#must_use
+fn jlw_gui_color_g(c) { return (c / 65536) & 0xFF; }      # >> 16
+#inline
+#must_use
+fn jlw_gui_color_b(c) { return (c / 256) & 0xFF; }        # >> 8
+#inline
+#must_use
+fn jlw_gui_color_a(c) { return c & 0xFF; }

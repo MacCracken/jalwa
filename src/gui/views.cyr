@@ -1,0 +1,358 @@
+# gui/views.cyr -- portable view-helper logic for the jalwa GUI.
+# Ports the egui-INDEPENDENT parts of rust-old/crates/jalwa-gui/src/views/*.rs
+# (library, now_playing, queue, transport, sidebar). L5 (after gui/app.cyr:
+# select_view mutates JlwGuiApp; queue_after_remove mutates JlwPlayQueue).
+#
+# Every immediate-mode draw body (egui panels/labels/sliders/inputs, TextEdit,
+# ScrollArea, ui.image, key_pressed handlers) is DEFERRED to a dhancha retained-
+# mode rewrite. What ports here is the pure logic those draws wrap: string
+# formatting, selection/index math, layout arithmetic, and state transitions --
+# the parts the #[cfg(test)]s (and new derived tests) actually assert.
+
+# ============================================================================
+# library.rs
+# ============================================================================
+# dhancha grid-layout hints (const CELL_WIDTH/ART_SIZE/CELL_HEIGHT).
+var JLW_GUI_CELL_WIDTH  = 130;
+var JLW_GUI_ART_SIZE    = 120;
+var JLW_GUI_CELL_HEIGHT = 170;
+
+# nav direction codes (replace egui::Key Arrow*).
+var JLW_GUI_NAV_UP    = 0;
+var JLW_GUI_NAV_DOWN  = 1;
+var JLW_GUI_NAV_LEFT  = 2;
+var JLW_GUI_NAV_RIGHT = 3;
+
+# --- UTF-8 helpers (truncate_str is char-count based, not byte based) ---
+# count of unicode scalars: bytes whose top bits are not a continuation (10xxxxxx).
+#must_use
+fn jlw_gui_utf8_char_count(s) {
+    var n = strlen(s);
+    var count = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        if ((load8(s + i) & 0xC0) != 0x80) { count = count + 1; }
+    }
+    return count;
+}
+# byte offset where the k-th char (0-based) starts; == strlen if k >= char count.
+#must_use
+fn jlw_gui_utf8_byte_offset(s, k) {
+    var n = strlen(s);
+    var seen = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        if ((load8(s + i) & 0xC0) != 0x80) {
+            if (seen == k) { return i; }
+            seen = seen + 1;
+        }
+    }
+    return n;
+}
+
+# truncate_str(s, max_len): if char count <= max_len keep s; else take the first
+# max_len-1 chars (saturating_sub guards max_len==0 -> 0) and append U+2026.
+#must_use
+fn jlw_gui_truncate_str(s, max_len) {
+    if (jlw_gui_utf8_char_count(s) <= max_len) { return s; }
+    var take = 0;
+    if (max_len >= 1) { take = max_len - 1; }
+    var cut = jlw_gui_utf8_byte_offset(s, take);
+    var out = alloc(cut + 4);         # cut bytes + "…" (3 bytes) + NUL
+    memcpy(out, s, cut);
+    store8(out + cut, 0xE2);          # U+2026 HORIZONTAL ELLIPSIS
+    store8(out + cut + 1, 0x80);
+    store8(out + cut + 2, 0xA6);
+    store8(out + cut + 3, 0);
+    return out;
+}
+
+# grid_columns(available_width): floor(width / CELL_WIDTH), clamped to >= 1.
+#must_use
+fn jlw_gui_grid_columns(available_width) {
+    var cols = available_width / JLW_GUI_CELL_WIDTH;
+    if (cols < 1) { return 1; }
+    return cols;
+}
+
+# nav_grid: Right/Left step by 1; Down/Up step by `columns` (clamped in range).
+#must_use
+fn jlw_gui_nav_grid(sel, columns, item_count, dir) {
+    if (dir == JLW_GUI_NAV_RIGHT) { if (sel + 1 < item_count) { return sel + 1; } return sel; }
+    if (dir == JLW_GUI_NAV_LEFT)  { if (sel > 0) { return sel - 1; } return sel; }
+    if (dir == JLW_GUI_NAV_DOWN)  { if (sel + columns < item_count) { return sel + columns; } return sel; }
+    if (dir == JLW_GUI_NAV_UP)    { if (sel >= columns) { return sel - columns; } return sel; }
+    return sel;
+}
+# nav_list: Down/Up step by 1 (clamped in range).
+#must_use
+fn jlw_gui_nav_list(sel, item_count, dir) {
+    if (dir == JLW_GUI_NAV_DOWN) { if (sel + 1 < item_count) { return sel + 1; } return sel; }
+    if (dir == JLW_GUI_NAV_UP)   { if (sel > 0) { return sel - 1; } return sel; }
+    return sel;
+}
+
+# row_color_code(is_playing, is_selected): playing beats selected beats default.
+#must_use
+fn jlw_gui_row_color_code(is_playing, is_selected) {
+    if (is_playing == 1) { return JLW_GUI_ACCENT; }
+    if (is_selected == 1) { return JLW_GUI_TEXT_PRIMARY; }
+    return JLW_GUI_TEXT_SECONDARY;
+}
+
+# right-justify a non-negative int to a min width of 3 with leading spaces
+# (Rust "{:>3}"); values >= 1000 render at natural width.
+#must_use
+fn jlw_gui_rjust3(n) {
+    var sb = str_builder_new();
+    if (n < 100) { str_builder_putc(sb, 32); }
+    if (n < 10)  { str_builder_putc(sb, 32); }
+    str_builder_add_int(sb, n);
+    return str_cstr(str_builder_build(sb));
+}
+
+# format_library_row(display_idx0, title, artist_or_null, dur_f64):
+# "{:>3}. {artist} – {title} [{duration}]". artist None -> "Unknown";
+# duration None (NaN) -> "?:??" else format_duration.
+#must_use
+fn jlw_gui_format_library_row(display_idx0, title, artist_or_null, dur_f64) {
+    var artist = artist_or_null;
+    if (artist == 0) { artist = "Unknown"; }
+    var dur = "?:??";
+    if (jlw_is_finite(dur_f64) == 1) { dur = jlw_format_duration(f64_to(dur_f64)); }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, jlw_gui_rjust3(display_idx0 + 1));
+    str_builder_add_cstr(sb, ". ");
+    str_builder_add_cstr(sb, artist);
+    str_builder_add_cstr(sb, " – ");
+    str_builder_add_cstr(sb, title);
+    str_builder_add_cstr(sb, " [");
+    str_builder_add_cstr(sb, dur);
+    str_builder_putc(sb, 93);          # ']'
+    return str_cstr(str_builder_build(sb));
+}
+
+# ============================================================================
+# now_playing.rs
+# ============================================================================
+#derive(accessors)
+struct JlwGuiVec2 { x; y; }
+
+# art_display_size(w, h, max_size): scale = min(max_size / max(w,h), 1.0);
+# return (w*scale, h*scale). Pure float math.
+#must_use
+fn jlw_gui_art_display_size(w, h, max_size) {
+    var big = w;
+    if (f64_gt(h, w) == 1) { big = h; }
+    var scale = f64_div(max_size, big);
+    if (f64_gt(scale, 1.0) == 1) { scale = 1.0; }
+    var v = alloc(sizeof(JlwGuiVec2));
+    JlwGuiVec2_set_x(v, f64_mul(w, scale));
+    JlwGuiVec2_set_y(v, f64_mul(h, scale));
+    return v;
+}
+
+# metadata projections (Option -> fallback literal).
+#must_use
+fn jlw_gui_np_artist(artist_or_null) {
+    if (artist_or_null == 0) { return "Unknown Artist"; }
+    return artist_or_null;
+}
+#must_use
+fn jlw_gui_np_album(album_or_null) {
+    if (album_or_null == 0) { return "Unknown Album"; }
+    return album_or_null;
+}
+#must_use
+fn jlw_gui_np_duration(dur_f64) {
+    if (jlw_is_finite(dur_f64) == 1) { return jlw_format_duration(f64_to(dur_f64)); }
+    return "?:??";
+}
+#must_use
+fn jlw_gui_np_codec(codec_code) {
+    if (codec_code == (0 - 1)) { return "?"; }
+    return jlw_audio_codec_name(codec_code);
+}
+#must_use
+fn jlw_gui_np_rating(rating) {          # rating None = -1 -> "-", else "{r}/5"
+    if (rating == (0 - 1)) { return "-"; }
+    var sb = str_builder_new();
+    str_builder_add_int(sb, rating);
+    str_builder_add_cstr(sb, "/5");
+    return str_cstr(str_builder_build(sb));
+}
+# details/stats lines (assembly of the projections + format name; bullet U+2022).
+#must_use
+fn jlw_gui_np_details_line(dur_str, codec_str, fmt_str) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Duration: ");
+    str_builder_add_cstr(sb, dur_str);
+    str_builder_add_cstr(sb, "  •  Codec: ");
+    str_builder_add_cstr(sb, codec_str);
+    str_builder_add_cstr(sb, "  •  Format: ");
+    str_builder_add_cstr(sb, fmt_str);
+    return str_cstr(str_builder_build(sb));
+}
+#must_use
+fn jlw_gui_np_stats_line(play_count, rating_str) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Plays: ");
+    str_builder_add_int(sb, play_count);
+    str_builder_add_cstr(sb, "  •  Rating: ");
+    str_builder_add_cstr(sb, rating_str);
+    return str_cstr(str_builder_build(sb));
+}
+
+# ============================================================================
+# queue.rs
+# ============================================================================
+# queue_row_label(index0, artist_or_null, title_or_null, is_current):
+# "{prefix}{:>3}. {artist} – {title}", or "{prefix}{:>3}. (unknown)" if the item
+# is missing (title_or_null == 0). prefix = "▶ " when current else "  ".
+#must_use
+fn jlw_gui_queue_row_label(index0, artist_or_null, title_or_null, is_current) {
+    var sb = str_builder_new();
+    if (is_current == 1) { str_builder_add_cstr(sb, "▶ "); }
+    else { str_builder_add_cstr(sb, "  "); }
+    str_builder_add_cstr(sb, jlw_gui_rjust3(index0 + 1));
+    if (title_or_null == 0) {
+        str_builder_add_cstr(sb, ". (unknown)");
+        return str_cstr(str_builder_build(sb));
+    }
+    var artist = artist_or_null;
+    if (artist == 0) { artist = "Unknown"; }
+    str_builder_add_cstr(sb, ". ");
+    str_builder_add_cstr(sb, artist);
+    str_builder_add_cstr(sb, " – ");
+    str_builder_add_cstr(sb, title_or_null);
+    return str_cstr(str_builder_build(sb));
+}
+
+# queue_after_remove(q, sel, removed_idx): the caller has already removed
+# items[removed_idx] from the queue, so `q` holds the new length. Clamp the
+# selection into range and shift position left when the removed index is at/
+# before the current position. Mutates q.position; returns the new selection.
+fn jlw_gui_queue_after_remove(q, sel, removed_idx) {
+    var len = jlw_queue_len(q);
+    var new_sel = sel;
+    if (sel >= len) { if (len > 0) { new_sel = len - 1; } }
+    var pos = JlwPlayQueue_position(q);
+    if (pos != (0 - 1)) {
+        if (removed_idx <= pos) { if (pos > 0) { JlwPlayQueue_set_position(q, pos - 1); } }
+    }
+    return new_sel;
+}
+
+# arrow-key selection moves (bounds-clamped); returns the new selection.
+#must_use
+fn jlw_gui_queue_move_down(sel, len) { if (sel + 1 < len) { return sel + 1; } return sel; }
+#must_use
+fn jlw_gui_queue_move_up(sel) { if (sel > 0) { return sel - 1; } return sel; }
+
+# ============================================================================
+# transport.rs
+# ============================================================================
+# icon selector codes (the actual glyph is dhancha's).
+var JLW_GUI_ICON_PLAY          = 0;
+var JLW_GUI_ICON_PAUSE         = 1;
+var JLW_GUI_ICON_SPEAKER_LOUD  = 0;
+var JLW_GUI_ICON_SPEAKER_MUTED = 1;
+
+# play_label_code(state): Playing -> pause icon; every other state -> play icon.
+#must_use
+fn jlw_gui_play_label_code(state_code) {
+    if (state_code == JLW_STATE_PLAYING) { return JLW_GUI_ICON_PAUSE; }
+    return JLW_GUI_ICON_PLAY;
+}
+# mute_icon_code(muted): muted -> muted-speaker; else loud-speaker.
+#must_use
+fn jlw_gui_mute_icon_code(muted) {
+    if (muted == 1) { return JLW_GUI_ICON_SPEAKER_MUTED; }
+    return JLW_GUI_ICON_SPEAKER_LOUD;
+}
+
+# format_volume_pct(vol): "{(vol*100) as u8}%". u8 truncation toward zero is
+# load-bearing (0.999 -> "99%", 1.0 -> "100%").
+#must_use
+fn jlw_gui_format_volume_pct(vol) {
+    var n = f64_to(f64_mul(vol, 100.0));
+    var sb = str_builder_new();
+    str_builder_add_int(sb, n);
+    str_builder_putc(sb, 37);          # '%'
+    return str_cstr(str_builder_build(sb));
+}
+
+# format_track_title(artist_or_null, title, has_item):
+# no item -> "No media loaded"; empty/absent artist -> bare title;
+# else "{artist} – {title}" (en-dash U+2013).
+#must_use
+fn jlw_gui_format_track_title(artist_or_null, title, has_item) {
+    if (has_item == 0) { return "No media loaded"; }
+    if (artist_or_null == 0) { return title; }
+    if (strlen(artist_or_null) == 0) { return title; }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, artist_or_null);
+    str_builder_add_cstr(sb, " – ");
+    str_builder_add_cstr(sb, title);
+    return str_cstr(str_builder_build(sb));
+}
+
+# format_duration_or_dashes(dur_secs): zero -> "--:--"; else format_duration.
+#must_use
+fn jlw_gui_format_duration_or_dashes(dur_secs) {
+    if (dur_secs == 0) { return "--:--"; }
+    return jlw_format_duration(dur_secs);
+}
+
+# progress_ratio(pos, dur): zero-duration guard -> 0.0; else pos/dur (f64).
+#must_use
+fn jlw_gui_progress_ratio(pos, dur) {
+    if (f64_gt(dur, 0.0) == 0) { return 0.0; }
+    return f64_div(pos, dur);
+}
+# seek_target(seek_val, dur): linear map slider 0..1 to 0..duration seconds.
+#must_use
+fn jlw_gui_seek_target(seek_val, dur) { return f64_mul(seek_val, dur); }
+
+# ============================================================================
+# sidebar.rs
+# ============================================================================
+#derive(accessors)
+struct JlwGuiNavEntry { view_code; label; icon; }
+
+#must_use
+fn jlw_gui_nav_entry_new(view_code, label, icon) {
+    var e = alloc(sizeof(JlwGuiNavEntry));
+    JlwGuiNavEntry_set_view_code(e, view_code);
+    JlwGuiNavEntry_set_label(e, label);
+    JlwGuiNavEntry_set_icon(e, icon);
+    return e;
+}
+
+# sidebar_entries(is_video): base [Library, NowPlaying, Queue, Equalizer]; insert
+# Video at index 2 when a video is loaded; always append Devices last.
+#must_use
+fn jlw_gui_sidebar_entries(is_video) {
+    var v = vec_new();
+    vec_push(v, jlw_gui_nav_entry_new(JLW_GUI_VIEW_LIBRARY,     "Library",     "📚"));
+    vec_push(v, jlw_gui_nav_entry_new(JLW_GUI_VIEW_NOW_PLAYING, "Now Playing", "♫"));
+    if (is_video == 1) {
+        vec_push(v, jlw_gui_nav_entry_new(JLW_GUI_VIEW_VIDEO,   "Video",       "🎬"));
+    }
+    vec_push(v, jlw_gui_nav_entry_new(JLW_GUI_VIEW_QUEUE,       "Queue",       "📋"));
+    vec_push(v, jlw_gui_nav_entry_new(JLW_GUI_VIEW_EQUALIZER,   "EQ",          "🎚"));
+    vec_push(v, jlw_gui_nav_entry_new(JLW_GUI_VIEW_DEVICES,     "Devices",     "🔌"));
+    return v;
+}
+
+# nav_active_color(is_active): active -> accent; else secondary text.
+#must_use
+fn jlw_gui_nav_active_color(is_active) {
+    if (is_active == 1) { return JLW_GUI_ACCENT; }
+    return JLW_GUI_TEXT_SECONDARY;
+}
+
+# select_view(app, clicked_view_code): set active view and reset selection to 0.
+fn jlw_gui_select_view(app, clicked_view_code) {
+    JlwGuiApp_set_view(app, clicked_view_code);
+    JlwGuiApp_set_selected_index(app, 0);
+    return 0;
+}

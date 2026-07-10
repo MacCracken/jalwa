@@ -1,0 +1,81 @@
+# gui_art_cache.tcyr -- parity tests for src/gui/art_cache.cyr.
+# Ports the #[cfg(test)] mod from jalwa-gui/src/art_cache.rs. The get()/load_art
+# calls in the Rust tests all use nonexistent paths, so they only ever exercise
+# the load-FAILURE branch -- modeled here by jlw_gui_art_get_miss (no egui).
+# DROPPED: nothing structural; the success path (texture insert) is deferred.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/gui/art_cache.cyr"
+
+alloc_init();
+
+# ---- cache_new_empty ----
+test_group("cache_new_empty");
+var c0 = jlw_gui_art_cache_new();
+assert_eq(jlw_gui_art_texture_count(c0), 0, "textures empty");
+assert_eq(jlw_gui_art_no_art_count(c0), 0, "no_art empty");
+assert_eq(JlwGuiArtCache_access_counter(c0), 0, "counter 0");
+
+# ---- invalidate_unknown_id (no crash, no-op) ----
+test_group("invalidate_unknown_id");
+var c1 = jlw_gui_art_cache_new();
+jlw_gui_art_invalidate(c1, jlw_uuid_v4());
+assert_eq(jlw_gui_art_no_art_count(c1), 0, "still empty after invalidate unknown");
+
+# ---- cache_no_art_tracking ----
+test_group("cache_no_art_tracking");
+var c2 = jlw_gui_art_cache_new();
+var fid = jlw_uuid_v4();
+jlw_gui_art_get_miss(c2, fid);
+assert_eq(jlw_gui_art_no_art_count(c2), 1, "first miss records no_art");
+jlw_gui_art_get_miss(c2, fid);
+assert_eq(jlw_gui_art_no_art_count(c2), 1, "same id short-circuits (still 1)");
+var fid2 = jlw_uuid_v4();
+jlw_gui_art_get_miss(c2, fid2);
+assert_eq(jlw_gui_art_no_art_count(c2), 2, "different id tracked");
+assert_eq(jlw_gui_art_no_art_contains(c2, fid), 1, "contains fid");
+assert_eq(jlw_gui_art_no_art_contains(c2, jlw_uuid_v4()), 0, "does not contain random");
+
+# ---- invalidate_clears_no_art ----
+test_group("invalidate_clears_no_art");
+var c3 = jlw_gui_art_cache_new();
+var iid = jlw_uuid_v4();
+jlw_gui_art_get_miss(c3, iid);
+assert_eq(jlw_gui_art_no_art_count(c3), 1, "marked no_art");
+jlw_gui_art_invalidate(c3, iid);
+assert_eq(jlw_gui_art_no_art_count(c3), 0, "no_art cleared");
+assert_eq(jlw_gui_art_texture_count(c3), 0, "textures 0");
+
+# ---- cache_max_textures_constant ----
+test_group("cache_max_textures_constant");
+assert_eq(JLW_GUI_ART_MAX_TEXTURES > 0, 1, "MAX_TEXTURES positive");
+assert_eq(JLW_GUI_ART_MAX_TEXTURES <= 1000, 1, "MAX_TEXTURES <= 1000");
+
+# ---- no_art_set_eviction (fill past MAX_NO_ART -> cleared) ----
+test_group("no_art_set_eviction");
+var c4 = jlw_gui_art_cache_new();
+for (var k = 0; k <= JLW_GUI_ART_MAX_NO_ART; k = k + 1) {
+    jlw_gui_art_get_miss(c4, jlw_uuid_v4());
+}
+assert_eq(jlw_gui_art_no_art_count(c4) <= 1, 1, "no_art cleared after exceeding threshold");
+
+# ---- no_art_set_below_threshold_not_cleared ----
+test_group("no_art_set_below_threshold_not_cleared");
+var c5 = jlw_gui_art_cache_new();
+for (var j5 = 0; j5 < 10; j5 = j5 + 1) {
+    jlw_gui_art_get_miss(c5, jlw_uuid_v4());
+}
+assert_eq(jlw_gui_art_no_art_count(c5), 10, "retains entries below threshold");
+
+# ---- cache_access_counter_increments ----
+test_group("cache_access_counter_increments");
+var c6 = jlw_gui_art_cache_new();
+assert_eq(JlwGuiArtCache_access_counter(c6), 0, "counter starts 0");
+jlw_gui_art_get_miss(c6, jlw_uuid_v4());
+assert_eq(JlwGuiArtCache_access_counter(c6), 1, "counter 1 after first get");
+jlw_gui_art_get_miss(c6, jlw_uuid_v4());
+assert_eq(JlwGuiArtCache_access_counter(c6), 2, "counter 2 after second get");
+
+var rc = assert_summary();
+syscall(60, rc);
