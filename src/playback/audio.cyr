@@ -66,6 +66,81 @@ fn jlw_audio_f64_to_i16(samples, start, count, volume, out) {
     return 0;
 }
 
+# ---- output sink: the mishran mixer (route through the server) or direct vani ----
+# jlw_sink is a tagged handle: +0 kind (1 = mishran, 2 = vani), +8 handle. All
+# playback goes through this seam so jalwa SHARES the one hardware writer with
+# every other sounding app when a mishran server is up — falling back to a direct
+# vani device when standalone (no mixer). The mishran path streams PCM over
+# loopback:7701; the server paces us via TCP backpressure (its ring-full latch),
+# so the play loop stays real-time without a client-side timer.
+enum JlwSinkKind {
+    JLW_SINK_MISHRAN = 1;
+    JLW_SINK_VANI    = 2;
+}
+
+# Open an output sink for rate/channels. Prefer the mishran mixer; fall back to a
+# direct vani device if no server is listening. Returns a *jlw_sink, or 0 when
+# neither is available.
+fn jlw_sink_open(rate, channels) {
+    var c = msh_client_connect(rate, channels);
+    if (c != 0) {
+        var mm = "jalwa: audio routed through the mishran mixer\n";
+        syscall(1, 1, mm, strlen(mm));
+        var s = alloc(16);
+        store64(s + 0, JLW_SINK_MISHRAN);
+        store64(s + 8, c);
+        return s;
+    }
+    var dev = audio_open_playback(0, 0);
+    if (dev == 0) { return 0; }
+    var vm = "jalwa: audio via direct vani (no mixer)\n";
+    syscall(1, 1, vm, strlen(vm));
+    audio_set_params(dev, rate, channels, 16);
+    audio_prepare(dev);
+    var s2 = alloc(16);
+    store64(s2 + 0, JLW_SINK_VANI);
+    store64(s2 + 8, dev);
+    return s2;
+}
+
+# Write `frames` interleaved S16 frames from `buf`; returns 0 on success, -1 on a
+# write error. mishran takes the whole chunk in one msh_client_write (paced by the
+# server's TCP backpressure); vani loops over partial writes.
+fn jlw_sink_write(s, buf, frames, channels) {
+    if (load64(s + 0) == JLW_SINK_MISHRAN) {
+        if (msh_client_write(load64(s + 8), buf, frames) < 0) { return 0 - 1; }
+        return 0;
+    }
+    var dev = load64(s + 8);
+    var written = 0;
+    while (written < frames) {
+        var w = audio_write(dev, buf + written * channels * 2, frames - written);
+        if (w <= 0) { return 0 - 1; }
+        written = written + w;
+    }
+    return 0;
+}
+
+# Flush queued audio on a seek. vani drops + re-arms the device buffer; mishran has
+# no client-side flush yet (the mixer ring drains naturally — brief extra latency).
+fn jlw_sink_drop(s) {
+    if (load64(s + 0) == JLW_SINK_VANI) { audio_drop(load64(s + 8)); }
+    return 0;
+}
+fn jlw_sink_prepare(s) {
+    if (load64(s + 0) == JLW_SINK_VANI) { audio_prepare(load64(s + 8)); }
+    return 0;
+}
+
+# Drain + close the sink (BYE + close for mishran; drain + close for vani).
+fn jlw_sink_close(s) {
+    if (load64(s + 0) == JLW_SINK_MISHRAN) { return msh_client_close(load64(s + 8)); }
+    var dev = load64(s + 8);
+    audio_drain(dev);
+    audio_close(dev);
+    return 0;
+}
+
 # play a decoded file to the default device. `h` is an optional JlwPlayHandle
 # (0 = none): between chunks the loop checks JlwPlayHandle_stop(h) and, if set,
 # stops early -- the hook a background thread / the engine uses to cancel playback.
@@ -91,12 +166,10 @@ fn jlw_audio_play_file_h(path, volume, h) {
         count = vec_len(samples);
     }
 
-    var dev = audio_open_playback(0, 0);
-    if (dev == 0) { return JLW_ERR_PLAYBACK; }   # no device
-    audio_set_params(dev, rate, channels, 16);
-    audio_prepare(dev);
+    var sink = jlw_sink_open(rate, channels);
+    if (sink == 0) { return JLW_ERR_PLAYBACK; }   # no mixer and no device
 
-    var chunk_frames = 4096;
+    var chunk_frames = 1024;                      # <= mishran ring (backpressure); fine for vani too
     var chunk_samples = chunk_frames * channels;
     var outbuf = alloc(chunk_samples * 2);       # reused per chunk (no per-frame alloc)
     var silbuf = alloc(chunk_samples * 2);       # zero-filled: fed to the device while paused
@@ -121,18 +194,14 @@ fn jlw_audio_play_file_h(path, volume, h) {
                     if (ts > count) { ts = count; }
                     i = ts;
                     JlwPlayHandle_set_seek_to(h, 0 - 1);
-                    audio_drop(dev);
-                    audio_prepare(dev);
+                    jlw_sink_drop(sink);
+                    jlw_sink_prepare(sink);
                     if (rate > 0) { JlwPlayHandle_set_position(h, f64_div(f64_from(i / channels), f64_from(rate))); }
                 }
             }
             if (paused == 1) {
                 # keep the device fed with silence (no ALSA underrun); hold position
-                var pw = 0;
-                while (pw < chunk_frames) {
-                    var ws = audio_write(dev, silbuf + pw * channels * 2, chunk_frames - pw);
-                    if (ws <= 0) { pw = chunk_frames; } else { pw = pw + ws; }
-                }
+                jlw_sink_write(sink, silbuf, chunk_frames, channels);
             } else {
                 var vol = volume;
                 if (h != 0) { vol = JlwPlayHandle_volume(h); }   # live volume
@@ -140,19 +209,13 @@ fn jlw_audio_play_file_h(path, volume, h) {
                 if (m > chunk_samples) { m = chunk_samples; }
                 jlw_audio_f64_to_i16(samples, i, m, vol, outbuf);
                 var frames = m / channels;
-                var written = 0;
-                while (written < frames) {
-                    var w = audio_write(dev, outbuf + written * channels * 2, frames - written);
-                    if (w <= 0) { written = frames; i = count; }   # write error -> stop
-                    else { written = written + w; }
-                }
+                if (jlw_sink_write(sink, outbuf, frames, channels) < 0) { i = count; }   # write error -> stop
                 i = i + m;
                 if (h != 0) { if (rate > 0) { JlwPlayHandle_set_position(h, f64_div(f64_from(i / channels), f64_from(rate))); } }
             }
         }
     }
-    audio_drain(dev);
-    audio_close(dev);
+    jlw_sink_close(sink);
     return JLW_ERR_NONE;
 }
 

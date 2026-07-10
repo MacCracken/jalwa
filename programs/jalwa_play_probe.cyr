@@ -1,0 +1,65 @@
+# programs/jalwa_play_probe.cyr — the jalwa->mishran agnos audio proof entry.
+#
+# Spawned by /bin/mishrand on agnos (sys_spawn_path passes no argv), so it can't
+# take a file argument — it hard-plays a fixed seeded /tone.wav THROUGH the
+# mishran mixer: jlw_audio_play_file -> jlw_sink_open (msh_client_connect
+# loopback:7701) -> msh_client_write. mishrand mixes it to vani -> snd -> HDA.
+# Includes the SAME module assembly as src/main.cyr (minus the CLI dispatch/entry)
+# so jlw_audio_play_file and its deps resolve. Prints markers the smoke gates on.
+#
+# Build:  cyrius build --agnos programs/jalwa_play_probe.cyr build/jalwa-play-probe
+
+# ===== ASSEMBLY: all modules (mirrors src/main.cyr) =====
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/core/playlist_io.cyr"
+include "src/core/scanner.cyr"
+include "src/core/watcher.cyr"
+include "src/core/hardware.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/playback/mpris.cyr"
+include "src/playback/audio.cyr"
+include "src/ai/reco.cyr"
+include "src/ai/daimon.cyr"
+include "src/ai/fingerprint.cyr"
+include "src/ui/renderers.cyr"
+include "src/ui/app.cyr"
+include "src/ui/tui.cyr"
+include "src/ui/widgets.cyr"
+include "src/mcp.cyr"
+include "src/mcp_serve.cyr"
+include "src/gui/theme.cyr"
+include "src/gui/art_cache.cyr"
+include "src/gui/app.cyr"
+include "src/gui/views.cyr"
+include "src/gui/draw.cyr"
+include "src/gui/raster.cyr"
+include "src/gui/input.cyr"
+include "src/gui/control.cyr"
+include "src/gui/wayland.cyr"
+include "src/gui/present.cyr"
+
+fn _pp_say(s): i64 { return syscall(1, 1, s, strlen(s)); }
+
+fn _pp_main(): i64 {
+    alloc_init();
+    #ifdef CYRIUS_TARGET_AGNOS
+    # Bring up the mixer daemon ourselves — it's a small binary (spawn_path works),
+    # whereas we (2.5 MB) had to be sh_exec'd as the primary. Then yield generously
+    # so mishrand opens its loopback:7701 listener + vani sink before we connect.
+    var mpid = sys_spawn_path("/bin/mishrand", 13);
+    if (mpid >= 0) { _pp_say("jalwa: spawned /bin/mishrand\n"); }
+    var w = 0;
+    while (w < 2000) { sys_sched_yield(); w = w + 1; }
+    #endif
+    _pp_say("jalwa play-probe: playing /tone.wav through the mixer\n");
+    jlw_audio_play_file("/tone.wav", 1.0);
+    _pp_say("jalwa play-probe: done\n");
+    return 0;
+}
+
+fn _entry(): i64 { var r = _pp_main(); syscall(SYS_EXIT, r); return 0; }
+_entry();

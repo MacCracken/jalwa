@@ -201,5 +201,5 @@ fn main() {
     return 0;
 }
 
-var rr = main();
-syscall(60, rr);
+fn _entry(): i64 { var r = main(); syscall(SYS_EXIT, r); return 0; }
+_entry();

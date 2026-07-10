@@ -11,7 +11,16 @@ entry = "src/main.cyr"
 output = "jalwa"
 
 [deps]
-stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert", "math", "random", "chrono", "patra", "fs", "yukti", "hashmap", "tagged", "process", "ganita", "thread", "fnptr", "bayan", "freelist", "sakshi", "atomic", "sync", "thread_local"]
+stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert", "math", "random", "chrono", "patra", "fs", "yukti", "hashmap", "tagged", "process", "ganita", "thread", "fnptr", "bayan", "freelist", "sakshi", "atomic", "sync", "thread_local", "result", "net", "bench"]
+
+# mishran — the audio MIXER / routing server. jalwa streams its decoded PCM to
+# mishran (msh_client_*) so it shares the one hardware writer with every other
+# app, instead of grabbing vani directly. The client API needs `result` + `net`
+# (above). Local path-dep during development (picks up the backpressure latch);
+# switch to `tag = "0.4.1"` at release.
+[deps.mishran]
+path = "../mishran"
+modules = ["dist/mishran.cyr"]
 
 [deps.dhvani]
 git = "https://github.com/MacCracken/dhvani.git"

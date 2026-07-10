@@ -102,7 +102,11 @@ fn jlw_watcher_lookup_dir(w, wd) {
 #must_use
 fn jlw_watcher_new(paths) {
     var w = alloc(sizeof(JlwWatcher));
+    #ifdef CYRIUS_TARGET_AGNOS
+    JlwWatcher_set_fd(w, 0 - 1);                 # inotify absent on agnos -> fd<0, poll() is a noop
+    #else
     JlwWatcher_set_fd(w, syscall(294, 2048));   # inotify_init1(IN_NONBLOCK)
+    #endif
     JlwWatcher_set_wds(w, vec_new());
     JlwWatcher_set_dirs(w, vec_new());
     var fd = JlwWatcher_fd(w);
@@ -110,7 +114,11 @@ fn jlw_watcher_new(paths) {
         var n = vec_len(paths);
         for (var i = 0; i < n; i = i + 1) {
             var d = vec_get(paths, i);
+            #ifdef CYRIUS_TARGET_AGNOS
+            var wd = 0 - 1;                                # inotify unavailable on agnos (call must be textually excluded — DCE is call-graph based)
+            #else
             var wd = sys_inotify_add_watch(fd, d, 962);   # CREATE|MODIFY|DELETE|MOVED_FROM|MOVED_TO
+            #endif
             if (wd >= 0) { jlw_watcher_add(w, wd, d); }
         }
     }
