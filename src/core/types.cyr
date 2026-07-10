@@ -596,3 +596,28 @@ fn jlw_library_items_len(lib) { return vec_len(JlwLibrary_items(lib)); }
 #inline
 #must_use
 fn jlw_library_playlists_len(lib) { return vec_len(JlwLibrary_playlists(lib)); }
+
+# format_duration(total_secs): "H:MM:SS" if hours, else "M:SS". A core util
+# (Rust had it in jalwa-playback; here it's shared by playback + ui).
+#must_use
+fn jlw_format_duration(total_secs) {
+    var hours = total_secs / 3600;
+    var mins = (total_secs % 3600) / 60;
+    var secs = total_secs % 60;
+    var sb = str_builder_new();
+    if (hours > 0) {
+        str_builder_add_int(sb, hours);
+        str_builder_putc(sb, 58);                       # ':'
+        if (mins < 10) { str_builder_putc(sb, 48); }
+        str_builder_add_int(sb, mins);
+        str_builder_putc(sb, 58);
+        if (secs < 10) { str_builder_putc(sb, 48); }
+        str_builder_add_int(sb, secs);
+    } else {
+        str_builder_add_int(sb, mins);
+        str_builder_putc(sb, 58);
+        if (secs < 10) { str_builder_putc(sb, 48); }
+        str_builder_add_int(sb, secs);
+    }
+    return str_cstr(str_builder_build(sb));
+}

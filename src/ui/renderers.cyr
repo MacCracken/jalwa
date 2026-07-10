@@ -1,0 +1,116 @@
+# ui/renderers.cyr -- stateless string renderers for the UI layer.
+# Ports rust-old/crates/jalwa-ui/src/lib.rs. L3: depends on error.cyr +
+# core/types.cyr (PlaybackStatus/PlayQueue/MediaItem/Library + jlw_format_duration).
+# Pure string building -- a direct port, the high-value early UI win.
+
+# render_status_bar(status, item): "ICON [artist - ]title  [pos / dur]  Vol: V".
+#must_use
+fn jlw_ui_render_status_bar(status, item) {
+    var sb = str_builder_new();
+    var state = JlwPlaybackStatus_state(status);
+    if (state == JLW_STATE_PLAYING) { str_builder_add_cstr(sb, ">>"); }
+    else { if (state == JLW_STATE_PAUSED) { str_builder_add_cstr(sb, "||"); }
+    else { if (state == JLW_STATE_STOPPED) { str_builder_add_cstr(sb, "[]"); }
+    else { str_builder_add_cstr(sb, ".."); } } }
+    str_builder_putc(sb, 32);
+    var title = "No media loaded";
+    var artist = "";
+    if (item != 0) {
+        title = JlwMediaItem_title(item);
+        var a = JlwMediaItem_artist(item);
+        if (a != 0) { artist = a; }
+    }
+    if (strlen(artist) > 0) {
+        str_builder_add_cstr(sb, artist); str_builder_add_cstr(sb, " - "); str_builder_add_cstr(sb, title);
+    } else {
+        str_builder_add_cstr(sb, title);
+    }
+    str_builder_add_cstr(sb, "  [");
+    str_builder_add_cstr(sb, jlw_format_duration(f64_to(JlwPlaybackStatus_position(status))));
+    str_builder_add_cstr(sb, " / ");
+    var dur = JlwPlaybackStatus_duration(status);
+    if (jlw_is_finite(dur) == 1) { str_builder_add_cstr(sb, jlw_format_duration(f64_to(dur))); }
+    else { str_builder_add_cstr(sb, "--:--"); }
+    str_builder_add_cstr(sb, "]  Vol: ");
+    if (JlwPlaybackStatus_muted(status) == 1) { str_builder_add_cstr(sb, "MUTE"); }
+    else {
+        str_builder_add_int(sb, f64_to(f64_mul(JlwPlaybackStatus_volume(status), 100.0)));
+        str_builder_putc(sb, 37);   # '%'
+    }
+    return str_cstr(str_builder_build(sb));
+}
+
+# render_progress_bar(progress, width): "[===   ]".
+#must_use
+fn jlw_ui_render_progress_bar(progress, width) {
+    var filled = f64_to(f64_mul(progress, f64_from(width)));
+    if (filled > width) { filled = width; }
+    if (filled < 0) { filled = 0; }
+    var empty = width - filled;
+    var sb = str_builder_new();
+    str_builder_putc(sb, 91);   # '['
+    for (var i = 0; i < filled; i = i + 1) { str_builder_putc(sb, 61); }   # '='
+    for (var j = 0; j < empty; j = j + 1) { str_builder_putc(sb, 32); }    # ' '
+    str_builder_putc(sb, 93);   # ']'
+    return str_cstr(str_builder_build(sb));
+}
+
+# render_queue_summary(queue): "Queue: p/n [R1|RA] [S]".
+#must_use
+fn jlw_ui_render_queue_summary(queue) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Queue: ");
+    var pos = JlwPlayQueue_position(queue);
+    var len = jlw_queue_len(queue);
+    if (pos == (0 - 1)) { str_builder_add_int(sb, 0); } else { str_builder_add_int(sb, pos + 1); }
+    str_builder_putc(sb, 47);   # '/'
+    str_builder_add_int(sb, len);
+    var rm = JlwPlayQueue_repeat_mode(queue);
+    if (rm == JLW_REPEAT_ONE) { str_builder_add_cstr(sb, " [R1]"); }
+    if (rm == JLW_REPEAT_ALL) { str_builder_add_cstr(sb, " [RA]"); }
+    if (JlwPlayQueue_shuffle(queue) == 1) { str_builder_add_cstr(sb, " [S]"); }
+    return str_cstr(str_builder_build(sb));
+}
+
+# render_library_item(item, index): "N. artist - title [dur] (type)".
+#must_use
+fn jlw_ui_render_library_item(item, index) {
+    var sb = str_builder_new();
+    str_builder_add_int(sb, index + 1);
+    str_builder_add_cstr(sb, ". ");
+    var artist = JlwMediaItem_artist(item);
+    if (artist != 0) { str_builder_add_cstr(sb, artist); } else { str_builder_add_cstr(sb, "Unknown"); }
+    str_builder_add_cstr(sb, " - ");
+    str_builder_add_cstr(sb, JlwMediaItem_title(item));
+    str_builder_add_cstr(sb, " [");
+    var dur = JlwMediaItem_duration(item);
+    if (jlw_is_finite(dur) == 1) { str_builder_add_cstr(sb, jlw_format_duration(f64_to(dur))); }
+    else { str_builder_add_cstr(sb, "?:??"); }
+    str_builder_add_cstr(sb, "] (");
+    str_builder_add_cstr(sb, jlw_media_type_name(JlwMediaItem_media_type(item)));
+    str_builder_putc(sb, 41);   # ')'
+    return str_cstr(str_builder_build(sb));
+}
+
+# render_library_stats(library): item/audio/video/playlist counts + total time.
+#must_use
+fn jlw_ui_render_library_stats(library) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Library: ");
+    str_builder_add_int(sb, jlw_library_items_len(library));
+    str_builder_add_cstr(sb, " items (");
+    str_builder_add_int(sb, jlw_library_audio_count(library));
+    str_builder_add_cstr(sb, " audio, ");
+    str_builder_add_int(sb, jlw_library_video_count(library));
+    str_builder_add_cstr(sb, " video), ");
+    str_builder_add_int(sb, jlw_library_playlists_len(library));
+    str_builder_add_cstr(sb, " playlists, total: ");
+    var items = JlwLibrary_items(library);
+    var total = 0;
+    for (var i = 0; i < vec_len(items); i = i + 1) {
+        var d = JlwMediaItem_duration(vec_get(items, i));
+        if (jlw_is_finite(d) == 1) { total = total + f64_to(d); }
+    }
+    str_builder_add_cstr(sb, jlw_format_duration(total));
+    return str_cstr(str_builder_build(sb));
+}

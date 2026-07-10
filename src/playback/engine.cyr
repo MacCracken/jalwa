@@ -167,26 +167,4 @@ fn jlw_engine_poll_events(e) { return vec_new(); }
 #must_use
 fn jlw_engine_take_video_frame(e) { return 0; }   # None without a video channel
 
-# format_duration(total_secs): "H:MM:SS" if hours, else "M:SS".
-#must_use
-fn jlw_format_duration(total_secs) {
-    var hours = total_secs / 3600;
-    var mins = (total_secs % 3600) / 60;
-    var secs = total_secs % 60;
-    var sb = str_builder_new();
-    if (hours > 0) {
-        str_builder_add_int(sb, hours);
-        str_builder_putc(sb, 58);                       # ':'
-        if (mins < 10) { str_builder_putc(sb, 48); }    # zero-pad
-        str_builder_add_int(sb, mins);
-        str_builder_putc(sb, 58);
-        if (secs < 10) { str_builder_putc(sb, 48); }
-        str_builder_add_int(sb, secs);
-    } else {
-        str_builder_add_int(sb, mins);
-        str_builder_putc(sb, 58);
-        if (secs < 10) { str_builder_putc(sb, 48); }
-        str_builder_add_int(sb, secs);
-    }
-    return str_cstr(str_builder_build(sb));
-}
+# format_duration moved to core/types.cyr (shared by playback + ui).
