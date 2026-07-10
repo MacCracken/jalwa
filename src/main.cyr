@@ -27,6 +27,7 @@ include "src/ui/app.cyr"
 include "src/ui/tui.cyr"
 include "src/ui/widgets.cyr"
 include "src/mcp.cyr"
+include "src/mcp_serve.cyr"
 include "src/gui/theme.cyr"
 include "src/gui/art_cache.cyr"
 include "src/gui/app.cyr"
@@ -151,7 +152,7 @@ fn main() {
     if (streq(cmd, "import") == 1)  { if (n >= 3) { println(jlw_cmd_import(jlw_open_library(), argv(2))); } return 0; }
     if (streq(cmd, "devices") == 1) { println(jlw_cmd_devices()); return 0; }
     if (streq(cmd, "tui") == 1)     { jlw_tui_run(jlw_app_new(jlw_open_library(), jlw_engine_new(jlw_engine_config_default()))); return 0; }
-    if (streq(cmd, "mcp") == 1)     { println("jalwa MCP server -- 8 tools (stdio JSON-RPC loop deferred)"); return 0; }
+    if (streq(cmd, "mcp") == 1)     { return jlw_mcp_serve(jlw_open_library(), jlw_engine_new(jlw_engine_config_default())); }
     if (streq(cmd, "gui") == 1)     { println("jalwa GUI -- state/view logic ported; dhancha/Wayland render loop deferred"); return 0; }
     println(jlw_mcp_cat("unknown command: ", cmd));
     return 0;

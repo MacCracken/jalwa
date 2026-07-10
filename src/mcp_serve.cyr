@@ -1,0 +1,272 @@
+# mcp_serve.cyr -- the MCP stdio JSON-RPC 2.0 serve loop.
+# Ports rust-old/src/mcp.rs `run`/`run_on` + `tool_defs`/`tool_list` (the transport;
+# the 8 tool handlers already live in src/mcp.cyr). L5 (after mcp.cyr; needs the
+# engine/library open helpers from main.cyr -- included there in entry order).
+#
+# rust-old used the `bote` crate ONLY for the ToolDef/ToolSchema data types; the
+# JSON-RPC loop itself is hand-rolled with serde_json. This port stays faithful:
+# it hand-rolls the loop in pure Cyrius (str_builder + jalwa's targeted JSON scan
+# primitives + raw read/write syscalls) and emits serverInfo.name="jalwa",
+# protocolVersion "2024-11-05" exactly like Rust -- no external dep, no divergence.
+#
+# TESTABILITY mirrors Rust's `run_on(reader, writer)`: the per-request core is
+# jlw_mcp_process_request(line, plib, engine) -> response cstr, unit-tested by
+# feeding request lines directly (tests/mcp_serve.tcyr); jlw_mcp_serve() wires it
+# to fd0/fd1. Compact-JSON assumption matches jalwa's existing jlw_mcp_get_str
+# reader (MCP clients send compact JSON; the parity tests do too).
+
+# ---- JSON string escaping (serde-equivalent for string values) ----
+#must_use
+fn jlw_mcp_hexdigit(d) { if (d < 10) { return 48 + d; } return 87 + d; }   # 0-9, a-f
+
+fn jlw_mcp_json_escape(sb, s) {
+    var n = strlen(s);
+    for (var i = 0; i < n; i = i + 1) {
+        var c = load8(s + i);
+        if (c == 34) { str_builder_add_cstr(sb, "\\\""); }             # "
+        else { if (c == 92) { str_builder_add_cstr(sb, "\\\\"); }      # backslash
+        else { if (c == 10) { str_builder_add_cstr(sb, "\\n"); }
+        else { if (c == 13) { str_builder_add_cstr(sb, "\\r"); }
+        else { if (c == 9)  { str_builder_add_cstr(sb, "\\t"); }
+        else { if (c < 32) {                                           # \u00XX
+            str_builder_add_cstr(sb, "\\u00");
+            str_builder_putc(sb, jlw_mcp_hexdigit((c / 16) & 0xF));
+            str_builder_putc(sb, jlw_mcp_hexdigit(c & 0xF));
+        }
+        else { str_builder_putc(sb, c); } } } } } }
+    }
+    return 0;
+}
+
+# ---- raw JSON value extractors (echo id verbatim; scope nested objects) ----
+# read a raw scalar token (number / "quoted string" / true|false|null) at `from`.
+#must_use
+fn jlw_mcp_read_raw_scalar(s, from) {
+    var n = strlen(s);
+    if (from >= n) { return "null"; }
+    if (load8(s + from) == 34) {                 # quoted string: capture incl quotes
+        var j = from + 1;
+        while (j < n) { if (load8(s + j) == 34) { j = j + 1; break; } j = j + 1; }
+        var slen = j - from;
+        var sout = alloc(slen + 1); memcpy(sout, s + from, slen); store8(sout + slen, 0);
+        return sout;
+    }
+    var k = from;                                # bare scalar: until , } ] or ws
+    while (k < n) {
+        var d = load8(s + k);
+        if (d == 44 || d == 125 || d == 93 || d == 32 || d == 9 || d == 13 || d == 10) { break; }
+        k = k + 1;
+    }
+    var len = k - from;
+    if (len == 0) { return "null"; }
+    var out = alloc(len + 1); memcpy(out, s + from, len); store8(out + len, 0);
+    return out;
+}
+
+# the request's raw `id` token (for verbatim echo), or "null" if absent.
+#must_use
+fn jlw_mcp_get_id(line) {
+    var idx = jlw_mcp_find(line, "\"id\":", 0);
+    if (idx < 0) { return "null"; }
+    return jlw_mcp_read_raw_scalar(line, idx + 5);
+}
+
+# capture the balanced {...} object starting at `from` (string-aware), or "{}".
+#must_use
+fn jlw_mcp_read_raw_obj(s, from) {
+    var n = strlen(s);
+    if (from >= n) { return "{}"; }
+    if (load8(s + from) != 123) { return "{}"; }        # not '{'
+    var depth = 0;
+    var instr = 0;
+    var j = from;
+    var done = 0;
+    while (j < n && done == 0) {
+        var c = load8(s + j);
+        if (instr == 1) {
+            if (c == 92) { j = j + 1; }                 # backslash: skip next
+            else { if (c == 34) { instr = 0; } }
+        } else {
+            if (c == 34) { instr = 1; }
+            else { if (c == 123) { depth = depth + 1; }
+            else { if (c == 125) { depth = depth - 1; if (depth == 0) { j = j + 1; done = 1; } } } }
+        }
+        if (done == 0) { j = j + 1; }
+    }
+    var len = j - from;
+    var out = alloc(len + 1); memcpy(out, s + from, len); store8(out + len, 0);
+    return out;
+}
+
+# raw object value for `key` in `s`, or "{}" if absent.
+#must_use
+fn jlw_mcp_get_obj(s, key) {
+    var sb = str_builder_new();
+    str_builder_putc(sb, 34); str_builder_add_cstr(sb, key); str_builder_add_cstr(sb, "\":");
+    var pat = str_cstr(str_builder_build(sb));
+    var idx = jlw_mcp_find(s, pat, 0);
+    if (idx < 0) { return "{}"; }
+    return jlw_mcp_read_raw_obj(s, idx + strlen(pat));
+}
+
+# ---- result builders ----
+# initialize result -- byte-faithful to rust-old mcp.rs:72-76.
+#must_use
+fn jlw_mcp_initialize_result() {
+    return "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{\"listChanged\":false}},\"serverInfo\":{\"name\":\"jalwa\",\"version\":\"2026.3.22\"}}";
+}
+
+# emit one tool def in the MCP {"name","description","inputSchema"} shape.
+fn jlw_mcp_emit_tool(sb, name, desc, schema_json) {
+    str_builder_add_cstr(sb, "{\"name\":\"");
+    str_builder_add_cstr(sb, name);
+    str_builder_add_cstr(sb, "\",\"description\":\"");
+    jlw_mcp_json_escape(sb, desc);
+    str_builder_add_cstr(sb, "\",\"inputSchema\":");
+    str_builder_add_cstr(sb, schema_json);
+    str_builder_add_cstr(sb, "}");
+    return 0;
+}
+
+# tools/list result -- the 8 ToolDefs from rust-old mcp.rs:105-190, deterministic
+# order (Rust's HashMap props were non-deterministic; the run_tools_list oracle
+# only asserts tools.len()==8, so semantic parity holds and byte order improves).
+#must_use
+fn jlw_mcp_tools_list_json() {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "{\"tools\":[");
+    jlw_mcp_emit_tool(sb, "jalwa_play", "Play a media file (audio or video)",
+        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
+    str_builder_putc(sb, 44);
+    jlw_mcp_emit_tool(sb, "jalwa_pause", "Pause current playback", "{\"type\":\"object\"}");
+    str_builder_putc(sb, 44);
+    jlw_mcp_emit_tool(sb, "jalwa_status", "Get current playback status (state, position, volume)", "{\"type\":\"object\"}");
+    str_builder_putc(sb, 44);
+    jlw_mcp_emit_tool(sb, "jalwa_search", "Search the media library by title, artist, album, or tag",
+        "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}},\"required\":[\"query\"]}");
+    str_builder_putc(sb, 44);
+    jlw_mcp_emit_tool(sb, "jalwa_recommend", "Get AI-powered media recommendations based on a seed item",
+        "{\"type\":\"object\",\"properties\":{\"item_id\":{\"type\":\"string\",\"description\":\"UUID of seed media item\"},\"max\":{\"type\":\"integer\",\"description\":\"Max recommendations (default 5)\"}},\"required\":[\"item_id\"]}");
+    str_builder_putc(sb, 44);
+    jlw_mcp_emit_tool(sb, "jalwa_queue", "Manage the play queue (list, enqueue, clear, shuffle)",
+        "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"description\":\"Action: list, enqueue, clear, shuffle\"},\"item_id\":{\"type\":\"string\",\"description\":\"UUID of media item (for enqueue)\"}},\"required\":[\"action\"]}");
+    str_builder_putc(sb, 44);
+    jlw_mcp_emit_tool(sb, "jalwa_library", "Manage the media library (stats, scan, list)",
+        "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"description\":\"Action: stats, scan, list\"},\"path\":{\"type\":\"string\",\"description\":\"Directory path (for scan)\"}},\"required\":[\"action\"]}");
+    str_builder_putc(sb, 44);
+    jlw_mcp_emit_tool(sb, "jalwa_playlist", "Manage playlists (list, create, add, remove, export)",
+        "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"description\":\"Action: list, create, add, remove, export\"},\"name\":{\"type\":\"string\",\"description\":\"Playlist name (for create/add/remove/export)\"},\"item_id\":{\"type\":\"string\",\"description\":\"UUID of media item (for add/remove)\"},\"output\":{\"type\":\"string\",\"description\":\"Output M3U file path (for export)\"}},\"required\":[\"action\"]}");
+    str_builder_add_cstr(sb, "]}");
+    return str_cstr(str_builder_build(sb));
+}
+
+# wrap a JlwMcpResponse into the MCP content envelope (mcp_ok / mcp_err).
+#must_use
+fn jlw_mcp_envelope_content(r) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "{\"content\":[{\"type\":\"text\",\"text\":\"");
+    jlw_mcp_json_escape(sb, JlwMcpResponse_text(r));
+    str_builder_add_cstr(sb, "\"}]");
+    if (JlwMcpResponse_is_error(r) == 1) { str_builder_add_cstr(sb, ",\"isError\":true"); }
+    str_builder_add_cstr(sb, "}");
+    return str_cstr(str_builder_build(sb));
+}
+
+# JSON-RPC parse-error response (id always null) -- rust-old mcp.rs:45-56.
+#must_use
+fn jlw_mcp_parse_error() {
+    return "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32700,\"message\":\"Parse error\",\"data\":\"expected JSON object\"}}";
+}
+
+# {"jsonrpc":"2.0","id":<raw>,"result":<result>}
+#must_use
+fn jlw_mcp_response_envelope(id_raw, result_json) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "{\"jsonrpc\":\"2.0\",\"id\":");
+    str_builder_add_cstr(sb, id_raw);
+    str_builder_add_cstr(sb, ",\"result\":");
+    str_builder_add_cstr(sb, result_json);
+    str_builder_putc(sb, 125);   # '}'
+    return str_cstr(str_builder_build(sb));
+}
+
+# ---- per-request core (the testable seam; mirrors rust-old run_on's body) ----
+#must_use
+fn jlw_mcp_process_request(line, plib, engine) {
+    # parse check: first non-whitespace char must open an object.
+    var n = strlen(line);
+    var i = 0;
+    while (i < n) {
+        var w = load8(line + i);
+        if (w == 32 || w == 9 || w == 13 || w == 10) { i = i + 1; } else { break; }
+    }
+    if (i >= n) { return jlw_mcp_parse_error(); }
+    if (load8(line + i) != 123) { return jlw_mcp_parse_error(); }
+
+    var method = jlw_mcp_get_str(line, "method");
+    var id_raw = jlw_mcp_get_id(line);
+    var result = 0;
+    if (streq(method, "initialize") == 1) {
+        result = jlw_mcp_initialize_result();
+    } else { if (streq(method, "tools/list") == 1) {
+        result = jlw_mcp_tools_list_json();
+    } else { if (streq(method, "tools/call") == 1) {
+        var params = jlw_mcp_get_obj(line, "params");
+        var tool = jlw_mcp_get_str(params, "name");
+        var args = jlw_mcp_get_obj(params, "arguments");
+        result = jlw_mcp_envelope_content(jlw_mcp_handle_tool_call(tool, args, plib, engine));
+    } else {
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "{\"error\":\"unknown method: ");
+        jlw_mcp_json_escape(sb, method);
+        str_builder_add_cstr(sb, "\"}");
+        result = str_cstr(str_builder_build(sb));
+    } } }
+    return jlw_mcp_response_envelope(id_raw, result);
+}
+
+# ---- stdio transport (fd0 -> fd1) ----
+# read one line (up to cap-1 bytes) from fd 0 into buf (NUL-terminated). Returns
+# the line length, or -1 at EOF with nothing read. Byte-at-a-time keeps line
+# framing exact (never over-reads into the next request).
+#must_use
+fn jlw_mcp_read_line(buf, cap) {
+    var i = 0;
+    while (i < cap - 1) {
+        var r = syscall(0, 0, buf + i, 1);        # read(0, buf+i, 1)
+        if (r <= 0) { if (i == 0) { return (0 - 1); } break; }
+        if (load8(buf + i) == 10) { break; }      # newline terminator (not stored)
+        i = i + 1;
+    }
+    store8(buf + i, 0);
+    return i;
+}
+
+fn jlw_mcp_write_all(s) {
+    var n = strlen(s);
+    var off = 0;
+    while (off < n) {
+        var w = syscall(1, 1, s + off, n - off);  # write(1, ...)
+        if (w <= 0) { return (0 - 1); }
+        off = off + w;
+    }
+    return 0;
+}
+
+# jlw_mcp_serve(plib, engine): loop over stdin lines, writing one JSON-RPC
+# response line per request. Blocks until EOF. Mirrors rust-old mcp.rs `run`.
+# The caller opens the library + engine (main.cyr's mcp branch) -- keeping them
+# as params avoids forward-referencing jlw_open_library (defined later in main).
+fn jlw_mcp_serve(plib, engine) {
+    var buf = alloc(65536);
+    var running = 1;
+    while (running == 1) {
+        var len = jlw_mcp_read_line(buf, 65536);
+        if (len < 0) { running = 0; }
+        else {
+            jlw_mcp_write_all(jlw_mcp_process_request(buf, plib, engine));
+            jlw_mcp_write_all("\n");
+        }
+    }
+    return 0;
+}

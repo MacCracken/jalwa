@@ -14,7 +14,7 @@
 ## Source / oracle
 
 - **Rust oracle**: 15,355 LOC (40 `.rs` files, full 5-crate workspace) frozen at `rust-old/`. Do not edit.
-- **Cyrius port**: `src/error.cyr` + all jalwa-core + all jalwa-playback + all jalwa-ai + all jalwa-ui (`src/ui/{renderers,app,tui,widgets}.cyr`) + jalwa-gui portable logic (`src/gui/{theme,art_cache,app,views}.cyr`) — green. `src/main.cyr` = full assembly + CLI dispatch — build/jalwa builds and runs (957K). (`jlw_format_duration` now lives in `core/types.cyr`.)
+- **Cyrius port**: `src/error.cyr` + all jalwa-core + all jalwa-playback + all jalwa-ai + all jalwa-ui (`src/ui/{renderers,app,tui,widgets}.cyr`) + jalwa-gui portable logic (`src/gui/{theme,art_cache,app,views}.cyr`) + `src/mcp.cyr` (8 tools) + `src/mcp_serve.cyr` (**real stdio JSON-RPC 2.0 server**) — green. `src/main.cyr` = full assembly + CLI dispatch — build/jalwa builds and runs (968K). (`jlw_format_duration` now lives in `core/types.cyr`.)
 
 ## Port progress
 
@@ -27,16 +27,16 @@
 | D — AI (reco/daimon/fingerprint) | ✅ done — `reco`, `daimon`, `fingerprint` (network + fingerprint kernel stubbed). **jalwa-ai fully ported.** |
 | E — terminal UI | ✅ done — `renderers`, `app`, `tui`, `widgets` (draw-loop + darshana tty deferred). **jalwa-ui fully ported.** |
 | F — desktop GUI | ✅ core done — `theme` (color palette), `art_cache` (LRU + no_art tracking), `app` (GuiApp state: update_search/list_len/play_item), `views` (portable helpers from library/now_playing/queue/transport/sidebar: truncate_str, nav math, row/title/volume/duration formatting, sidebar entries, select_view). egui `.rs` draw bodies deferred to dhancha/mabda Wayland rewrite; `video`/`equalizer`/`devices` views are pure-draw (deferred; video also aethersafta-blocked). |
-| G — binary + MCP | ✅ core done — `mcp` (8 tools), `main` (args dispatch), **full assembly builds & runs** (957K binary). stdio JSON-RPC loop deferred. |
+| G — binary + MCP | ✅ **done** — `mcp` (8 tools), `mcp_serve` (**real stdio JSON-RPC 2.0 loop** — `jalwa mcp` is a working MCP server; hand-rolled in pure Cyrius mirroring rust-old `run_on`, no bote dep, byte-faithful envelopes incl. serverInfo name=jalwa / protocolVersion 2024-11-05), `main` (args dispatch), **full assembly builds & runs** (968K binary). |
 
-**Modules: all jalwa-core + all non-video jalwa-playback + all jalwa-ai + all jalwa-ui + jalwa-gui portable logic + `mcp` + `main` (full assembly) ✅. 23 `.cyr` modules; ~27 / 33 rust modules ported.**
-Backlogged (blocked/deferred): `video_decode_thread`, `view_video` (tarang+aethersafta); `equalizer`/`devices` draw (dhancha); GUI dhancha render loop; real playback (tarang stub); MPRIS export (samvada client-only).
+**Modules: all jalwa-core + all non-video jalwa-playback + all jalwa-ai + all jalwa-ui + jalwa-gui portable logic + `mcp` + `mcp_serve` + `main` (full assembly) ✅. 24 `.cyr` modules; ~28 / 33 rust modules ported.**
+Backlogged (blocked/deferred): `video_decode_thread`, `view_video` (tarang+aethersafta); `equalizer`/`devices` draw + GUI dhancha render loop (dhancha); TUI run-loop (darshana); scanner real-probe/tags (shravan, unblocked — next candidate); real playback (tarang stub); MPRIS export (samvada is D-Bus client-only, hard-blocked).
 
 ## Tests
 
-- 25 `.tcyr` suites, **815 assertions, all green**. Includes GUI: `gui_theme` 17 · `gui_art_cache` 19 · `gui_app` 24 · `gui_views` 81. Bare `cyrius test` (CI) all green. `main`: assembly builds & runs (957K binary; stats/search/library/play/mcp/gui verified).
+- 26 `.tcyr` suites, **849 assertions, all green**. Includes GUI (`gui_theme` 17 · `gui_art_cache` 19 · `gui_app` 24 · `gui_views` 81) + `mcp_serve` 33 (oracle: rust-old run_on integration tests). Bare `cyrius test` (CI) all green. `main`: assembly builds & runs (968K binary); `jalwa mcp` end-to-end smoke-tested (initialize/tools/list/tools/call/parse-error over real stdin→stdout).
 
-> Toolchain drift: `cyrius.cyml` pins 6.4.29; cycc is now 6.4.35. Builds pass against the 6.4.29-vendored `lib/`; benign pin-drift warning. Bump the pin + `cyrius lib sync` when convenient.
+> Toolchain drift: `cyrius.cyml` pins 6.4.29; cycc is now 6.4.36. Builds pass against the 6.4.29-vendored `lib/`; benign pin-drift warning. Bump the pin + `cyrius lib sync` when convenient.
 - Per-module `.tcyr` suites land with each ported module, cross-checked against `rust-old/` `#[test]` blocks.
 
 ## Dependencies
@@ -49,11 +49,17 @@ Backlogged (blocked/deferred): `video_decode_thread`, `view_video` (tarang+aethe
 
 ## Next
 
-Waves A–G core are all ported (structure + portable logic, tarang/aethersafta surfaces stubbed).
-Remaining toward **1.0.0** is the deferred draw/IO layer, all gated on ecosystem dists:
-- **dhancha/darshana render loops** — TUI run-loop + GUI Wayland window (retained-mode rewrite of the
-  deferred egui/ratatui draw bodies: sidebar/transport/library/now_playing/queue/equalizer/devices).
-- **tarang** (still Rust) — real decode/probe: `decode_loop`, `engine.open/play`, `cmd_info`/`cmd_scan`,
-  fingerprint kernel. Unblocks `video_decode_thread` + `view_video` (with **aethersafta**).
-- **MCP stdio JSON-RPC loop**; **MPRIS D-Bus export** (samvada is client-only).
+Waves A–G core are all ported (structure + portable logic, tarang/aethersafta surfaces stubbed) —
+and Wave G is now fully functional (`jalwa mcp` is a real MCP server). A 6-way assessment workflow
+(2026-07-09) ranked the remaining unblocked work by value-per-effort:
+1. ✅ **MCP stdio JSON-RPC loop** — DONE this pass (`src/mcp_serve.cyr`).
+2. **TUI run-loop** (`src/ui/tui.cyr jlw_tui_run`) — unblocked over **darshana** (tty raw/alt-screen/
+   key-read verified); shell loop + CSI decode + tty setup/teardown remain. Lands correct-but-quiet
+   (engine events are tarang-stubbed). *do-now-with-caveats.*
+3. **Scanner real-probe + tags** via **shravan** (replace the `jlw_media_info_stub`) — unblocked (no
+   tarang), high correctness value, BUT shravan's only duration path is a full decode → bump-allocator
+   leak per file on large scans; needs a VORBIS_COMMENT block-walker + fixtures + an ADR. *do-now-with-caveats.*
+- **Blocked:** GUI dhancha/Wayland render loop (XL; on-screen present needs **aethersafta**); real
+  playback/decode/probe, `cmd_scan`, fingerprint kernel, `video_decode_thread`/`view_video` (**tarang**
+  + **aethersafta**); **MPRIS export** (**samvada** is D-Bus client-only — needs a session-bus server it lacks).
 See [`roadmap.md`](roadmap.md) and [`port-audit.md`](port-audit.md).

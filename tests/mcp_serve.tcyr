@@ -1,0 +1,110 @@
+# mcp_serve.tcyr -- parity tests for src/mcp_serve.cyr (the JSON-RPC loop).
+# Oracle: rust-old/src/mcp.rs:1156-1281 run_on integration tests. Those drive
+# run_on(reader, writer) with in-memory buffers; this port tests the equivalent
+# seam jlw_mcp_process_request(line, plib, engine) -> response cstr directly,
+# one request at a time (the fd0/fd1 transport in jlw_mcp_serve is bote-free raw
+# syscalls, exercised by the manual smoke test, not unit-testable under cyrius test).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/ai/reco.cyr"
+include "src/ui/renderers.cyr"
+include "src/mcp.cyr"
+include "src/mcp_serve.cyr"
+
+fn rm(path) { syscall(87, path); return 0; }
+fn fresh_plib() { rm("/tmp/jalwa_mcpserve_test.db"); return jlw_plib_open("/tmp/jalwa_mcpserve_test.db"); }
+fn eng() { return jlw_engine_new(jlw_engine_config_default()); }
+fn contains(hay, needle) { if (strstr(hay, needle) >= 0) { return 1; } return 0; }
+fn req(line) { return jlw_mcp_process_request(line, fresh_plib(), eng()); }
+
+alloc_init();
+
+# ---- run_initialize ----
+test_group("initialize");
+var ri = req("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}");
+assert_eq(contains(ri, "\"jsonrpc\":\"2.0\""), 1, "has jsonrpc 2.0");
+assert_eq(contains(ri, "\"id\":1"), 1, "echoes id 1");
+assert_eq(contains(ri, "\"protocolVersion\":\"2024-11-05\""), 1, "protocolVersion present");
+assert_eq(contains(ri, "\"serverInfo\":{\"name\":\"jalwa\""), 1, "serverInfo name jalwa");
+assert_eq(contains(ri, "\"error\""), 0, "no error key");
+
+# ---- run_tools_list (8 tools present) ----
+test_group("tools/list");
+var rl = req("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
+assert_eq(contains(rl, "\"id\":2"), 1, "echoes id 2");
+assert_eq(contains(rl, "jalwa_play"), 1, "has jalwa_play");
+assert_eq(contains(rl, "jalwa_pause"), 1, "has jalwa_pause");
+assert_eq(contains(rl, "jalwa_status"), 1, "has jalwa_status");
+assert_eq(contains(rl, "jalwa_search"), 1, "has jalwa_search");
+assert_eq(contains(rl, "jalwa_recommend"), 1, "has jalwa_recommend");
+assert_eq(contains(rl, "jalwa_queue"), 1, "has jalwa_queue");
+assert_eq(contains(rl, "jalwa_library"), 1, "has jalwa_library");
+assert_eq(contains(rl, "jalwa_playlist"), 1, "has jalwa_playlist");
+assert_eq(contains(rl, "\"inputSchema\""), 1, "has inputSchema");
+assert_eq(contains(rl, "\"required\":[\"path\"]"), 1, "play requires path");
+
+# ---- run_tool_call_status (content[0].text contains Stopped, no isError) ----
+test_group("tools/call status");
+var rs = req("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"jalwa_status\",\"arguments\":{}}}");
+assert_eq(contains(rs, "\"content\":[{\"type\":\"text\",\"text\":\""), 1, "content envelope");
+assert_eq(contains(rs, "Stopped"), 1, "status text has Stopped");
+assert_eq(contains(rs, "isError"), 0, "no isError on success");
+# the inner status JSON quotes must be escaped inside the text string
+assert_eq(contains(rs, "\\\"state\\\""), 1, "inner quotes escaped");
+
+# ---- tool_call error path (missing file -> isError) ----
+test_group("tools/call error");
+var re = req("{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\",\"params\":{\"name\":\"jalwa_play\",\"arguments\":{\"path\":\"/nonexistent.wav\"}}}");
+assert_eq(contains(re, "\"isError\":true"), 1, "play missing -> isError true");
+
+# ---- tools/call with arguments.name collision (playlist create) ----
+test_group("tools/call arg name collision");
+var rc2 = req("{\"jsonrpc\":\"2.0\",\"id\":32,\"method\":\"tools/call\",\"params\":{\"name\":\"jalwa_playlist\",\"arguments\":{\"action\":\"create\",\"name\":\"Favs\"}}}");
+assert_eq(contains(rc2, "Created playlist"), 1, "params.name resolved (not arguments.name)");
+
+# ---- run_unknown_method ----
+test_group("unknown method");
+var ru = req("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"bogus/method\"}");
+assert_eq(contains(ru, "\"error\":\"unknown method: bogus/method\""), 1, "unknown method error string");
+assert_eq(contains(ru, "\"id\":4"), 1, "echoes id 4");
+
+# ---- run_malformed_json (parse error, id null, -32700) ----
+test_group("parse error");
+var rp = req("this is not json");
+assert_eq(contains(rp, "\"id\":null"), 1, "parse error id null");
+assert_eq(contains(rp, "\"code\":-32700"), 1, "code -32700");
+assert_eq(contains(rp, "\"message\":\"Parse error\""), 1, "message Parse error");
+assert_eq(contains(rp, "\"data\":\""), 1, "data non-empty");
+var rp2 = req("not valid json at all");
+assert_eq(contains(rp2, "\"code\":-32700"), 1, "second garbage -> parse error");
+# empty line is also a parse error
+assert_eq(contains(req(""), "\"code\":-32700"), 1, "empty line -> parse error");
+
+# ---- id echo variants (string id, absent id) ----
+test_group("id echo variants");
+var rstr = req("{\"jsonrpc\":\"2.0\",\"id\":\"abc\",\"method\":\"initialize\"}");
+assert_eq(contains(rstr, "\"id\":\"abc\""), 1, "string id echoed verbatim");
+var rnoid = req("{\"jsonrpc\":\"2.0\",\"method\":\"tools/list\"}");
+assert_eq(contains(rnoid, "\"id\":null"), 1, "absent id -> null");
+
+# ---- search tool through the loop (end-to-end dispatch) ----
+test_group("tools/call search e2e");
+var ps = fresh_plib();
+fn mk(title, artist) {
+    var la = strlen("/m/"); var lt = strlen(title); var d = alloc(la + lt + 6);
+    memcpy(d, "/m/", la); memcpy(d + la, title, lt); memcpy(d + la + lt, ".flac", 5); store8(d + la + lt + 5, 0);
+    var it = jlw_media_item_new(d, title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist); return it;
+}
+jlw_library_add_item(jlw_plib_library(ps), mk("Time", "Pink Floyd"));
+var rse = jlw_mcp_process_request("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\",\"params\":{\"name\":\"jalwa_search\",\"arguments\":{\"query\":\"floyd\"}}}", ps, eng());
+assert_eq(contains(rse, "Pink Floyd"), 1, "search finds Pink Floyd");
+
+rm("/tmp/jalwa_mcpserve_test.db");
+var rcode = assert_summary();
+syscall(60, rcode);
