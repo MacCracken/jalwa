@@ -125,6 +125,11 @@ var JLW_STATE_PLAYING   = 1;
 var JLW_STATE_PAUSED    = 2;
 var JLW_STATE_BUFFERING = 3;
 
+# transport-control commands sent from the engine to a live decode thread (see the
+# engine audio-backend ctl seam + playback/audio.cyr jlw_audio_play_ctl).
+var JLW_PLAY_CMD_PAUSE  = 0;   # arg: 1 = pause, 0 = resume
+var JLW_PLAY_CMD_VOLUME = 1;   # arg: volume percent (0-100)
+
 #must_use
 fn jlw_playback_state_name(code) {
     if (code == JLW_STATE_STOPPED)   { return "stopped"; }

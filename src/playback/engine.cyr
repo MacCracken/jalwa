@@ -35,15 +35,19 @@ struct JlwPlaybackEngine {
 # tests don't fold the heavy audio deps. Volume crosses as an integer percent (0-100)
 # to avoid any f64-through-fncall question; position returns f64 bits (Cyrius f64 IS
 # an i64 bit pattern, so it survives fncall1's i64 return).
+# transport-control command codes (JLW_PLAY_CMD_*) live in core/types.cyr so both
+# engine.cyr and audio.cyr (and their tests) see them regardless of include set.
 var JLW_ENG_PLAY_FP = 0;   # (path, vol_pct) -> handle
 var JLW_ENG_DONE_FP = 0;   # (handle) -> 0/1
 var JLW_ENG_STOP_FP = 0;   # (handle) -> 0
 var JLW_ENG_POS_FP  = 0;   # (handle) -> position (f64 bits)
-fn jlw_engine_set_audio_backend(play_fp, done_fp, stop_fp, pos_fp) {
+var JLW_ENG_CTL_FP  = 0;   # (handle, cmd_code, arg) -> 0  (pause/volume during play)
+fn jlw_engine_set_audio_backend(play_fp, done_fp, stop_fp, pos_fp, ctl_fp) {
     JLW_ENG_PLAY_FP = play_fp;
     JLW_ENG_DONE_FP = done_fp;
     JLW_ENG_STOP_FP = stop_fp;
     JLW_ENG_POS_FP  = pos_fp;
+    JLW_ENG_CTL_FP  = ctl_fp;
     return 0;
 }
 
@@ -109,7 +113,11 @@ fn jlw_engine_set_volume(e, vol) {
     if (f64_lt(v, 0) == 1)   { v = 0; }
     if (f64_gt(v, 1.0) == 1) { v = 1.0; }
     JlwPlaybackEngine_set_volume(e, v);
-    return 0;   # (Volume command send is a no-op without a decode thread)
+    var h = JlwPlaybackEngine_play_handle(e);
+    if (h != 0 && JLW_ENG_CTL_FP != 0) {   # apply to the live decode thread
+        fncall3(JLW_ENG_CTL_FP, h, JLW_PLAY_CMD_VOLUME, f64_to(f64_mul(v, 100.0)));
+    }
+    return 0;
 }
 fn jlw_engine_toggle_mute(e) {
     JlwPlaybackEngine_set_muted(e, 1 - JlwPlaybackEngine_muted(e));
@@ -135,7 +143,11 @@ fn jlw_engine_toggle_normalize(e) {
 
 # ---- transport ----
 fn jlw_engine_pause(e) {
-    if (JlwPlaybackEngine_state(e) == JLW_STATE_PLAYING) { JlwPlaybackEngine_set_state(e, JLW_STATE_PAUSED); }
+    if (JlwPlaybackEngine_state(e) == JLW_STATE_PLAYING) {
+        var h = JlwPlaybackEngine_play_handle(e);
+        if (h != 0 && JLW_ENG_CTL_FP != 0) { fncall3(JLW_ENG_CTL_FP, h, JLW_PLAY_CMD_PAUSE, 1); }
+        JlwPlaybackEngine_set_state(e, JLW_STATE_PAUSED);
+    }
     return 0;
 }
 fn jlw_engine_stop(e) {
@@ -173,6 +185,13 @@ fn jlw_engine_seek_relative(e, offset_secs) {
 # tests), it's a state-only transition. Errors when no file is loaded.
 fn jlw_engine_play(e) {
     if (JlwPlaybackEngine_current_path(e) == 0) { return JLW_ERR_PLAYBACK; }
+    var h = JlwPlaybackEngine_play_handle(e);
+    # resume a paused thread rather than re-spawning it
+    if (JlwPlaybackEngine_state(e) == JLW_STATE_PAUSED && h != 0) {
+        if (JLW_ENG_CTL_FP != 0) { fncall3(JLW_ENG_CTL_FP, h, JLW_PLAY_CMD_PAUSE, 0); }
+        JlwPlaybackEngine_set_state(e, JLW_STATE_PLAYING);
+        return JLW_ERR_NONE;
+    }
     if (JLW_ENG_PLAY_FP != 0) {
         var vol_pct = f64_to(f64_mul(JlwPlaybackEngine_volume(e), 100.0));
         JlwPlaybackEngine_set_play_handle(e, fncall2(JLW_ENG_PLAY_FP, JlwPlaybackEngine_current_path(e), vol_pct));

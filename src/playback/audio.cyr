@@ -91,22 +91,41 @@ fn jlw_audio_play_file_h(path, volume, h) {
     var chunk_frames = 4096;
     var chunk_samples = chunk_frames * channels;
     var outbuf = alloc(chunk_samples * 2);       # reused per chunk (no per-frame alloc)
+    var silbuf = alloc(chunk_samples * 2);       # zero-filled: fed to the device while paused
+    for (var z = 0; z < chunk_samples; z = z + 1) { store16(silbuf + z * 2, 0); }
     var i = 0;
     while (i < count) {
-        if (h != 0) { if (JlwPlayHandle_stop(h) == 1) { i = count; } }   # cancelled
-        if (i < count) {
-            var m = count - i;
-            if (m > chunk_samples) { m = chunk_samples; }
-            jlw_audio_f64_to_i16(samples, i, m, volume, outbuf);
-            var frames = m / channels;
-            var written = 0;
-            while (written < frames) {
-                var w = audio_write(dev, outbuf + written * channels * 2, frames - written);
-                if (w <= 0) { written = frames; i = count; }   # write error -> stop
-                else { written = written + w; }
+        var cancelled = 0;
+        var paused = 0;
+        if (h != 0) {
+            if (JlwPlayHandle_stop(h) == 1) { cancelled = 1; }
+            else { if (JlwPlayHandle_paused(h) == 1) { paused = 1; } }
+        }
+        if (cancelled == 1) { i = count; }
+        else {
+            if (paused == 1) {
+                # keep the device fed with silence (no ALSA underrun); hold position
+                var pw = 0;
+                while (pw < chunk_frames) {
+                    var ws = audio_write(dev, silbuf + pw * channels * 2, chunk_frames - pw);
+                    if (ws <= 0) { pw = chunk_frames; } else { pw = pw + ws; }
+                }
+            } else {
+                var vol = volume;
+                if (h != 0) { vol = JlwPlayHandle_volume(h); }   # live volume
+                var m = count - i;
+                if (m > chunk_samples) { m = chunk_samples; }
+                jlw_audio_f64_to_i16(samples, i, m, vol, outbuf);
+                var frames = m / channels;
+                var written = 0;
+                while (written < frames) {
+                    var w = audio_write(dev, outbuf + written * channels * 2, frames - written);
+                    if (w <= 0) { written = frames; i = count; }   # write error -> stop
+                    else { written = written + w; }
+                }
+                i = i + m;
+                if (h != 0) { if (rate > 0) { JlwPlayHandle_set_position(h, f64_div(f64_from(i / channels), f64_from(rate))); } }
             }
-            i = i + m;
-            if (h != 0) { if (rate > 0) { JlwPlayHandle_set_position(h, f64_div(f64_from(i / channels), f64_from(rate))); } }
         }
     }
     audio_drain(dev);
@@ -123,7 +142,7 @@ fn jlw_audio_play_file(path, volume) { return jlw_audio_play_file_h(path, volume
 # thread. Single-word fields -> aligned load64/store64 are atomic on x86_64/agnos,
 # so `stop`/`done`/`position` need no lock for this producer/consumer pattern.
 #derive(accessors)
-struct JlwPlayHandle { path; volume; stop; done; position; rc; }
+struct JlwPlayHandle { path; volume; stop; done; position; rc; paused; }
 
 # the thread body: play the file (cancellable via the handle), then mark done.
 fn jlw_audio_play_worker(h) {
@@ -134,8 +153,8 @@ fn jlw_audio_play_worker(h) {
 
 # start playback on a background thread; returns the JlwPlayHandle immediately
 # (non-blocking). Poll jlw_audio_play_is_done / read position; cancel via
-# jlw_audio_play_stop. Mirrors rust-old's spawned decode thread (minus a command
-# channel -- pause/seek during play are a follow-up).
+# jlw_audio_play_stop; pause + live volume via jlw_audio_play_ctl. Mirrors rust-old's
+# spawned decode thread (seek-during-play + gapless are a follow-up).
 #must_use
 fn jlw_audio_play_async(path, volume) {
     var h = alloc(sizeof(JlwPlayHandle));
@@ -145,8 +164,18 @@ fn jlw_audio_play_async(path, volume) {
     JlwPlayHandle_set_done(h, 0);
     JlwPlayHandle_set_position(h, 0.0);
     JlwPlayHandle_set_rc(h, JLW_ERR_NONE);
+    JlwPlayHandle_set_paused(h, 0);
     thread_create(&jlw_audio_play_worker, h);
     return h;
+}
+
+# transport control from the main thread -> the decode thread (atomic single-word
+# flags; the loop re-reads them between chunks). code/arg use the JLW_PLAY_CMD_*
+# constants from engine.cyr.
+fn jlw_audio_play_ctl(h, code, arg) {
+    if (code == JLW_PLAY_CMD_PAUSE)  { JlwPlayHandle_set_paused(h, arg); }
+    if (code == JLW_PLAY_CMD_VOLUME) { JlwPlayHandle_set_volume(h, f64_div(f64_from(arg), 100.0)); }
+    return 0;
 }
 #inline
 #must_use

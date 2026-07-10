@@ -16,7 +16,7 @@ include "src/playback/audio.cyr"
 
 alloc_init();
 jlw_engine_set_audio_backend(&jlw_audio_play_async_pct, &jlw_audio_play_is_done,
-                             &jlw_audio_play_stop, &jlw_audio_play_position);
+                             &jlw_audio_play_stop, &jlw_audio_play_position, &jlw_audio_play_ctl);
 
 # ---- play (no file) errors ----
 test_group("play without a file");
@@ -55,6 +55,25 @@ jlw_engine_play(e2);
 jlw_engine_stop(e2);
 assert_eq(jlw_engine_state(e2), JLW_STATE_STOPPED, "Stopped after stop");
 assert_eq(JlwPlaybackEngine_play_handle(e2), 0, "handle cleared on stop");
+
+# ---- transport control: pause / resume / live volume reach the thread handle ----
+# (don't poll before checking -- poll would clear the handle when the thread is done)
+test_group("transport pause/resume/volume");
+var e3 = jlw_engine_new(jlw_engine_config_default());
+jlw_engine_open(e3, "tests/fixtures/probe.flac");
+jlw_engine_play(e3);
+var h3 = JlwPlaybackEngine_play_handle(e3);
+assert_eq(h3 != 0, 1, "handle set");
+jlw_engine_pause(e3);
+assert_eq(jlw_engine_state(e3), JLW_STATE_PAUSED, "state Paused");
+assert_eq(JlwPlayHandle_paused(h3), 1, "handle paused flag set");
+jlw_engine_play(e3);   # resume from pause -> unpause, NOT re-spawn
+assert_eq(jlw_engine_state(e3), JLW_STATE_PLAYING, "state Playing after resume");
+assert_eq(JlwPlayHandle_paused(h3), 0, "handle unpaused");
+assert_eq(JlwPlaybackEngine_play_handle(e3), h3, "same handle (not re-spawned)");
+jlw_engine_set_volume(e3, 0.5);
+assert_eq(f64_to(f64_mul(JlwPlayHandle_volume(h3), 100.0)), 50, "live volume -> handle 0.5");
+jlw_engine_stop(e3);
 
 var rc = assert_summary();
 syscall(60, rc);
