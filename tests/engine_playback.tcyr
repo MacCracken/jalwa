@@ -1,0 +1,60 @@
+# engine_playback.tcyr -- the engine's threaded-playback integration over the
+# audio-backend fnptr seam. This is the ONE test that wires a real backend (so it
+# folds shravan/vani); the other engine/tui/gui tests leave the seam unwired and
+# stay on the state-only no-op path. No audio device under CI -> the decode thread
+# decodes (real) then device-open fails, so it finishes fast; the control flow
+# (play spawns -> poll yields TrackFinished -> Stopped; stop cancels) is verified.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/core/scanner.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/playback/audio.cyr"
+
+alloc_init();
+jlw_engine_set_audio_backend(&jlw_audio_play_async_pct, &jlw_audio_play_is_done,
+                             &jlw_audio_play_stop, &jlw_audio_play_position);
+
+# ---- play (no file) errors ----
+test_group("play without a file");
+var e0 = jlw_engine_new(jlw_engine_config_default());
+assert_eq(jlw_is_err(jlw_engine_play(e0)), 1, "play errors without a loaded file");
+assert_eq(jlw_engine_state(e0), JLW_STATE_STOPPED, "still Stopped");
+
+# ---- open + play -> background thread -> TrackFinished ----
+test_group("threaded play -> TrackFinished");
+var e = jlw_engine_new(jlw_engine_config_default());
+assert_eq(jlw_engine_open(e, "tests/fixtures/probe.flac"), JLW_ERR_NONE, "open ok");
+assert_eq(jlw_engine_play(e), JLW_ERR_NONE, "play ok");
+assert_eq(jlw_engine_state(e), JLW_STATE_PLAYING, "state Playing after play");
+assert_eq(JlwPlaybackEngine_play_handle(e) != 0, 1, "play handle set (thread spawned)");
+
+var got = 0;
+var spins = 0;
+while (got == 0 && spins < 500) {
+    var evs = jlw_engine_poll_events(e);
+    for (var i = 0; i < vec_len(evs); i = i + 1) {
+        if (JlwEngineEvent_code(vec_get(evs, i)) == JLW_EVT_TRACK_FINISHED) { got = 1; }
+    }
+    if (got == 0) { sleep_ms(10); spins = spins + 1; }
+}
+assert_eq(got, 1, "poll_events yields TrackFinished");
+assert_eq(jlw_engine_state(e), JLW_STATE_STOPPED, "state Stopped after finish");
+assert_eq(JlwPlaybackEngine_play_handle(e), 0, "handle cleared after finish");
+# poll again -> no duplicate event
+assert_eq(vec_len(jlw_engine_poll_events(e)), 0, "no duplicate TrackFinished");
+
+# ---- stop cancels an active playback ----
+test_group("stop cancels playback");
+var e2 = jlw_engine_new(jlw_engine_config_default());
+jlw_engine_open(e2, "tests/fixtures/probe.mp3");
+jlw_engine_play(e2);
+jlw_engine_stop(e2);
+assert_eq(jlw_engine_state(e2), JLW_STATE_STOPPED, "Stopped after stop");
+assert_eq(JlwPlaybackEngine_play_handle(e2), 0, "handle cleared on stop");
+
+var rc = assert_summary();
+syscall(60, rc);

@@ -25,7 +25,26 @@ fn jlw_engine_config_default() {
 struct JlwPlaybackEngine {
     config; state; current_path; position; duration; volume; muted;
     eq_settings; normalize_enabled; cmd_tx; decode_status; event_rx;
-    is_video; video_frame_rx;
+    is_video; video_frame_rx; play_handle;
+}
+
+# ---- audio-backend seam ----
+# The engine stays decoupled from the shravan/vani audio stack: playback is driven
+# through these fnptr slots, wired by main() via jlw_engine_set_audio_backend. When
+# 0 (unwired -- every engine/tui/gui unit test), play is a state-only no-op, so those
+# tests don't fold the heavy audio deps. Volume crosses as an integer percent (0-100)
+# to avoid any f64-through-fncall question; position returns f64 bits (Cyrius f64 IS
+# an i64 bit pattern, so it survives fncall1's i64 return).
+var JLW_ENG_PLAY_FP = 0;   # (path, vol_pct) -> handle
+var JLW_ENG_DONE_FP = 0;   # (handle) -> 0/1
+var JLW_ENG_STOP_FP = 0;   # (handle) -> 0
+var JLW_ENG_POS_FP  = 0;   # (handle) -> position (f64 bits)
+fn jlw_engine_set_audio_backend(play_fp, done_fp, stop_fp, pos_fp) {
+    JLW_ENG_PLAY_FP = play_fp;
+    JLW_ENG_DONE_FP = done_fp;
+    JLW_ENG_STOP_FP = stop_fp;
+    JLW_ENG_POS_FP  = pos_fp;
+    return 0;
 }
 
 #must_use
@@ -45,6 +64,7 @@ fn jlw_engine_new(config) {
     JlwPlaybackEngine_set_event_rx(e, 0);
     JlwPlaybackEngine_set_is_video(e, 0);
     JlwPlaybackEngine_set_video_frame_rx(e, 0);
+    JlwPlaybackEngine_set_play_handle(e, 0);       # None (no active playback thread)
     return e;
 }
 
@@ -77,6 +97,8 @@ fn jlw_engine_state(e) {
 }
 #must_use
 fn jlw_engine_position(e) {
+    var h = JlwPlaybackEngine_play_handle(e);
+    if (h != 0 && JLW_ENG_POS_FP != 0) { return fncall1(JLW_ENG_POS_FP, h); }   # live thread position
     if (JlwPlaybackEngine_decode_status(e) != 0) { return JlwDecodeStatus_position(JlwPlaybackEngine_decode_status(e)); }
     return JlwPlaybackEngine_position(e);
 }
@@ -117,6 +139,9 @@ fn jlw_engine_pause(e) {
     return 0;
 }
 fn jlw_engine_stop(e) {
+    var h = JlwPlaybackEngine_play_handle(e);
+    if (h != 0 && JLW_ENG_STOP_FP != 0) { fncall1(JLW_ENG_STOP_FP, h); }   # cancel the decode thread
+    JlwPlaybackEngine_set_play_handle(e, 0);
     JlwPlaybackEngine_set_cmd_tx(e, 0);
     JlwPlaybackEngine_set_decode_status(e, 0);
     JlwPlaybackEngine_set_event_rx(e, 0);
@@ -143,10 +168,17 @@ fn jlw_engine_seek_relative(e, offset_secs) {
     if (jlw_is_finite(d) == 1) { if (f64_gt(new_pos, d) == 1) { new_pos = d; } }
     return jlw_engine_seek(e, new_pos);
 }
-# play(): errors without a loaded file (the tested path). Real decode is stubbed.
+# play(): start playback of the loaded file. With an audio backend wired, spawns a
+# background decode thread (non-blocking) and stores its handle; without one (unit
+# tests), it's a state-only transition. Errors when no file is loaded.
 fn jlw_engine_play(e) {
     if (JlwPlaybackEngine_current_path(e) == 0) { return JLW_ERR_PLAYBACK; }
-    return JLW_ERR_NONE;   # (decode spawn stubbed)
+    if (JLW_ENG_PLAY_FP != 0) {
+        var vol_pct = f64_to(f64_mul(JlwPlaybackEngine_volume(e), 100.0));
+        JlwPlaybackEngine_set_play_handle(e, fncall2(JLW_ENG_PLAY_FP, JlwPlaybackEngine_current_path(e), vol_pct));
+    }
+    JlwPlaybackEngine_set_state(e, JLW_STATE_PLAYING);
+    return JLW_ERR_NONE;
 }
 # open(path): probe. Errors on a missing file; real probe (duration/codec) stubbed.
 fn jlw_engine_open(e, path) {
@@ -170,8 +202,22 @@ fn jlw_engine_status(e) {
 
 # prepare_next / poll_events / take_video_frame -- no-ops without a decode thread.
 fn jlw_engine_prepare_next(e, path) { return 0; }
+# poll_events(): drain playback events. With a live decode thread, emit
+# TrackFinished once the handle reports done (then clear it + go Stopped) -- the
+# source the TUI's engine-event handler advances the queue on. No thread -> empty.
 #must_use
-fn jlw_engine_poll_events(e) { return vec_new(); }
+fn jlw_engine_poll_events(e) {
+    var evs = vec_new();
+    var h = JlwPlaybackEngine_play_handle(e);
+    if (h != 0 && JLW_ENG_DONE_FP != 0) {
+        if (fncall1(JLW_ENG_DONE_FP, h) == 1) {
+            vec_push(evs, jlw_engine_event_new(JLW_EVT_TRACK_FINISHED, 0));
+            JlwPlaybackEngine_set_play_handle(e, 0);
+            JlwPlaybackEngine_set_state(e, JLW_STATE_STOPPED);
+        }
+    }
+    return evs;
+}
 #must_use
 fn jlw_engine_take_video_frame(e) { return 0; }   # None without a video channel
 

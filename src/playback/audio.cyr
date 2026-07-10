@@ -153,3 +153,14 @@ fn jlw_audio_play_async(path, volume) {
 fn jlw_audio_play_is_done(h) { return JlwPlayHandle_done(h); }
 #inline
 fn jlw_audio_play_stop(h) { JlwPlayHandle_set_stop(h, 1); return 0; }
+#inline
+#must_use
+fn jlw_audio_play_position(h) { return JlwPlayHandle_position(h); }   # f64 seconds
+
+# engine-backend adapter: volume arrives as an integer percent (0-100) across the
+# fnptr seam. Registered via jlw_engine_set_audio_backend(&jlw_audio_play_async_pct,
+# &jlw_audio_play_is_done, &jlw_audio_play_stop, &jlw_audio_play_position).
+#must_use
+fn jlw_audio_play_async_pct(path, vol_pct) {
+    return jlw_audio_play_async(path, f64_div(f64_from(vol_pct), 100.0));
+}
