@@ -7,6 +7,7 @@
 include "src/error.cyr"
 include "src/core/types.cyr"
 include "src/core/db.cyr"
+include "src/core/scanner.cyr"
 include "src/playback/dsp.cyr"
 include "src/playback/decode_thread.cyr"
 include "src/playback/engine.cyr"

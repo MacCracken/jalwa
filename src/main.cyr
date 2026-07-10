@@ -103,8 +103,33 @@ fn jlw_cmd_info(path) {
     # tarang probe stubbed -- report the path only for now.
     return jlw_mcp_cat("File: ", path);
 }
+# scan a directory (real, via shravan audio probe -- tarang is video-only), add
+# new files to the library, and report. Ports rust-old cmd_scan (backed by
+# shravan instead of tarang::probe_audio).
 #must_use
-fn jlw_cmd_scan(plib, dir) { return "scanning requires the 'tarang' feature"; }
+fn jlw_cmd_scan(plib, dir) {
+    var result = jlw_scanner_scan_directory(dir);
+    if (result == 0) { return jlw_mcp_cat("error: not a directory: ", dir); }
+    var lib = jlw_plib_library(plib);
+    var files = JlwScanResult_files(result);
+    var errors = JlwScanResult_errors(result);
+    var added = 0;
+    for (var i = 0; i < vec_len(files); i = i + 1) {
+        var f = vec_get(files, i);
+        if (jlw_library_find_by_path(lib, JlwScannedFile_path(f)) == 0) {
+            jlw_plib_add_item(plib, jlw_scanner_scanned_to_media_item(f));
+            added = added + 1;
+        }
+    }
+    jlw_plib_add_scan_path(plib, dir);
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Scanning "); str_builder_add_cstr(sb, dir); str_builder_add_cstr(sb, "...\n");
+    str_builder_add_cstr(sb, "Found "); str_builder_add_int(sb, vec_len(files)); str_builder_add_cstr(sb, " media files\n");
+    if (vec_len(errors) > 0) { str_builder_add_int(sb, vec_len(errors)); str_builder_add_cstr(sb, " files had errors\n"); }
+    str_builder_add_cstr(sb, "Added "); str_builder_add_int(sb, added); str_builder_add_cstr(sb, " new items to library\n");
+    str_builder_add_cstr(sb, jlw_ui_render_library_stats(lib));
+    return str_cstr(str_builder_build(sb));
+}
 #must_use
 fn jlw_cmd_export(plib, name, output) {
     var lib = jlw_plib_library(plib);

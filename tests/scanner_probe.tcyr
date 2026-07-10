@@ -1,0 +1,113 @@
+# scanner_probe.tcyr -- tests for the shravan-backed audio probe in scanner.cyr.
+# Replaces the two DROPPED rust-old WAV tests (scan_file_and_convert,
+# scan_directory_with_wav) now that a real probe exists, and covers FLAC/MP3
+# metadata via committed fixtures (tests/fixtures/probe.{flac,mp3}, 1s + tags).
+# WAV uses an in-Cyrius header writer (ports jalwa_core make_test_wav's header).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/core/scanner.cyr"
+
+fn rm(path) { syscall(87, path); return 0; }
+
+# write a minimal 44-byte PCM WAV header (mono 16-bit); data_size drives duration.
+# store16/store32 are little-endian on x86_64, matching RIFF.
+fn write_wav(path, sample_rate, num_samples) {
+    var data_size = num_samples * 2;              # mono, 16-bit
+    var byte_rate = sample_rate * 2;
+    var b = alloc(44);
+    store8(b, 0x52); store8(b + 1, 0x49); store8(b + 2, 0x46); store8(b + 3, 0x46);   # RIFF
+    store32(b + 4, 36 + data_size);
+    store8(b + 8, 0x57); store8(b + 9, 0x41); store8(b + 10, 0x56); store8(b + 11, 0x45);   # WAVE
+    store8(b + 12, 0x66); store8(b + 13, 0x6D); store8(b + 14, 0x74); store8(b + 15, 0x20); # "fmt "
+    store32(b + 16, 16);
+    store16(b + 20, 1);                           # PCM
+    store16(b + 22, 1);                           # channels
+    store32(b + 24, sample_rate);
+    store32(b + 28, byte_rate);
+    store16(b + 32, 2);                           # block align
+    store16(b + 34, 16);                          # bits
+    store8(b + 36, 0x64); store8(b + 37, 0x61); store8(b + 38, 0x74); store8(b + 39, 0x61); # "data"
+    store32(b + 40, data_size);
+    file_write_all(path, b, 44);
+    return 0;
+}
+
+alloc_init();
+
+# ---- format/codec mappers (pure) ----
+test_group("shravan fmt/codec mappers");
+assert_eq(jlw_shravan_fmt_to_jlw(0), JLW_FMT_WAV, "WAV");
+assert_eq(jlw_shravan_fmt_to_jlw(1), JLW_FMT_FLAC, "FLAC");
+assert_eq(jlw_shravan_fmt_to_jlw(5), JLW_FMT_MP3, "MP3");
+assert_eq(jlw_shravan_fmt_to_codec(1), JLW_ACODEC_FLAC, "FLAC codec");
+assert_eq(jlw_shravan_fmt_to_codec(5), JLW_ACODEC_MP3, "MP3 codec");
+assert_eq(jlw_shravan_fmt_to_codec(0), JLW_ACODEC_PCM, "PCM codec");
+
+# ---- magic-byte format detection (jalwa-owned, avoids sankoch collision) ----
+test_group("detect audio format (magic bytes)");
+var wbuf = alloc(64);
+write_wav("/tmp/jalwa_sp.wav", 44100, 44100);
+var wn = file_read_all("/tmp/jalwa_sp.wav", wbuf, 64);
+assert_eq(jlw_detect_audio_format(wbuf, wn), 0, "RIFF/WAVE -> WAV(0)");
+
+# ---- WAV probe end-to-end (real duration from header) ----
+test_group("WAV scan_file (real duration)");
+write_wav("/tmp/jalwa_sp2.wav", 44100, 88200);   # 2.0 s
+var wsf = jlw_scanner_scan_file("/tmp/jalwa_sp2.wav");
+var winfo = JlwScannedFile_info(wsf);
+assert_eq(JlwMediaInfo_format(winfo), JLW_FMT_WAV, "format WAV");
+assert_eq(JlwMediaInfo_audio_codec(winfo), JLW_ACODEC_PCM, "codec PCM");
+assert_eq(f64_to(JlwMediaInfo_duration(winfo)), 2, "duration 2s");
+assert_eq(jlw_is_finite(JlwMediaInfo_duration(winfo)), 1, "duration finite");
+
+# ---- FLAC fixture: STREAMINFO duration + VORBIS_COMMENT tags ----
+test_group("FLAC scan_file (duration + tags)");
+var fsf = jlw_scanner_scan_file("tests/fixtures/probe.flac");
+var finfo = JlwScannedFile_info(fsf);
+assert_eq(JlwMediaInfo_format(finfo), JLW_FMT_FLAC, "format FLAC");
+assert_eq(JlwMediaInfo_audio_codec(finfo), JLW_ACODEC_FLAC, "codec FLAC");
+assert_eq(f64_to(JlwMediaInfo_duration(finfo)), 1, "duration 1s");
+assert_streq(JlwScannedFile_title(fsf), "Probe Title", "FLAC title");
+assert_streq(JlwScannedFile_artist(fsf), "Probe Artist", "FLAC artist");
+assert_streq(JlwScannedFile_album(fsf), "Probe Album", "FLAC album");
+
+# ---- MP3 fixture: ID3v2 tags + CBR duration estimate ----
+test_group("MP3 scan_file (duration + tags)");
+var msf = jlw_scanner_scan_file("tests/fixtures/probe.mp3");
+var minfo = JlwScannedFile_info(msf);
+assert_eq(JlwMediaInfo_format(minfo), JLW_FMT_MP3, "format MP3");
+assert_eq(JlwMediaInfo_audio_codec(minfo), JLW_ACODEC_MP3, "codec MP3");
+assert_eq(jlw_is_finite(JlwMediaInfo_duration(minfo)), 1, "duration estimated (finite)");
+assert_eq(f64_to(JlwMediaInfo_duration(minfo)) >= 1, 1, "duration ~1s (CBR est >=1)");
+assert_streq(JlwScannedFile_title(msf), "Probe Title", "MP3 title");
+assert_streq(JlwScannedFile_artist(msf), "Probe Artist", "MP3 artist");
+
+# ---- scanned_to_media_item integration (WAV, no tags -> path stem title) ----
+test_group("scanned_to_media_item");
+var item = jlw_scanner_scanned_to_media_item(wsf);
+assert_eq(JlwMediaItem_media_type(item), JLW_MEDIA_AUDIO, "audio");
+assert_eq(JlwMediaItem_format(item), JLW_FMT_WAV, "item format WAV");
+assert_eq(f64_to(JlwMediaItem_duration(item)), 2, "item duration 2s");
+# WAV has no embedded tags -> title falls back to the path stem
+assert_streq(JlwMediaItem_title(item), "jalwa_sp2", "title = path stem when untagged");
+assert_eq(JlwMediaItem_art_mime(item), 0, "no album art (shravan has no picture parser)");
+
+# ---- scan_directory end-to-end (re-enables scan_directory_with_wav) ----
+test_group("scan_directory");
+rm("/tmp/jalwa_sp_dir_a.wav"); rm("/tmp/jalwa_sp_dir_b.wav");
+# put two WAVs in a fresh dir
+var dir = "/tmp/jalwa_sp_scandir";
+syscall(83, dir, 493);                            # mkdir 0755
+write_wav("/tmp/jalwa_sp_scandir/a.wav", 44100, 44100);   # 1 s
+write_wav("/tmp/jalwa_sp_scandir/b.wav", 22050, 22050);   # 1 s
+var res = jlw_scanner_scan_directory(dir);
+assert_eq(res != 0, 1, "scan_directory ok");
+assert_eq(vec_len(JlwScanResult_files(res)), 2, "found 2 wav files");
+assert_eq(JlwScanResult_dirs_walked(res) >= 1, 1, "walked >=1 dir");
+
+rm("/tmp/jalwa_sp.wav"); rm("/tmp/jalwa_sp2.wav");
+rm("/tmp/jalwa_sp_scandir/a.wav"); rm("/tmp/jalwa_sp_scandir/b.wav");
+var rc = assert_summary();
+syscall(60, rc);

@@ -192,7 +192,27 @@ fn jlw_mcp_tool_library(args, plib) {
     var action = jlw_mcp_get_str(args, "action");
     var lib = jlw_plib_library(plib);
     if (streq(action, "stats") == 1) { return jlw_mcp_ok(jlw_ui_render_library_stats(lib)); }
-    if (streq(action, "scan") == 1) { return jlw_mcp_err("scanning requires the 'tarang' feature"); }
+    if (streq(action, "scan") == 1) {
+        var spath = jlw_mcp_get_str(args, "path");
+        if (strlen(spath) == 0) { return jlw_mcp_err("scan requires a 'path'"); }
+        var sres = jlw_scanner_scan_directory(spath);
+        if (sres == 0) { return jlw_mcp_err(jlw_mcp_cat("not a directory: ", spath)); }
+        var sfiles = JlwScanResult_files(sres);
+        var sadded = 0;
+        for (var si = 0; si < vec_len(sfiles); si = si + 1) {
+            var sf = vec_get(sfiles, si);
+            if (jlw_library_find_by_path(lib, JlwScannedFile_path(sf)) == 0) {
+                jlw_plib_add_item(plib, jlw_scanner_scanned_to_media_item(sf));
+                sadded = sadded + 1;
+            }
+        }
+        jlw_plib_add_scan_path(plib, spath);
+        var ssb = str_builder_new();
+        str_builder_add_cstr(ssb, "Scanned "); str_builder_add_cstr(ssb, spath);
+        str_builder_add_cstr(ssb, ": added "); str_builder_add_int(ssb, sadded);
+        str_builder_add_cstr(ssb, " items");
+        return jlw_mcp_ok(str_cstr(str_builder_build(ssb)));
+    }
     if (streq(action, "list") == 1) {
         var items = JlwLibrary_items(lib);
         if (vec_len(items) == 0) { return jlw_mcp_ok("Library is empty"); }

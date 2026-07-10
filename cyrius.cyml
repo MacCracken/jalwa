@@ -11,7 +11,7 @@ entry = "src/main.cyr"
 output = "jalwa"
 
 [deps]
-stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert", "math", "random", "chrono", "patra", "fs", "yukti", "hashmap", "tagged", "process"]
+stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert", "math", "random", "chrono", "patra", "fs", "yukti", "hashmap", "tagged", "process", "ganita", "thread", "fnptr", "bayan"]
 
 [deps.dhvani]
 path = "../dhvani"
@@ -27,3 +27,15 @@ modules = ["dist/abaco.cyr"]
 path = "../darshana"
 tag = "0.9.0"
 modules = ["dist/darshana.cyr"]
+
+# sankoch before shravan (shravan depends on sankoch). Audio codecs (decode/probe/
+# tags) go through shravan -- tarang is video-only.
+[deps.sankoch]
+path = "../sankoch"
+tag = "2.4.9"
+modules = ["dist/sankoch.cyr"]
+
+[deps.shravan]
+path = "../shravan"
+tag = "2.6.7"
+modules = ["dist/shravan.cyr"]

@@ -1,18 +1,22 @@
-# core/scanner.cyr -- recursive media directory scanner.
+# core/scanner.cyr -- recursive media directory scanner + audio probe.
 # Ports rust-old/crates/jalwa-core/src/scanner.rs. L1: depends on error.cyr +
-# core/types.cyr. walkdir -> fs stdlib (dir_list/path_join/is_dir, Str-based);
-# lofty tag read + tarang probe -> STUBBED (see below).
+# core/types.cyr. walkdir -> fs stdlib (dir_list/path_join/is_dir, Str-based).
 #
-# STUBS (blocked, structure preserved):
-#  - tarang probe_audio -> jlw_media_info_stub (no Cyrius tarang). scan_file
-#    returns an unknown-probe JlwMediaInfo.
-#  - lofty tags + album art -> scan_file leaves title/artist/album/art = None.
-#    shravan can read ID3v2/Vorbis TEXT but can't locate the Vorbis block inside
-#    a FLAC/Ogg container, and has no picture parser -- deferred. No ported test
-#    exercises scan_file on a real media file (the two WAV tests DROP), so the
-#    stub is behavior-equivalent for the ported suite.
-# Everything else (extension filter, dir-walk + dirs_walked count, ScanResult/
-# ScanError, scanned_to_media_item tag-override) ports faithfully.
+# AUDIO PROBE + TAGS: real, via shravan (audio codec dist) -- NOT tarang.
+# rust-old routed the probe through `tarang::audio::probe_audio`, but tarang is
+# VIDEO-only in the Cyrius port; audio goes through shravan. jlw_scanner_scan_file
+# reads a bounded header (one reused buffer, so a large scan stays O(1) memory)
+# and does header-only (no full-decode) probing:
+#   - WAV : own RIFF fmt+data chunk parse -> sample_rate/channels/duration (PCM)
+#   - FLAC: shravan flac_parse_metadata (STREAMINFO) -> duration; own VORBIS_COMMENT
+#           (block_type 4) walker -> shravan tag_read_vorbis for title/artist/album
+#   - MP3 : shravan mp3_id3v2_skip + mp3_parse_frame_header -> rate + CBR duration
+#           estimate (true file size via lseek); shravan tag_read_id3v2 for tags
+#   - MP4/OGG/AAC/OPUS/AIFF: format + codec detected; duration/tags deferred
+# DIVERGENCE (ADR 0002): album art stays None -- shravan has no picture parser
+# (Rust used lofty). Video containers stay tarang-blocked.
+# Extension filter, dir-walk + dirs_walked, ScanResult/ScanError, and
+# scanned_to_media_item's tag-override all port faithfully.
 
 # ---- MediaInfo stub (was tarang::core::MediaInfo) ----
 #derive(accessors)
@@ -133,25 +137,234 @@ fn jlw_scanner_extract_art(pics, out_mime, out_data) {
 
 # scan_file: STUB probe + STUB tags (see module header). Returns a JlwScannedFile.
 #must_use
+# bounded header read: enough for WAV/FLAC/MP3 headers + typical tags. One buffer
+# is reused across a directory scan, so total scan memory stays ~this size.
+var JLW_SCAN_CAP = 1048576;   # 1 MiB
+
+# true file size via lseek(fd, 0, SEEK_END). SEEK_END=2, lseek=syscall 8 (x86_64).
+#must_use
+fn jlw_file_size(path) {
+    var fd = file_open(path, 0, 0);
+    if (fd < 0) { return 0; }
+    var sz = syscall(8, fd, 0, 2);
+    file_close(fd);
+    if (sz < 0) { return 0; }
+    return sz;
+}
+
+# shravan AudioFormat code (WAV=0 FLAC=1 RAW=2 OGG=3 AIFF=4 MP3=5 OPUS=6 AAC=7
+# ALAC=8 MP4=9) -> jalwa JLW_FMT_* / JLW_ACODEC_*.
+#must_use
+fn jlw_shravan_fmt_to_jlw(sf) {
+    if (sf == 1) { return JLW_FMT_FLAC; }
+    if (sf == 3) { return JLW_FMT_OGG; }
+    if (sf == 5) { return JLW_FMT_MP3; }
+    if (sf == 6) { return JLW_FMT_OGG; }    # Opus (Ogg container)
+    if (sf == 7) { return JLW_FMT_MP4; }    # AAC
+    if (sf == 8) { return JLW_FMT_MP4; }    # ALAC
+    if (sf == 9) { return JLW_FMT_MP4; }    # MP4/M4A
+    return JLW_FMT_WAV;                       # WAV / AIFF / RAW -> PCM container
+}
+#must_use
+fn jlw_shravan_fmt_to_codec(sf) {
+    if (sf == 1) { return JLW_ACODEC_FLAC; }
+    if (sf == 3) { return JLW_ACODEC_VORBIS; }
+    if (sf == 5) { return JLW_ACODEC_MP3; }
+    if (sf == 6) { return JLW_ACODEC_OPUS; }
+    if (sf == 7) { return JLW_ACODEC_AAC; }
+    if (sf == 8) { return JLW_ACODEC_ALAC; }
+    if (sf == 9) { return JLW_ACODEC_AAC; }
+    return JLW_ACODEC_PCM;                     # WAV / AIFF / RAW
+}
+
+# WAV probe: walk RIFF chunks for fmt (rate/channels/bits) + data (size). Fills
+# out[0]=sample_rate, out[8]=channels, out[16]=duration (f64 bits). Returns 1 ok.
+# load16/load32 are little-endian on x86_64, matching RIFF.
+#must_use
+fn jlw_wav_probe(buf, n, out) {
+    if (n < 44) { return 0; }
+    if (load8(buf) != 0x52 || load8(buf + 1) != 0x49 || load8(buf + 2) != 0x46 || load8(buf + 3) != 0x46) { return 0; }   # "RIFF"
+    if (load8(buf + 8) != 0x57 || load8(buf + 9) != 0x41 || load8(buf + 10) != 0x56 || load8(buf + 11) != 0x45) { return 0; }   # "WAVE"
+    var rate = 0; var ch = 0; var bits = 0; var data_size = 0;
+    var have_fmt = 0; var have_data = 0;
+    var pos = 12;
+    while (pos + 8 <= n) {
+        var b0 = load8(buf + pos); var b1 = load8(buf + pos + 1);
+        var b2 = load8(buf + pos + 2); var b3 = load8(buf + pos + 3);
+        var csize = load32(buf + pos + 4);
+        var payload = pos + 8;
+        if (b0 == 0x66 && b1 == 0x6D && b2 == 0x74 && b3 == 0x20) {   # "fmt "
+            if (payload + 16 <= n) {
+                ch   = load16(buf + payload + 2);
+                rate = load32(buf + payload + 4);
+                bits = load16(buf + payload + 14);
+                have_fmt = 1;
+            }
+        }
+        if (b0 == 0x64 && b1 == 0x61 && b2 == 0x74 && b3 == 0x61) {   # "data"
+            data_size = csize;
+            have_data = 1;
+        }
+        if (have_fmt == 1 && have_data == 1) { break; }
+        var adv = csize;
+        if ((adv & 1) == 1) { adv = adv + 1; }   # chunks are word-aligned
+        pos = payload + adv;
+    }
+    if (have_fmt == 0 || rate == 0 || ch == 0 || bits == 0) { return 0; }
+    store64(out, rate);
+    store64(out + 8, ch);
+    var dur = JLW_NAN;
+    var byte_rate = rate * ch * (bits / 8);
+    if (have_data == 1 && byte_rate > 0) { dur = f64_div(f64_from(data_size), f64_from(byte_rate)); }
+    store64(out + 16, dur);
+    return 1;
+}
+
+# locate the FLAC VORBIS_COMMENT metadata block (type 4). Returns its payload
+# offset into buf and stores its length at out_len; 0 if not present/truncated.
+# FLAC block header: byte0 = is_last<<7 | block_type(7); bytes1-3 = size (BE24).
+#must_use
+fn jlw_flac_find_vorbis(buf, n, out_len) {
+    if (n < 4) { return 0; }
+    if (load8(buf) != 0x66 || load8(buf + 1) != 0x4C || load8(buf + 2) != 0x61 || load8(buf + 3) != 0x43) { return 0; }   # "fLaC"
+    var pos = 4;
+    var go = 1;
+    while (go == 1 && pos + 4 <= n) {
+        var hdr = load8(buf + pos);
+        var btype = hdr & 0x7F;
+        var bsize = (load8(buf + pos + 1) << 16) | (load8(buf + pos + 2) << 8) | load8(buf + pos + 3);
+        pos = pos + 4;
+        if (btype == 4) {
+            if (pos + bsize <= n) { store64(out_len, bsize); return pos; }
+            return 0;   # truncated in our bounded read
+        }
+        if ((hdr & 0x80) != 0) { go = 0; }   # last block
+        pos = pos + bsize;
+    }
+    return 0;
+}
+
+# a shravan tag Str pointer -> owned cstr (str_cstr copies), or 0 for None.
+#must_use
+fn jlw_tag_cstr(sp) { if (sp == 0) { return 0; } return str_cstr(sp); }
+
+# shravan's mp3_parse_frame_header reads the bitrate/sample-rate tables directly
+# (no lazy guard, unlike mp3_scan_frames/mp3_decode), so mp3_init() must run first
+# or the null table pointers segfault. Call it once.
+var JLW_SHRAVAN_MP3_INIT = 0;
+fn jlw_shravan_ensure_mp3() {
+    if (JLW_SHRAVAN_MP3_INIT == 0) { mp3_init(); JLW_SHRAVAN_MP3_INIT = 1; }
+    return 0;
+}
+
+# audio-format detection from magic bytes -> shravan AudioFormat code, or -1.
+# jalwa-owned to avoid the shravan/sankoch `detect_format` symbol collision
+# (sankoch's detect_format is for COMPRESSION formats). Mirrors shravan's logic.
+#must_use
+fn jlw_detect_audio_format(buf, n) {
+    if (n < 12) { return (0 - 1); }
+    var b0 = load8(buf); var b1 = load8(buf + 1); var b2 = load8(buf + 2); var b3 = load8(buf + 3);
+    if (b0 == 0x66 && b1 == 0x4C && b2 == 0x61 && b3 == 0x43) { return 1; }   # "fLaC" -> FLAC
+    if (b0 == 0x52 && b1 == 0x49 && b2 == 0x46 && b3 == 0x46) {               # "RIFF"
+        if (load8(buf + 8) == 0x57 && load8(buf + 9) == 0x41 && load8(buf + 10) == 0x56 && load8(buf + 11) == 0x45) { return 0; }   # "WAVE" -> WAV
+    }
+    if (b0 == 0x4F && b1 == 0x67 && b2 == 0x67 && b3 == 0x53) { return 3; }   # "OggS" -> OGG
+    if (b0 == 0x46 && b1 == 0x4F && b2 == 0x52 && b3 == 0x4D) {               # "FORM"
+        if (load8(buf + 8) == 0x41 && load8(buf + 9) == 0x49 && load8(buf + 10) == 0x46 && load8(buf + 11) == 0x46) { return 4; }   # "AIFF" -> AIFF
+    }
+    if (load8(buf + 4) == 0x66 && load8(buf + 5) == 0x74 && load8(buf + 6) == 0x79 && load8(buf + 7) == 0x70) { return 9; }   # "ftyp" -> MP4
+    if (b0 == 0x49 && b1 == 0x44 && b2 == 0x33) { return 5; }                 # "ID3" -> MP3
+    if (b0 == 0xFF && (b1 & 0xE0) == 0xE0) {                                  # MPEG/ADTS sync
+        if ((b1 & 0xF6) == 0xF0) { return 7; }                               # ADTS AAC
+        return 5;                                                             # MP3
+    }
+    return (0 - 1);
+}
+
+# scan one file into the caller's reusable header buffer (bounded read). Returns
+# a JlwScannedFile with real probe/tags where supported, or an unknown stub on
+# read/format failure.
+fn jlw_scanner_scan_file_into(path, buf, cap) {
+    var size = jlw_file_size(path);
+    var n = file_read_all(path, buf, cap);
+    if (n <= 0) { return jlw_scanned_file_new(path, jlw_media_info_stub(), 0, 0, 0, 0, 0); }
+    var sf = jlw_detect_audio_format(buf, n);
+    if (sf < 0) { return jlw_scanned_file_new(path, jlw_media_info_stub(), 0, 0, 0, 0, 0); }
+
+    var jfmt = jlw_shravan_fmt_to_jlw(sf);
+    var codec = jlw_shravan_fmt_to_codec(sf);
+    var duration = JLW_NAN;
+    var title = 0; var artist = 0; var album = 0;
+
+    if (sf == 0) {                               # WAV
+        var wout = alloc(24);
+        if (jlw_wav_probe(buf, n, wout) == 1) { duration = load64(wout + 16); }
+    }
+    if (sf == 1) {                               # FLAC
+        var si = flac_parse_metadata(buf, n);
+        if (si > 0) {
+            var srate = load64(si + 16);
+            var tsamp = load64(si + 40);
+            if (srate > 0) { duration = f64_div(f64_from(tsamp), f64_from(srate)); }
+        }
+        var vlen = alloc(8);
+        var voff = jlw_flac_find_vorbis(buf, n, vlen);
+        if (voff != 0) {
+            var vm = tag_read_vorbis(buf + voff, load64(vlen));
+            if (vm > 0) {
+                title  = jlw_tag_cstr(tag_meta_title(vm));
+                artist = jlw_tag_cstr(tag_meta_artist(vm));
+                album  = jlw_tag_cstr(tag_meta_album(vm));
+            }
+        }
+    }
+    if (sf == 5) {                               # MP3
+        jlw_shravan_ensure_mp3();
+        var foff = mp3_id3v2_skip(buf, n);
+        if (foff >= 0 && foff < n) {
+            var fh = mp3_parse_frame_header(buf, foff);
+            if (fh > 0) {
+                var bitrate = load64(fh + 16);
+                var audio_bytes = size - foff;
+                if (bitrate > 0 && audio_bytes > 0) {
+                    duration = f64_div(f64_from(audio_bytes * 8), f64_from(bitrate * 1000));
+                }
+            }
+        }
+        var im = tag_read_id3v2(buf, n);
+        if (im > 0) {
+            title  = jlw_tag_cstr(tag_meta_title(im));
+            artist = jlw_tag_cstr(tag_meta_artist(im));
+            album  = jlw_tag_cstr(tag_meta_album(im));
+        }
+    }
+
+    var info = jlw_media_info_new(jfmt, duration, codec, (0 - 1), 0, 0, 0);
+    return jlw_scanned_file_new(path, info, title, artist, album, 0, 0);
+}
+
+# scan one file (allocates its own header buffer; scan_directory reuses one).
+#must_use
 fn jlw_scanner_scan_file(path) {
-    return jlw_scanned_file_new(path, jlw_media_info_stub(), 0, 0, 0, 0, 0);
+    return jlw_scanner_scan_file_into(path, alloc(JLW_SCAN_CAP), JLW_SCAN_CAP);
 }
 
 # recursive walk: count each directory into *dirs_ptr; scan supported files.
-fn jlw_scanner_walk(dir, result, dirs_ptr) {
+# buf is the shared header buffer (reused per file so the scan stays O(1) memory).
+fn jlw_scanner_walk(dir, result, dirs_ptr, buf) {
     store64(dirs_ptr, load64(dirs_ptr) + 1);
     var entries = dir_list(dir);
     var n = vec_len(entries);
     for (var i = 0; i < n; i = i + 1) {
         var full = path_join(dir, vec_get(entries, i));
         if (is_dir(full) == 1) {
-            jlw_scanner_walk(full, result, dirs_ptr);
+            jlw_scanner_walk(full, result, dirs_ptr, buf);
         } else {
             var fullc = str_cstr(full);
             var ext = jlw_path_ext(fullc);
             if (ext != 0) {
                 if (jlw_scanner_is_supported_extension(ext) == 1) {
-                    var scanned = jlw_scanner_scan_file(fullc);
+                    var scanned = jlw_scanner_scan_file_into(fullc, buf, JLW_SCAN_CAP);
                     if (scanned != 0) {
                         vec_push(JlwScanResult_files(result), scanned);
                     } else {
@@ -173,7 +386,8 @@ fn jlw_scanner_scan_directory(path) {
     var result = jlw_scan_result_new();
     var dirs = alloc(8);
     store64(dirs, 0);
-    jlw_scanner_walk(pstr, result, dirs);
+    var buf = alloc(JLW_SCAN_CAP);          # one header buffer, reused per file
+    jlw_scanner_walk(pstr, result, dirs, buf);
     JlwScanResult_set_dirs_walked(result, load64(dirs));
     return result;
 }
