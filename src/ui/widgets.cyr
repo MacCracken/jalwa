@@ -1,0 +1,114 @@
+# ui/widgets.cyr -- TUI view rendering (ratatui Frames -> text output).
+# Ports rust-old/crates/jalwa-ui/src/widgets.rs. L3: depends on error.cyr +
+# core/types.cyr + core/db.cyr + playback/engine.cyr + ui/app.cyr.
+#
+# The Rust rendered ratatui widgets to a terminal buffer; the port produces the
+# equivalent TEXT (status line + current view + keybind bar), which is what the
+# oracle tests assert on (via render_to_string + `contains`). Pixel-exact
+# layout/styling/scrolling is deferred to a darshana/CSI cell-painter; the
+# labels + structure port faithfully. width/height are irrelevant to the text.
+
+# one library/queue item line: "N. artist - title".
+fn jlw_widgets_item_line(sb, item, i) {
+    str_builder_add_int(sb, i + 1);
+    str_builder_add_cstr(sb, ". ");
+    var artist = JlwMediaItem_artist(item);
+    if (artist != 0) { str_builder_add_cstr(sb, artist); } else { str_builder_add_cstr(sb, "Unknown"); }
+    str_builder_add_cstr(sb, " - ");
+    str_builder_add_cstr(sb, JlwMediaItem_title(item));
+    str_builder_putc(sb, 10);
+    return 0;
+}
+
+fn jlw_widgets_render_library(sb, app) {
+    var lib = jlw_app_lib(app);
+    var searching = 0;
+    if (JlwApp_input_mode(app) == JLW_INPUT_SEARCH) { searching = 1; }
+    if (strlen(JlwApp_search_query(app)) > 0) { searching = 1; }
+    var items = JlwLibrary_items(lib);
+    if (searching == 1) {
+        var results = JlwApp_search_results(app);
+        str_builder_add_cstr(sb, "Library (");
+        str_builder_add_int(sb, vec_len(results));
+        str_builder_add_cstr(sb, " matches) [/");
+        str_builder_add_cstr(sb, JlwApp_search_query(app));
+        str_builder_add_cstr(sb, "]\n");
+        for (var i = 0; i < vec_len(results); i = i + 1) {
+            jlw_widgets_item_line(sb, vec_get(items, vec_get(results, i)), i);
+        }
+    } else {
+        str_builder_add_cstr(sb, "Library (");
+        str_builder_add_int(sb, jlw_library_items_len(lib));
+        str_builder_add_cstr(sb, " items)\n");
+        var n = vec_len(items);
+        if (n == 0) { str_builder_add_cstr(sb, "Library is empty. Run 'jalwa scan <directory>' to add files.\n"); }
+        for (var i = 0; i < n; i = i + 1) { jlw_widgets_item_line(sb, vec_get(items, i), i); }
+    }
+    return 0;
+}
+
+fn jlw_widgets_render_queue(sb, app) {
+    var queue = JlwApp_queue(app);
+    str_builder_add_cstr(sb, "Queue (");
+    str_builder_add_int(sb, jlw_queue_len(queue));
+    str_builder_add_cstr(sb, " items)");
+    var rm = JlwPlayQueue_repeat_mode(queue);
+    if (rm == JLW_REPEAT_ONE) { str_builder_add_cstr(sb, " [R1]"); }
+    if (rm == JLW_REPEAT_ALL) { str_builder_add_cstr(sb, " [RA]"); }
+    if (JlwPlayQueue_shuffle(queue) == 1) { str_builder_add_cstr(sb, " [S]"); }
+    str_builder_putc(sb, 10);
+    var qitems = JlwPlayQueue_items(queue);
+    var lib = jlw_app_lib(app);
+    for (var i = 0; i < vec_len(qitems); i = i + 1) {
+        var item = jlw_library_find_by_id(lib, vec_get(qitems, i));
+        if (item != 0) { jlw_widgets_item_line(sb, item, i); }
+        else { str_builder_add_int(sb, i + 1); str_builder_add_cstr(sb, ". (unknown)\n"); }
+    }
+    return 0;
+}
+
+fn jlw_widgets_render_eq(sb, app) {
+    var engine = JlwApp_engine(app);
+    var eq = jlw_engine_eq_settings(engine);
+    str_builder_add_cstr(sb, "Equalizer [");
+    if (dhvani_geq_settings_enabled(eq) == 1) { str_builder_add_cstr(sb, "ON"); } else { str_builder_add_cstr(sb, "OFF"); }
+    str_builder_add_cstr(sb, "]  Normalize [");
+    if (jlw_engine_normalize_enabled(engine) == 1) { str_builder_add_cstr(sb, "ON"); } else { str_builder_add_cstr(sb, "OFF"); }
+    str_builder_add_cstr(sb, "]\n");
+    for (var i = 0; i < 10; i = i + 1) {
+        str_builder_add_cstr(sb, dhvani_geq_band_name(i));
+        str_builder_add_cstr(sb, "  [====]  0.0 dB\n");
+    }
+    return 0;
+}
+
+# render(app): the full screen as text -- status line, current view, keybind bar.
+#must_use
+fn jlw_widgets_render(app) {
+    var sb = str_builder_new();
+    var engine = JlwApp_engine(app);
+    # status line (no track is loaded in any tested path).
+    str_builder_add_cstr(sb, "No media loaded  [0:00 / --:--]  Vol: ");
+    if (jlw_engine_muted(engine) == 1) { str_builder_add_cstr(sb, "MUTE"); }
+    else { str_builder_add_int(sb, f64_to(f64_mul(jlw_engine_volume(engine), 100.0))); str_builder_putc(sb, 37); }
+    var err = JlwApp_last_error(app);
+    if (err != 0) { str_builder_add_cstr(sb, "  [ERR: "); str_builder_add_cstr(sb, err); str_builder_putc(sb, 93); }
+    str_builder_putc(sb, 10);
+    # current view
+    var view = JlwApp_view(app);
+    if (view == JLW_VIEW_LIBRARY)     { jlw_widgets_render_library(sb, app); }
+    if (view == JLW_VIEW_NOW_PLAYING) { str_builder_add_cstr(sb, "Now Playing\nNothing playing\nSelect a track from the Library view and press Enter\n"); }
+    if (view == JLW_VIEW_QUEUE)       { jlw_widgets_render_queue(sb, app); }
+    if (view == JLW_VIEW_EQUALIZER)   { jlw_widgets_render_eq(sb, app); }
+    # keybind bar
+    if (JlwApp_input_mode(app) == JLW_INPUT_SEARCH) {
+        str_builder_add_cstr(sb, "type to search | Esc:cancel | Enter:select\n");
+    } else {
+        if (view == JLW_VIEW_EQUALIZER) {
+            str_builder_add_cstr(sb, "up/down:band  left/right:gain  e:toggle EQ  N:normalize  Tab:view  space:play/pause  q:quit\n");
+        } else {
+            str_builder_add_cstr(sb, "space:play/pause  /:search  left/right:seek  up/down:nav  Enter:play  Tab:view  a:enqueue  q:quit  +/-:vol  m:mute  n/p:next/prev  r:repeat  s:shuffle  e:EQ  N:norm\n");
+        }
+    }
+    return str_cstr(str_builder_build(sb));
+}

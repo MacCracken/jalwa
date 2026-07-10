@@ -135,6 +135,14 @@ fn jlw_engine_seek(e, position) {
     JlwPlaybackEngine_set_position(e, position);
     return JLW_ERR_NONE;
 }
+# seek_relative(offset_secs): clamp to [0, duration] and seek.
+fn jlw_engine_seek_relative(e, offset_secs) {
+    var new_pos = f64_add(jlw_engine_position(e), offset_secs);
+    if (f64_lt(new_pos, 0) == 1) { new_pos = 0; }
+    var d = JlwPlaybackEngine_duration(e);
+    if (jlw_is_finite(d) == 1) { if (f64_gt(new_pos, d) == 1) { new_pos = d; } }
+    return jlw_engine_seek(e, new_pos);
+}
 # play(): errors without a loaded file (the tested path). Real decode is stubbed.
 fn jlw_engine_play(e) {
     if (JlwPlaybackEngine_current_path(e) == 0) { return JLW_ERR_PLAYBACK; }

@@ -1,0 +1,215 @@
+# tui.tcyr -- parity tests for src/ui/tui.cyr (input handlers).
+# Ports the handle_normal_input / handle_search_input / handle_mpris_command
+# #[test]s from jalwa-ui/src/tui.rs. The run() event loop is deferred (no test).
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/playback/mpris.cyr"
+include "src/ui/app.cyr"
+include "src/ui/tui.cyr"
+
+fn cstr3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var d = alloc(la + lb + lc + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); memcpy(d + la + lb, c, lc);
+    store8(d + la + lb + lc, 0);
+    return d;
+}
+fn rm(path) { syscall(87, path); return 0; }
+fn make_item(title, artist) {
+    var it = jlw_media_item_new(cstr3("/music/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    JlwMediaItem_set_album(it, "Album");
+    JlwMediaItem_set_duration(it, f64_from(200));
+    return it;
+}
+fn make_test_app() {
+    rm("/tmp/jalwa_tui_test.db");
+    return jlw_app_new(jlw_plib_open("/tmp/jalwa_tui_test.db"), jlw_engine_new(jlw_engine_config_default()));
+}
+fn add(a, title, artist) { jlw_library_add_item(jlw_app_lib(a), make_item(title, artist)); return 0; }
+fn cid() { var p = alloc(8); store64(p, 0); return p; }
+fn repeat_str(ch, n) { var v = alloc(n + 1); for (var i = 0; i < n; i = i + 1) { store8(v + i, ch); } store8(v + n, 0); return v; }
+
+alloc_init();
+
+# ---- handle_normal_input ----
+test_group("normal input quit");
+var a1 = make_test_app();
+jlw_tui_handle_normal_input(a1, 113, cid());
+assert_eq(JlwApp_running(a1), 0, "q quits");
+
+test_group("tab cycles view");
+var a2 = make_test_app();
+var c2 = cid();
+jlw_tui_handle_normal_input(a2, JLW_KEY_TAB, c2);
+assert_eq(JlwApp_view(a2), JLW_VIEW_NOW_PLAYING, "-> NowPlaying");
+jlw_tui_handle_normal_input(a2, JLW_KEY_TAB, c2);
+assert_eq(JlwApp_view(a2), JLW_VIEW_QUEUE, "-> Queue");
+jlw_tui_handle_normal_input(a2, JLW_KEY_TAB, c2);
+assert_eq(JlwApp_view(a2), JLW_VIEW_EQUALIZER, "-> Equalizer");
+jlw_tui_handle_normal_input(a2, JLW_KEY_TAB, c2);
+assert_eq(JlwApp_view(a2), JLW_VIEW_LIBRARY, "-> Library");
+
+test_group("up/down navigation");
+var a3 = make_test_app(); add(a3, "A", "X"); add(a3, "B", "Y"); add(a3, "C", "Z");
+var c3 = cid();
+jlw_tui_handle_normal_input(a3, JLW_KEY_DOWN, c3);
+assert_eq(JlwApp_selected_index(a3), 1, "down 1");
+jlw_tui_handle_normal_input(a3, JLW_KEY_DOWN, c3);
+assert_eq(JlwApp_selected_index(a3), 2, "down 2");
+jlw_tui_handle_normal_input(a3, JLW_KEY_UP, c3);
+assert_eq(JlwApp_selected_index(a3), 1, "up 1");
+
+test_group("volume controls");
+var a4 = make_test_app(); var c4 = cid();
+jlw_engine_set_volume(JlwApp_engine(a4), 0.5);
+jlw_tui_handle_normal_input(a4, 43, c4);   # '+'
+assert_eq(f64_gt(jlw_engine_volume(JlwApp_engine(a4)), 0.5), 1, "+ raises");
+jlw_tui_handle_normal_input(a4, 45, c4);   # '-'
+jlw_tui_handle_normal_input(a4, 45, c4);
+assert_eq(f64_lt(jlw_engine_volume(JlwApp_engine(a4)), 0.5), 1, "- lowers");
+
+test_group("mute toggle");
+var a5 = make_test_app(); var c5 = cid();
+jlw_tui_handle_normal_input(a5, 109, c5);   # 'm'
+assert_eq(jlw_engine_muted(JlwApp_engine(a5)), 1, "muted");
+jlw_tui_handle_normal_input(a5, 109, c5);
+assert_eq(jlw_engine_muted(JlwApp_engine(a5)), 0, "unmuted");
+
+test_group("enter search");
+var a6 = make_test_app();
+jlw_tui_handle_normal_input(a6, 47, cid());   # '/'
+assert_eq(JlwApp_input_mode(a6), JLW_INPUT_SEARCH, "search mode");
+assert_eq(JlwApp_view(a6), JLW_VIEW_LIBRARY, "library view");
+
+test_group("repeat cycle");
+var a7 = make_test_app(); var c7 = cid();
+jlw_tui_handle_normal_input(a7, 114, c7);   # 'r'
+assert_eq(JlwPlayQueue_repeat_mode(JlwApp_queue(a7)), JLW_REPEAT_ONE, "-> One");
+jlw_tui_handle_normal_input(a7, 114, c7);
+assert_eq(JlwPlayQueue_repeat_mode(JlwApp_queue(a7)), JLW_REPEAT_ALL, "-> All");
+
+test_group("shuffle toggle");
+var a8 = make_test_app();
+jlw_tui_handle_normal_input(a8, 115, cid());   # 's'
+assert_eq(JlwPlayQueue_shuffle(JlwApp_queue(a8)), 1, "shuffle on");
+
+test_group("enqueue from library");
+var a9 = make_test_app();
+var item9 = make_item("Song", "Artist");
+var id9 = JlwMediaItem_id(item9);
+jlw_library_add_item(jlw_app_lib(a9), item9);
+JlwApp_set_selected_index(a9, 0);
+jlw_tui_handle_normal_input(a9, 97, cid());   # 'a'
+assert_eq(jlw_queue_len(JlwApp_queue(a9)), 1, "queued 1");
+assert_eq(jlw_uuid_eq(vec_get(JlwPlayQueue_items(JlwApp_queue(a9)), 0), id9), 1, "correct id");
+
+test_group("eq toggle");
+var a10 = make_test_app(); JlwApp_set_view(a10, JLW_VIEW_EQUALIZER);
+jlw_tui_handle_normal_input(a10, 101, cid());   # 'e'
+assert_eq(dhvani_geq_settings_enabled(jlw_engine_eq_settings(JlwApp_engine(a10))), 1, "eq enabled");
+
+test_group("eq band adjust");
+var a11 = make_test_app(); JlwApp_set_view(a11, JLW_VIEW_EQUALIZER); JlwApp_set_selected_index(a11, 3);
+var c11 = cid();
+var initial = dhvani_geq_settings_band(jlw_engine_eq_settings(JlwApp_engine(a11)), 3);
+jlw_tui_handle_normal_input(a11, JLW_KEY_RIGHT, c11);
+assert_eq(f64_gt(dhvani_geq_settings_band(jlw_engine_eq_settings(JlwApp_engine(a11)), 3), initial), 1, "right raises band");
+jlw_tui_handle_normal_input(a11, JLW_KEY_LEFT, c11);
+assert_eq(f64_lt(f64_abs(f64_sub(dhvani_geq_settings_band(jlw_engine_eq_settings(JlwApp_engine(a11)), 3), initial)), 0.0001), 1, "left restores");
+
+test_group("normalize toggle");
+var a12 = make_test_app();
+jlw_tui_handle_normal_input(a12, 78, cid());   # 'N'
+assert_eq(jlw_engine_normalize_enabled(JlwApp_engine(a12)), 1, "normalize on");
+
+test_group("delete from queue");
+var a13 = make_test_app();
+var qid1 = jlw_uuid_v4(); var qid2 = jlw_uuid_v4();
+jlw_queue_enqueue(JlwApp_queue(a13), qid1);
+jlw_queue_enqueue(JlwApp_queue(a13), qid2);
+JlwApp_set_view(a13, JLW_VIEW_QUEUE); JlwApp_set_selected_index(a13, 0);
+jlw_tui_handle_normal_input(a13, 100, cid());   # 'd'
+assert_eq(jlw_queue_len(JlwApp_queue(a13)), 1, "1 left");
+assert_eq(jlw_uuid_eq(vec_get(JlwPlayQueue_items(JlwApp_queue(a13)), 0), qid2), 1, "id2 remains");
+
+test_group("clear queue");
+var a14 = make_test_app();
+jlw_queue_enqueue(JlwApp_queue(a14), jlw_uuid_v4());
+jlw_queue_enqueue(JlwApp_queue(a14), jlw_uuid_v4());
+JlwApp_set_view(a14, JLW_VIEW_QUEUE);
+jlw_tui_handle_normal_input(a14, 99, cid());   # 'c'
+assert_eq(jlw_queue_is_empty(JlwApp_queue(a14)), 1, "empty");
+assert_eq(JlwApp_selected_index(a14), 0, "selection reset");
+
+# ---- handle_search_input ----
+test_group("search type query");
+var s1 = make_test_app(); JlwApp_set_input_mode(s1, JLW_INPUT_SEARCH); add(s1, "Song", "Artist");
+jlw_tui_handle_search_input(s1, 115);   # 's'
+assert_streq(JlwApp_search_query(s1), "s", "s");
+jlw_tui_handle_search_input(s1, 111);   # 'o'
+assert_streq(JlwApp_search_query(s1), "so", "so");
+
+test_group("search backspace");
+var s2 = make_test_app(); JlwApp_set_input_mode(s2, JLW_INPUT_SEARCH); JlwApp_set_search_query(s2, "test");
+jlw_tui_handle_search_input(s2, JLW_KEY_BACKSPACE);
+assert_streq(JlwApp_search_query(s2), "tes", "tes");
+
+test_group("search escape");
+var s3 = make_test_app(); JlwApp_set_input_mode(s3, JLW_INPUT_SEARCH); JlwApp_set_search_query(s3, "query");
+var res3 = vec_new(); vec_push(res3, 0); vec_push(res3, 1); JlwApp_set_search_results(s3, res3);
+jlw_tui_handle_search_input(s3, JLW_KEY_ESC);
+assert_eq(JlwApp_input_mode(s3), JLW_INPUT_NORMAL, "normal mode");
+assert_eq(strlen(JlwApp_search_query(s3)), 0, "query cleared");
+assert_eq(vec_len(JlwApp_search_results(s3)), 0, "results cleared");
+
+test_group("search enter");
+var s4 = make_test_app(); JlwApp_set_input_mode(s4, JLW_INPUT_SEARCH); JlwApp_set_search_query(s4, "query");
+jlw_tui_handle_search_input(s4, JLW_KEY_ENTER);
+assert_eq(JlwApp_input_mode(s4), JLW_INPUT_NORMAL, "normal mode");
+assert_streq(JlwApp_search_query(s4), "query", "query preserved");
+
+test_group("search navigation");
+var s5 = make_test_app(); JlwApp_set_input_mode(s5, JLW_INPUT_SEARCH); add(s5, "A", "X"); add(s5, "B", "X");
+JlwApp_set_search_query(s5, "X"); jlw_app_update_search(s5);
+jlw_tui_handle_search_input(s5, JLW_KEY_DOWN);
+assert_eq(JlwApp_selected_index(s5), 1, "down 1");
+jlw_tui_handle_search_input(s5, JLW_KEY_UP);
+assert_eq(JlwApp_selected_index(s5), 0, "up 0");
+
+test_group("search caps at 256");
+var s6 = make_test_app(); JlwApp_set_input_mode(s6, JLW_INPUT_SEARCH);
+JlwApp_set_search_query(s6, repeat_str(97, 256));
+jlw_tui_handle_search_input(s6, 120);   # 'x'
+assert_eq(strlen(JlwApp_search_query(s6)), 256, "still 256");
+var s7 = make_test_app(); JlwApp_set_input_mode(s7, JLW_INPUT_SEARCH);
+JlwApp_set_search_query(s7, repeat_str(97, 255));
+jlw_tui_handle_search_input(s7, 122);   # 'z'
+assert_eq(strlen(JlwApp_search_query(s7)), 256, "now 256");
+assert_eq(load8(JlwApp_search_query(s7) + 255), 122, "ends with z");
+
+# ---- handle_mpris_command ----
+test_group("mpris commands");
+var m1 = make_test_app();
+jlw_tui_handle_mpris_command(m1, JLW_MPRIS_PLAY_PAUSE, 0, cid());   # no crash
+jlw_tui_handle_mpris_command(m1, JLW_MPRIS_PAUSE, 0, cid());
+jlw_tui_handle_mpris_command(m1, JLW_MPRIS_STOP, 0, cid());
+assert_eq(jlw_engine_state(JlwApp_engine(m1)), JLW_STATE_STOPPED, "stopped");
+jlw_tui_handle_mpris_command(m1, JLW_MPRIS_SEEK, 10.0, cid());   # no crash
+jlw_tui_handle_mpris_command(m1, JLW_MPRIS_SET_VOLUME, 0.7, cid());
+assert_eq(f64_lt(f64_abs(f64_sub(jlw_engine_volume(JlwApp_engine(m1)), 0.7)), 0.01), 1, "volume 0.7");
+var cnext = cid();
+jlw_tui_handle_mpris_command(make_test_app(), JLW_MPRIS_NEXT, 0, cnext);
+assert_eq(load64(cnext), 0, "next empty queue -> no current");
+var cprev = cid();
+jlw_tui_handle_mpris_command(make_test_app(), JLW_MPRIS_PREVIOUS, 0, cprev);
+assert_eq(load64(cprev), 0, "prev empty queue -> no current");
+
+rm("/tmp/jalwa_tui_test.db");
+var rc = assert_summary();
+syscall(60, rc);

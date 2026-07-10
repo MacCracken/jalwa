@@ -1,0 +1,212 @@
+# ui/tui.cyr -- TUI input handling (crossterm keys / MPRIS commands -> app state).
+# Ports rust-old/crates/jalwa-ui/src/tui.rs. L3: depends on error.cyr +
+# core/types.cyr + core/db.cyr + playback/{engine,mpris}.cyr + ui/app.cyr.
+#
+# The run() event loop + terminal control (crossterm alt-screen/raw-mode +
+# ratatui draw) is DEFERRED -- reimplement over darshana (tty) + ui/widgets
+# text rendering. The TESTED core -- the key-dispatch + MPRIS-command handlers
+# that mutate app state -- ports faithfully. KeyCode: printable chars ride their
+# ASCII byte (< 256); special keys use the JLW_KEY_* sentinels below.
+
+var JLW_KEY_LEFT      = 256;
+var JLW_KEY_RIGHT     = 257;
+var JLW_KEY_UP        = 258;
+var JLW_KEY_DOWN      = 259;
+var JLW_KEY_ENTER     = 260;
+var JLW_KEY_TAB       = 261;
+var JLW_KEY_ESC       = 262;
+var JLW_KEY_BACKSPACE = 263;
+
+# append a char (byte) to a cstring -> fresh cstring.
+#must_use
+fn jlw_str_push_char(s, c) {
+    var n = strlen(s);
+    var out = alloc(n + 2);
+    memcpy(out, s, n);
+    store8(out + n, c);
+    store8(out + n + 1, 0);
+    return out;
+}
+# drop the last char of a cstring -> fresh cstring.
+#must_use
+fn jlw_str_pop_char(s) {
+    var n = strlen(s);
+    if (n == 0) { return s; }
+    var out = alloc(n);
+    memcpy(out, s, n - 1);
+    store8(out + n - 1, 0);
+    return out;
+}
+
+# advance/go_back the queue and start the resulting track. current_id is an
+# 8-byte out-slot (0 = None). is_advance=1 -> next, 0 -> previous.
+fn jlw_tui_play_from_queue(app, current_id, is_advance) {
+    var queue = JlwApp_queue(app);
+    var id = 0;
+    if (is_advance == 1) { id = jlw_queue_advance(queue); } else { id = jlw_queue_go_back(queue); }
+    if (id != 0) {
+        var item = jlw_library_find_by_id(jlw_app_lib(app), id);
+        if (item != 0) {
+            store64(current_id, id);
+            jlw_engine_open(JlwApp_engine(app), JlwMediaItem_path(item));
+            jlw_engine_play(JlwApp_engine(app));
+        }
+    }
+    return 0;
+}
+
+# Enter: play the selection (Library/Queue). EQ preset-cycle is deferred (untested).
+fn jlw_tui_handle_enter(app, current_id) {
+    var view = JlwApp_view(app);
+    var engine = JlwApp_engine(app);
+    var queue = JlwApp_queue(app);
+    if (view == JLW_VIEW_LIBRARY) {
+        var idx = jlw_app_selected_library_index(app);
+        if (idx != (0 - 1)) {
+            var item = vec_get(JlwLibrary_items(jlw_app_lib(app)), idx);
+            store64(current_id, JlwMediaItem_id(item));
+            jlw_engine_open(engine, JlwMediaItem_path(item));
+            jlw_engine_play(engine);
+            if (jlw_queue_is_empty(queue) == 1) { jlw_queue_enqueue(queue, JlwMediaItem_id(item)); }
+        }
+    }
+    if (view == JLW_VIEW_QUEUE) {
+        if (JlwApp_selected_index(app) < jlw_queue_len(queue)) {
+            JlwPlayQueue_set_position(queue, JlwApp_selected_index(app));
+            var id = jlw_queue_current(queue);
+            if (id != 0) {
+                var item = jlw_library_find_by_id(jlw_app_lib(app), id);
+                if (item != 0) {
+                    store64(current_id, id);
+                    jlw_engine_open(engine, JlwMediaItem_path(item));
+                    jlw_engine_play(engine);
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+# handle_normal_input(app, key, current_id): navigation / playback / EQ keys.
+fn jlw_tui_handle_normal_input(app, key, current_id) {
+    var engine = JlwApp_engine(app);
+    var queue = JlwApp_queue(app);
+    if (key == 113) { JlwApp_set_running(app, 0); return 0; }          # 'q'
+    if (key == 32)  { jlw_engine_toggle(engine); return 0; }           # space
+    if (key == JLW_KEY_LEFT) {
+        if (JlwApp_view(app) == JLW_VIEW_EQUALIZER) {
+            var band = JlwApp_selected_index(app); if (band > 9) { band = 9; }
+            jlw_engine_set_eq_band(engine, band, f64_sub(dhvani_geq_settings_band(jlw_engine_eq_settings(engine), band), 1.0));
+        } else { jlw_engine_seek_relative(engine, f64_neg(10.0)); }
+        return 0;
+    }
+    if (key == JLW_KEY_RIGHT) {
+        if (JlwApp_view(app) == JLW_VIEW_EQUALIZER) {
+            var band = JlwApp_selected_index(app); if (band > 9) { band = 9; }
+            jlw_engine_set_eq_band(engine, band, f64_add(dhvani_geq_settings_band(jlw_engine_eq_settings(engine), band), 1.0));
+        } else { jlw_engine_seek_relative(engine, 10.0); }
+        return 0;
+    }
+    if (key == JLW_KEY_UP)   { jlw_app_select_prev(app); return 0; }
+    if (key == JLW_KEY_DOWN) { jlw_app_select_next(app); return 0; }
+    if (key == JLW_KEY_ENTER) { jlw_tui_handle_enter(app, current_id); return 0; }
+    if (key == 47) {   # '/'
+        JlwApp_set_input_mode(app, JLW_INPUT_SEARCH);
+        JlwApp_set_search_query(app, "");
+        JlwApp_set_search_results(app, vec_new());
+        JlwApp_set_view(app, JLW_VIEW_LIBRARY);
+        return 0;
+    }
+    if (key == JLW_KEY_TAB) { JlwApp_set_view(app, jlw_view_cycle(JlwApp_view(app))); JlwApp_set_selected_index(app, 0); return 0; }
+    if (key == 43) { jlw_engine_set_volume(engine, f64_add(jlw_engine_volume(engine), 0.05)); return 0; }   # '+'
+    if (key == 61) { jlw_engine_set_volume(engine, f64_add(jlw_engine_volume(engine), 0.05)); return 0; }   # '='
+    if (key == 45) { jlw_engine_set_volume(engine, f64_sub(jlw_engine_volume(engine), 0.05)); return 0; }   # '-'
+    if (key == 109) { jlw_engine_toggle_mute(engine); return 0; }      # 'm'
+    if (key == 110) { jlw_tui_play_from_queue(app, current_id, 1); return 0; }   # 'n'
+    if (key == 112) { jlw_tui_play_from_queue(app, current_id, 0); return 0; }   # 'p'
+    if (key == 114) { JlwPlayQueue_set_repeat_mode(queue, jlw_repeat_mode_cycle(JlwPlayQueue_repeat_mode(queue))); return 0; }   # 'r'
+    if (key == 115) { JlwPlayQueue_set_shuffle(queue, 1 - JlwPlayQueue_shuffle(queue)); return 0; }   # 's'
+    if (key == 101) {   # 'e'
+        if (JlwApp_view(app) == JLW_VIEW_EQUALIZER) { jlw_engine_toggle_eq(engine); }
+        else { JlwApp_set_view(app, JLW_VIEW_EQUALIZER); JlwApp_set_selected_index(app, 0); }
+        return 0;
+    }
+    if (key == 78) { jlw_engine_toggle_normalize(engine); return 0; }  # 'N'
+    if (key == 97) {   # 'a'
+        if (JlwApp_view(app) == JLW_VIEW_LIBRARY) {
+            var idx = jlw_app_selected_library_index(app);
+            if (idx != (0 - 1)) {
+                jlw_queue_enqueue(queue, JlwMediaItem_id(vec_get(JlwLibrary_items(jlw_app_lib(app)), idx)));
+            }
+        }
+        return 0;
+    }
+    if (key == 100) {   # 'd'
+        if (JlwApp_view(app) == JLW_VIEW_QUEUE) {
+            if (JlwApp_selected_index(app) < jlw_queue_len(queue)) {
+                vec_remove(JlwPlayQueue_items(queue), JlwApp_selected_index(app));
+                if (JlwApp_selected_index(app) >= jlw_queue_len(queue)) {
+                    if (jlw_queue_len(queue) > 0) { JlwApp_set_selected_index(app, jlw_queue_len(queue) - 1); }
+                }
+                var pos = JlwPlayQueue_position(queue);
+                if (pos != (0 - 1)) {
+                    if (JlwApp_selected_index(app) <= pos) { if (pos > 0) { JlwPlayQueue_set_position(queue, pos - 1); } }
+                }
+            }
+        }
+        return 0;
+    }
+    if (key == 99) {   # 'c'
+        if (JlwApp_view(app) == JLW_VIEW_QUEUE) { jlw_queue_clear(queue); JlwApp_set_selected_index(app, 0); }
+        return 0;
+    }
+    return 0;
+}
+
+# handle_search_input(app, key): text entry + search navigation.
+fn jlw_tui_handle_search_input(app, key) {
+    if (key == JLW_KEY_ESC) {
+        JlwApp_set_input_mode(app, JLW_INPUT_NORMAL);
+        JlwApp_set_search_query(app, "");
+        JlwApp_set_search_results(app, vec_new());
+        JlwApp_set_selected_index(app, 0);
+        return 0;
+    }
+    if (key == JLW_KEY_ENTER) { JlwApp_set_input_mode(app, JLW_INPUT_NORMAL); return 0; }
+    if (key == JLW_KEY_BACKSPACE) {
+        JlwApp_set_search_query(app, jlw_str_pop_char(JlwApp_search_query(app)));
+        jlw_app_update_search(app);
+        JlwApp_set_selected_index(app, 0);
+        return 0;
+    }
+    if (key == JLW_KEY_UP)   { jlw_app_select_prev(app); return 0; }
+    if (key == JLW_KEY_DOWN) { jlw_app_select_next(app); return 0; }
+    if (key < 256) {   # printable char
+        if (strlen(JlwApp_search_query(app)) < 256) {
+            JlwApp_set_search_query(app, jlw_str_push_char(JlwApp_search_query(app), key));
+            jlw_app_update_search(app);
+            JlwApp_set_selected_index(app, 0);
+        }
+        return 0;
+    }
+    return 0;
+}
+
+# handle_mpris_command(app, cmd_code, payload, current_id). payload = Seek offset
+# / SetVolume level (f64), ignored for the others.
+fn jlw_tui_handle_mpris_command(app, cmd, payload, current_id) {
+    var engine = JlwApp_engine(app);
+    if (cmd == JLW_MPRIS_PLAY_PAUSE) { jlw_engine_toggle(engine); return 0; }
+    if (cmd == JLW_MPRIS_PLAY)       { jlw_engine_play(engine); return 0; }
+    if (cmd == JLW_MPRIS_PAUSE)      { jlw_engine_pause(engine); return 0; }
+    if (cmd == JLW_MPRIS_STOP)       { jlw_engine_stop(engine); return 0; }
+    if (cmd == JLW_MPRIS_NEXT)       { jlw_tui_play_from_queue(app, current_id, 1); return 0; }
+    if (cmd == JLW_MPRIS_PREVIOUS)   { jlw_tui_play_from_queue(app, current_id, 0); return 0; }
+    if (cmd == JLW_MPRIS_SEEK)       { jlw_engine_seek_relative(engine, payload); return 0; }
+    if (cmd == JLW_MPRIS_SET_VOLUME) { jlw_engine_set_volume(engine, payload); return 0; }
+    return 0;   # Noop / unknown
+}
+
+# run(app): the event loop + terminal control -- DEFERRED (crossterm/ratatui ->
+# darshana + ui/widgets). Returns 0.
+fn jlw_tui_run(app) { return 0; }

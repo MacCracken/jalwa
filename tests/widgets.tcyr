@@ -1,0 +1,135 @@
+# widgets.tcyr -- parity tests for src/ui/widgets.cyr (view text rendering).
+# Ports the render_* #[test]s from jalwa-ui/src/widgets.rs. The Rust rendered to
+# a ratatui TestBackend and asserted `contains`; the port renders to text and
+# asserts the same substrings.
+
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/playback/dsp.cyr"
+include "src/playback/decode_thread.cyr"
+include "src/playback/engine.cyr"
+include "src/ui/app.cyr"
+include "src/ui/widgets.cyr"
+
+fn cstr3(a, b, c) {
+    var la = strlen(a); var lb = strlen(b); var lc = strlen(c);
+    var d = alloc(la + lb + lc + 1);
+    memcpy(d, a, la); memcpy(d + la, b, lb); memcpy(d + la + lb, c, lc);
+    store8(d + la + lb + lc, 0);
+    return d;
+}
+fn rm(path) { syscall(87, path); return 0; }
+fn make_item(title, artist) {
+    var it = jlw_media_item_new(cstr3("/music/", title, ".flac"), title, JLW_MEDIA_AUDIO, JLW_FMT_FLAC);
+    JlwMediaItem_set_artist(it, artist);
+    JlwMediaItem_set_duration(it, f64_from(200));
+    return it;
+}
+fn make_test_app() {
+    rm("/tmp/jalwa_widgets_test.db");
+    return jlw_app_new(jlw_plib_open("/tmp/jalwa_widgets_test.db"), jlw_engine_new(jlw_engine_config_default()));
+}
+fn add(a, title, artist) { jlw_library_add_item(jlw_app_lib(a), make_item(title, artist)); return 0; }
+fn contains(hay, needle) { if (strstr(hay, needle) >= 0) { return 1; } return 0; }
+
+alloc_init();
+
+# ---- library view ----
+test_group("library view empty");
+assert_eq(contains(jlw_widgets_render(make_test_app()), "Library (0 items)"), 1, "0 items");
+
+test_group("library view with items");
+var a2 = make_test_app(); add(a2, "Bohemian Rhapsody", "Queen"); add(a2, "Time", "Pink Floyd");
+var o2 = jlw_widgets_render(a2);
+assert_eq(contains(o2, "Library (2 items)"), 1, "2 items");
+assert_eq(contains(o2, "Queen"), 1, "Queen");
+assert_eq(contains(o2, "Bohemian Rhapsody"), 1, "title");
+assert_eq(contains(o2, "Pink Floyd"), 1, "Pink Floyd");
+
+test_group("library view search");
+var a3 = make_test_app(); add(a3, "Bohemian Rhapsody", "Queen"); add(a3, "Time", "Pink Floyd");
+JlwApp_set_search_query(a3, "queen"); jlw_app_update_search(a3);
+var o3 = jlw_widgets_render(a3);
+assert_eq(contains(o3, "1 matches"), 1, "1 match");
+assert_eq(contains(o3, "Queen"), 1, "Queen");
+
+test_group("library empty shows help");
+var o1b = jlw_widgets_render(make_test_app());
+assert_eq(contains(o1b, "Library is empty"), 1, "empty help");
+assert_eq(contains(o1b, "jalwa scan"), 1, "scan hint");
+
+# ---- now playing ----
+test_group("now playing nothing");
+var a4 = make_test_app(); JlwApp_set_view(a4, JLW_VIEW_NOW_PLAYING);
+var o4 = jlw_widgets_render(a4);
+assert_eq(contains(o4, "Now Playing"), 1, "header");
+assert_eq(contains(o4, "Nothing playing"), 1, "nothing");
+
+# ---- queue ----
+test_group("queue empty");
+var a5 = make_test_app(); JlwApp_set_view(a5, JLW_VIEW_QUEUE);
+assert_eq(contains(jlw_widgets_render(a5), "Queue (0 items)"), 1, "0 items");
+
+test_group("queue with items");
+var a6 = make_test_app();
+var it6 = make_item("Song", "Artist X");
+jlw_library_add_item(jlw_app_lib(a6), it6);
+jlw_queue_enqueue(JlwApp_queue(a6), JlwMediaItem_id(it6));
+JlwApp_set_view(a6, JLW_VIEW_QUEUE);
+var o6 = jlw_widgets_render(a6);
+assert_eq(contains(o6, "Queue (1 items)"), 1, "1 item");
+assert_eq(contains(o6, "Artist X"), 1, "artist shown");
+
+test_group("queue repeat/shuffle");
+var a7 = make_test_app();
+jlw_queue_enqueue(JlwApp_queue(a7), jlw_uuid_v4());
+JlwPlayQueue_set_repeat_mode(JlwApp_queue(a7), JLW_REPEAT_ALL);
+JlwPlayQueue_set_shuffle(JlwApp_queue(a7), 1);
+JlwApp_set_view(a7, JLW_VIEW_QUEUE);
+var o7 = jlw_widgets_render(a7);
+assert_eq(contains(o7, "[RA]"), 1, "repeat all");
+assert_eq(contains(o7, "[S]"), 1, "shuffle");
+
+# ---- equalizer ----
+test_group("eq view default");
+var a8 = make_test_app(); JlwApp_set_view(a8, JLW_VIEW_EQUALIZER);
+var o8 = jlw_widgets_render(a8);
+assert_eq(contains(o8, "Equalizer [OFF]"), 1, "eq off");
+assert_eq(contains(o8, "Normalize [OFF]"), 1, "normalize off");
+assert_eq(contains(o8, "31 Hz"), 1, "band 31 Hz");
+assert_eq(contains(o8, "1 kHz"), 1, "band 1 kHz");
+
+test_group("eq view enabled");
+var a9 = make_test_app(); jlw_engine_toggle_eq(JlwApp_engine(a9)); JlwApp_set_view(a9, JLW_VIEW_EQUALIZER);
+assert_eq(contains(jlw_widgets_render(a9), "Equalizer [ON]"), 1, "eq on");
+
+# ---- status bar + keybinds ----
+test_group("status bar stopped");
+assert_eq(contains(jlw_widgets_render(make_test_app()), "No media loaded"), 1, "no media");
+
+test_group("keybinds normal");
+var okb = jlw_widgets_render(make_test_app());
+assert_eq(contains(okb, "play/pause"), 1, "play/pause");
+assert_eq(contains(okb, "q:quit"), 1, "q:quit");
+
+test_group("keybinds search mode");
+var a10 = make_test_app(); JlwApp_set_input_mode(a10, JLW_INPUT_SEARCH);
+var o10 = jlw_widgets_render(a10);
+assert_eq(contains(o10, "type to search"), 1, "type to search");
+assert_eq(contains(o10, "Esc:cancel"), 1, "Esc:cancel");
+
+test_group("keybinds eq view");
+var a11 = make_test_app(); JlwApp_set_view(a11, JLW_VIEW_EQUALIZER);
+var o11 = jlw_widgets_render(a11);
+assert_eq(contains(o11, "band"), 1, "band");
+assert_eq(contains(o11, "gain"), 1, "gain");
+
+test_group("status bar error / no error");
+var a12 = make_test_app(); jlw_app_set_error(a12, "decode failed");
+assert_eq(contains(jlw_widgets_render(a12), "ERR: decode failed"), 1, "error shown");
+assert_eq(contains(jlw_widgets_render(make_test_app()), "ERR:"), 0, "no error");
+
+rm("/tmp/jalwa_widgets_test.db");
+var rc = assert_summary();
+syscall(60, rc);
