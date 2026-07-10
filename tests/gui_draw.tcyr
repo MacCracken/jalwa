@@ -276,6 +276,29 @@ assert_eq(find_text(cqe, "enqueue tracks") != 0, 1, "queue line 2 guidance");
 test_group("key_enqueue_remove");
 assert_eq(jlw_gui_key_to_action(97), JLW_GUI_ACT_ENQUEUE, "a -> enqueue");
 assert_eq(jlw_gui_key_to_action(100), JLW_GUI_ACT_REMOVE, "d -> remove");
+assert_eq(jlw_gui_key_to_action(103), JLW_GUI_ACT_TOGGLE_GRID, "g -> toggle grid");
+
+# ---- library grid mode (library.rs grid_view) ----
+test_group("build_library_grid");
+var ga = jlw_gui_app_new(fresh_plib(), eng());
+mk(ga, "GridA", "AA"); mk(ga, "GridB", "BB"); mk(ga, "GridC", "CC");
+JlwGuiApp_set_view(ga, JLW_GUI_VIEW_LIBRARY);
+JlwGuiApp_set_library_view_mode(ga, JLW_GUI_LIBVIEW_GRID);
+JlwGuiApp_set_selected_index(ga, 1);
+var cg = vec_new();
+jlw_gui_build_library_grid(ga, 0, 0, 400, 400, cg);       # 400/130 = 3 columns
+assert_eq(JlwGuiApp_grid_columns(ga), 3, "grid stashes column count (400/130=3)");
+assert_eq(find_text(cg, "GridA") != 0, 1, "grid renders titles");
+assert_eq(find_text(cg, "GridB") != 0, 1, "grid renders selected title");
+assert_eq(count_kind(cg, JLW_DRAW_IMAGE), 3, "one art box per grid cell");
+assert_eq(count_rect_color(cg, JLW_GUI_BG_WIDGET), 1, "selected cell tinted");
+# build_library dispatches to grid when the mode is grid
+var cg2 = vec_new();
+jlw_gui_build_library(ga, 0, 0, 400, 400, cg2);
+assert_eq(count_kind(cg2, JLW_DRAW_IMAGE), 3, "build_library dispatches to grid mode");
+# clip commands wrap the cells
+assert_eq(count_kind(cg2, JLW_DRAW_CLIP_PUSH), 1, "grid emits a clip push");
+assert_eq(count_kind(cg2, JLW_DRAW_CLIP_POP), 1, "grid emits a clip pop");
 
 rm("/tmp/jalwa_gui_draw.db");
 var rc = assert_summary();

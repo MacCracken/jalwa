@@ -141,19 +141,123 @@ fn jlw_gui_app_eq_nudge(app, dir) {
     return 0;
 }
 
+# true when the Library view is in grid mode (nav then steps by a cell grid).
+#must_use
+fn jlw_gui_app_is_library_grid(app) {
+    if (JlwGuiApp_view(app) != JLW_GUI_VIEW_LIBRARY) { return 0; }
+    if (JlwGuiApp_library_view_mode(app) != JLW_GUI_LIBVIEW_GRID) { return 0; }
+    return 1;
+}
+
+# Up/Down: in the library grid, step by a whole row (grid_columns) and stay put at the
+# top/bottom edge (library.rs:305-311); everywhere else, step the flat selection by 1.
+fn jlw_gui_app_nav_vert(app, dir) {
+    if (jlw_gui_app_is_library_grid(app) == 1) {
+        var cols = JlwGuiApp_grid_columns(app);
+        if (cols < 1) { cols = 1; }
+        var cur = JlwGuiApp_selected_index(app);
+        var sel = cur + dir * cols;
+        if (sel < 0) { sel = cur; }                        # already on the top row
+        if (sel >= jlw_gui_app_list_len(app)) { sel = cur; }   # nothing below
+        JlwGuiApp_set_selected_index(app, sel);
+        return 0;
+    }
+    return jlw_gui_app_nav(app, dir);
+}
+
+# Left/Right: nudge the EQ band (Equalizer view), step the flat selection by 1 (library
+# grid, library.rs:299-303), else no-op.
+fn jlw_gui_app_nav_horiz(app, dir) {
+    if (JlwGuiApp_view(app) == JLW_GUI_VIEW_EQUALIZER) { return jlw_gui_app_eq_nudge(app, dir); }
+    if (jlw_gui_app_is_library_grid(app) == 1) { return jlw_gui_app_nav(app, dir); }
+    return 0;
+}
+
+# 'g': toggle the Library between list and grid mode (library.rs:43-58). The flat
+# selected_index is shared, so no reset is needed.
+fn jlw_gui_app_toggle_grid(app) {
+    if (JlwGuiApp_library_view_mode(app) == JLW_GUI_LIBVIEW_GRID) {
+        JlwGuiApp_set_library_view_mode(app, JLW_GUI_LIBVIEW_LIST);
+    } else {
+        JlwGuiApp_set_library_view_mode(app, JLW_GUI_LIBVIEW_GRID);
+    }
+    return 0;
+}
+
+# ---- interactive search text-entry (library.rs search box) ----
+# append one byte to a cstr -> a fresh cstr (search edits are per-keystroke, not a hot
+# render path, so an alloc each edit is fine).
+#must_use
+fn jlw_gui__cstr_append(s, ch) {
+    var n = strlen(s);
+    var d = alloc(n + 2);
+    memcpy(d, s, n);
+    store8(d + n, ch);
+    store8(d + n + 1, 0);
+    return d;
+}
+# drop the last byte of a cstr -> a fresh cstr (unchanged if already empty).
+#must_use
+fn jlw_gui__cstr_drop_last(s) {
+    var n = strlen(s);
+    if (n == 0) { return s; }
+    var d = alloc(n);
+    memcpy(d, s, n - 1);
+    store8(d + n - 1, 0);
+    return d;
+}
+# '/': enter search-input mode (typing then filters the library live) on the Library view.
+fn jlw_gui_search_begin(app) {
+    JlwGuiApp_set_search_active(app, 1);
+    JlwGuiApp_set_view(app, JLW_GUI_VIEW_LIBRARY);
+    return 0;
+}
+# Esc/Enter: leave search mode. clear=1 (Esc) also empties the query + results (the
+# library.rs clear button); clear=0 (Enter) keeps the filter applied.
+fn jlw_gui_search_end(app, clear) {
+    JlwGuiApp_set_search_active(app, 0);
+    if (clear == 1) {
+        JlwGuiApp_set_search_query(app, "");
+        jlw_gui_app_update_search(app);
+    }
+    return 0;
+}
+# a printable byte -> append to the query, refresh the filter, reset the selection.
+fn jlw_gui_search_input_char(app, ch) {
+    JlwGuiApp_set_search_query(app, jlw_gui__cstr_append(JlwGuiApp_search_query(app), ch));
+    jlw_gui_app_update_search(app);
+    JlwGuiApp_set_selected_index(app, 0);
+    return 0;
+}
+# Backspace -> drop the last query byte + refresh the filter.
+fn jlw_gui_search_backspace(app) {
+    JlwGuiApp_set_search_query(app, jlw_gui__cstr_drop_last(JlwGuiApp_search_query(app)));
+    jlw_gui_app_update_search(app);
+    return 0;
+}
+# Route a key while search-input mode is active: Esc clears+exits, Enter keeps+exits,
+# Backspace deletes, printables type; everything else is swallowed (no nav/actions).
+fn jlw_gui_handle_search_key(app, key) {
+    if (key == JLW_KEY_ESC)       { jlw_gui_search_end(app, 1); return JLW_GUI_RUN_CONTINUE; }
+    if (key == JLW_KEY_ENTER)     { jlw_gui_search_end(app, 0); return JLW_GUI_RUN_CONTINUE; }
+    if (key == JLW_KEY_BACKSPACE) { jlw_gui_search_backspace(app); return JLW_GUI_RUN_CONTINUE; }
+    if (key >= 32) { if (key < 127) { jlw_gui_search_input_char(app, key); return JLW_GUI_RUN_CONTINUE; } }
+    return JLW_GUI_RUN_CONTINUE;
+}
+
 # Apply one GUI action to the app + engine. Returns JLW_GUI_RUN_QUIT when the loop
 # should end, else JLW_GUI_RUN_CONTINUE. The present shell repaints after every call.
 fn jlw_gui_apply_action(app, action) {
     var e = JlwGuiApp_engine(app);
     if (action == JLW_GUI_ACT_QUIT)       { return JLW_GUI_RUN_QUIT; }
     if (action == JLW_GUI_ACT_PLAY_PAUSE) { jlw_engine_toggle(e); return JLW_GUI_RUN_CONTINUE; }
-    if (action == JLW_GUI_ACT_NAV_UP)     { jlw_gui_app_nav(app, 0 - 1); return JLW_GUI_RUN_CONTINUE; }
-    if (action == JLW_GUI_ACT_NAV_DOWN)   { jlw_gui_app_nav(app, 1); return JLW_GUI_RUN_CONTINUE; }
-    if (action == JLW_GUI_ACT_NAV_LEFT)   { jlw_gui_app_eq_nudge(app, 0 - 1); return JLW_GUI_RUN_CONTINUE; }
-    if (action == JLW_GUI_ACT_NAV_RIGHT)  { jlw_gui_app_eq_nudge(app, 1); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NAV_UP)     { jlw_gui_app_nav_vert(app, 0 - 1); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NAV_DOWN)   { jlw_gui_app_nav_vert(app, 1); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NAV_LEFT)   { jlw_gui_app_nav_horiz(app, 0 - 1); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_NAV_RIGHT)  { jlw_gui_app_nav_horiz(app, 1); return JLW_GUI_RUN_CONTINUE; }
     if (action == JLW_GUI_ACT_ENTER)      { jlw_gui_app_activate_selected(app); return JLW_GUI_RUN_CONTINUE; }
     if (action == JLW_GUI_ACT_NEXT_VIEW)  { jlw_gui_app_cycle_view(app); return JLW_GUI_RUN_CONTINUE; }
-    if (action == JLW_GUI_ACT_SEARCH)     { JlwGuiApp_set_view(app, JLW_GUI_VIEW_LIBRARY); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_SEARCH)     { jlw_gui_search_begin(app); return JLW_GUI_RUN_CONTINUE; }
     if (action == JLW_GUI_ACT_VOL_UP)     { jlw_gui_app_volume_nudge(app, 1); return JLW_GUI_RUN_CONTINUE; }
     if (action == JLW_GUI_ACT_VOL_DOWN)   { jlw_gui_app_volume_nudge(app, 0 - 1); return JLW_GUI_RUN_CONTINUE; }
     if (action == JLW_GUI_ACT_MUTE)       { jlw_engine_toggle_mute(e); return JLW_GUI_RUN_CONTINUE; }
@@ -163,6 +267,7 @@ fn jlw_gui_apply_action(app, action) {
     if (action == JLW_GUI_ACT_NORMALIZE)  { jlw_engine_toggle_normalize(e); return JLW_GUI_RUN_CONTINUE; }
     if (action == JLW_GUI_ACT_ENQUEUE)    { jlw_gui_app_enqueue_selected(app); return JLW_GUI_RUN_CONTINUE; }
     if (action == JLW_GUI_ACT_REMOVE)     { jlw_gui_app_remove_selected_queue(app); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_TOGGLE_GRID){ jlw_gui_app_toggle_grid(app); return JLW_GUI_RUN_CONTINUE; }
     return JLW_GUI_RUN_CONTINUE;                # NONE / unhandled
 }
 
@@ -171,5 +276,7 @@ fn jlw_gui_apply_action(app, action) {
 # Wayland present loop (present.cyr) calls this for each drained key record. Returns
 # the run-status (JLW_GUI_RUN_QUIT closes the window).
 fn jlw_gui_handle_key_event(app, code, shift) {
-    return jlw_gui_apply_action(app, jlw_gui_key_to_action(jlw_gui_evdev_to_key(code, shift)));
+    var key = jlw_gui_evdev_to_key(code, shift);
+    if (JlwGuiApp_search_active(app) == 1) { return jlw_gui_handle_search_key(app, key); }
+    return jlw_gui_apply_action(app, jlw_gui_key_to_action(key));
 }

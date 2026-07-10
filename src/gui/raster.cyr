@@ -44,7 +44,24 @@ fn jlw_gui_fb_clear(buf, w, h, xrgb) {
     return 0;
 }
 
-# ---- primitives (all bounds-clipped to the fb) ----
+# ---- clip rect (one level: scroll viewports push a rect, POP restores full) ----
+# The executor honors JLW_DRAW_CLIP_PUSH/POP by setting these; primitives clamp to the
+# clip AND the fb bounds, so a row's text can't bleed past its viewport into a
+# neighbouring panel. Default = wide open.
+var JLW_GUI_CLIP_X0 = 0;
+var JLW_GUI_CLIP_Y0 = 0;
+var JLW_GUI_CLIP_X1 = 1000000;
+var JLW_GUI_CLIP_Y1 = 1000000;
+fn jlw_gui_clip_reset() {
+    JLW_GUI_CLIP_X0 = 0; JLW_GUI_CLIP_Y0 = 0; JLW_GUI_CLIP_X1 = 1000000; JLW_GUI_CLIP_Y1 = 1000000;
+    return 0;
+}
+fn jlw_gui_clip_set(x, y, w, h) {
+    JLW_GUI_CLIP_X0 = x; JLW_GUI_CLIP_Y0 = y; JLW_GUI_CLIP_X1 = x + w; JLW_GUI_CLIP_Y1 = y + h;
+    return 0;
+}
+
+# ---- primitives (all clipped to the clip rect AND the fb bounds) ----
 
 #inline
 fn jlw_gui_fb_plot(buf, fbw, fbh, x, y, xrgb) {
@@ -52,6 +69,10 @@ fn jlw_gui_fb_plot(buf, fbw, fbh, x, y, xrgb) {
     if (y < 0) { return 0; }
     if (x >= fbw) { return 0; }
     if (y >= fbh) { return 0; }
+    if (x < JLW_GUI_CLIP_X0) { return 0; }
+    if (y < JLW_GUI_CLIP_Y0) { return 0; }
+    if (x >= JLW_GUI_CLIP_X1) { return 0; }
+    if (y >= JLW_GUI_CLIP_Y1) { return 0; }
     store32(buf + (y * fbw + x) * 4, xrgb);
     return 0;
 }
@@ -65,6 +86,10 @@ fn jlw_gui_fb_fill_rect(buf, fbw, fbh, x, y, w, h, xrgb) {
     if (y0 < 0) { y0 = 0; }
     if (x1 > fbw) { x1 = fbw; }
     if (y1 > fbh) { y1 = fbh; }
+    if (x0 < JLW_GUI_CLIP_X0) { x0 = JLW_GUI_CLIP_X0; }
+    if (y0 < JLW_GUI_CLIP_Y0) { y0 = JLW_GUI_CLIP_Y0; }
+    if (x1 > JLW_GUI_CLIP_X1) { x1 = JLW_GUI_CLIP_X1; }
+    if (y1 > JLW_GUI_CLIP_Y1) { y1 = JLW_GUI_CLIP_Y1; }
     var yy = y0;
     while (yy < y1) {
         var p = buf + (yy * fbw + x0) * 4;
@@ -192,6 +217,7 @@ fn jlw_gui_fb_text(buf, fbw, fbh, x, y, cstr, xrgb, max_chars) {
 
 fn jlw_gui_raster(cmds, buf, fbw, fbh) {
     jlw_gui_raster_ensure_font();
+    jlw_gui_clip_reset();                              # start each frame with no clip
     var n = vec_len(cmds);
     var i = 0;
     while (i < n) {
@@ -212,18 +238,26 @@ fn jlw_gui_raster(cmds, buf, fbw, fbh) {
                             JlwDrawCmd_text(c), col, JlwDrawCmd_aux(c));
         }
         if (k == JLW_DRAW_IMAGE) {
-            # No decoded art source yet: fill the slot with widget bg + a muted outline
-            # so the region is visible. Real scaled-RGBA blit lands when art_cache
-            # exposes decoded pixels.
-            jlw_gui_fb_fill_rect(buf, fbw, fbh, JlwDrawCmd_x(c), JlwDrawCmd_y(c),
-                                 JlwDrawCmd_w(c), JlwDrawCmd_h(c),
-                                 jlw_gui_color_to_xrgb(JLW_GUI_BG_WIDGET));
-            jlw_gui_fb_border(buf, fbw, fbh, JlwDrawCmd_x(c), JlwDrawCmd_y(c),
-                              JlwDrawCmd_w(c), JlwDrawCmd_h(c),
-                              jlw_gui_color_to_xrgb(JLW_GUI_TEXT_MUTED));
+            # No decoded-image source yet (real album-art blit needs a JPEG/PNG decoder,
+            # backlogged). Draw a lettered placeholder: widget-bg box + muted outline +
+            # the art id's first glyph centered. `text` carries the id/title.
+            var ix = JlwDrawCmd_x(c);
+            var iy = JlwDrawCmd_y(c);
+            var iw = JlwDrawCmd_w(c);
+            var ih = JlwDrawCmd_h(c);
+            jlw_gui_fb_fill_rect(buf, fbw, fbh, ix, iy, iw, ih, jlw_gui_color_to_xrgb(JLW_GUI_BG_WIDGET));
+            jlw_gui_fb_border(buf, fbw, fbh, ix, iy, iw, ih, jlw_gui_color_to_xrgb(JLW_GUI_TEXT_MUTED));
+            var art = JlwDrawCmd_text(c);
+            if (art != 0) { if (load8(art) != 0) {
+                var g = jlw_gui__cp_to_glyph(jlw_gui__utf8_at(art, 0) / 8);
+                jlw_gui_fb_glyph(buf, fbw, fbh, ix + iw / 2 - JLW_GLYPH_W / 2, iy + ih / 2 - JLW_GLYPH_H / 2,
+                                 g, jlw_gui_color_to_xrgb(JLW_GUI_TEXT_SECONDARY));
+            } }
         }
-        # CLIP_PUSH / CLIP_POP: ignored in the first raster (builders already
-        # virtualize lists, so nothing overdraws). Clip-stack lands with scroll.
+        if (k == JLW_DRAW_CLIP_PUSH) {
+            jlw_gui_clip_set(JlwDrawCmd_x(c), JlwDrawCmd_y(c), JlwDrawCmd_w(c), JlwDrawCmd_h(c));
+        }
+        if (k == JLW_DRAW_CLIP_POP) { jlw_gui_clip_reset(); }
         i = i + 1;
     }
     return 0;

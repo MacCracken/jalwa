@@ -30,9 +30,14 @@ wiring table, the blockers, the wave plan, and the per-module ledger. Read it be
 
 Decisions in force (see port-audit + [ADRs](docs/adr/)):
 
-- **tarang is stubbed** — it's still Rust; port call sites against a stub, no real playback in v1.
-- **GUI is in scope** as a dhancha/mabda **Wayland** app (reference: the `puka` repo).
-- **Video is backlogged** — needs tarang + aethersafta (both still Rust).
+- **tarang is VIDEO-only** — it's still Rust, so only video is stubbed. **Audio playback is REAL**:
+  shravan (decode/probe/tags) → dhvani (EQ + loudness normalize) → vani (ALSA/agnos out). Never
+  route audio through tarang.
+- **GUI is DONE** — `jalwa gui` is a **Wayland** desktop shell: draw-command IR → CPU rasterizer
+  (kashi VGA 8x16 font, XRGB8888 wl_shm buffer) → control layer → present shell forked from `puka`.
+  **CPU framebuffer path, NOT mabda GPU**; dhancha was a design template, not a dep. The present
+  shell is **smoke-only** (unverifiable headless — validate on real AGNOS).
+- **Video is backlogged (P1, top of roadmap)** — needs tarang + aethersafta (both still Rust).
 - **MPRIS export is deferred** — `samvada` is D-Bus client-only.
 
 ## Scaffolding

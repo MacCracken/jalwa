@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.0.0 — Rust → Cyrius port
+
+Complete port of the 5-crate Rust workspace (frozen at `rust-old/` as the parity
+oracle) to pure **Cyrius**. Every non-video subsystem is ported and green against the
+oracle; the binary builds and every non-blocked subcommand runs end-to-end.
+
+### Core (jalwa-core → `src/core`)
+- Domain types, enums→int codes, Uuid/Playlist/PlayQueue/MediaItem/Library (ADR 0001: linear-scan indexes)
+- DB over **patra**, playlist I/O (M3U), inotify watcher, hardware (**yukti**) + `jalwa devices`
+- **Real audio scanner** — header-only WAV/FLAC/MP3 duration + FLAC-Vorbis / MP3-ID3v2 tags via **shravan** (ADR 0002)
+
+### Playback (jalwa-playback → `src/playback`)
+- **Real decode → output**: shravan `wav/flac/mp3_decode` → f64→i16 → **vani** ALSA/agnos output (not PipeWire)
+- **Threaded engine** over an fnptr audio-backend seam; full transport: play/pause/resume/stop/seek/live-volume
+- **DSP chain** via **dhvani**: 10-band graphic EQ + loudness normalize (per-track)
+- OGG/AAC/MP4 excluded (shravan decoders broken); mid-track-live EQ + gapless deferred
+
+### AI (jalwa-ai → `src/ai`)
+- Recommendations, daimon, fingerprint scaffold (network + kernel stubbed)
+
+### Terminal UI (jalwa-ui → `src/ui`)
+- Interactive `jalwa tui` run loop over **darshana** — raw/alt-screen, poll(2) tick, hand-rolled CSI/SS3 decoder, live background playback + queue auto-advance
+
+### Desktop GUI (jalwa-gui → `src/gui`)
+- Headless-testable **draw-command IR** → **CPU rasterizer** (kashi VGA 8x16 font, UTF-8-aware, XRGB8888 wl_shm buffer) → **control layer** (action → app/engine mutation) → evdev input map
+- All views: sidebar, transport, library (list + grid), now-playing, queue, equalizer, devices; interactive search text-entry; clip-stack; lettered album-art placeholder
+- `jalwa gui` — a real Wayland present shell over a puka-forked sovereign client (smoke-only headless; validate on real AGNOS). CPU framebuffer path, not GPU
+- Real album-art blit + mouse input backlogged
+
+### Binary + MCP (jalwa-mcp → `src/mcp*`, `src/main.cyr`)
+- `jalwa mcp` — real stdio JSON-RPC 2.0 server (8 tools), hand-rolled, no bote dep
+- Full-assembly `main` with CLI dispatch (scan/play/info/search/stats/library/export/import/devices/tui/gui/mcp)
+
+### Quality
+- 35 `.tcyr` suites, 1200+ assertions, green in CI (`cyrius test`)
+- Two adversarial-review passes (audio/threading/parsing; GUI draw+raster) — real bugs found + fixed
+
+### Blocked
+- **Video (P1)** — tarang + aethersafta are still Rust; video decode/surface deferred (see `docs/development/roadmap.md`)
+- MPRIS export deferred (samvada is D-Bus client-only)
+
+---
+
+> Entries below are the **pre-port Rust history** (calendar-versioned), kept for provenance.
+
 ## 2026.3.22
 
 Hardware device integration, full engineering backlog resolution, and audit/refactoring pass.

@@ -24,10 +24,13 @@ var JLW_GUI_LIBVIEW_GRID = 1;
 # library holds a PersistentLibrary (plib); library_view_mode/view are int codes;
 # search_results is an int vec of library indices; current_playing_id is a Uuid
 # ptr (0 = None).
+# search_active: 1 while typing into the search box ('/' begins, Esc/Enter ends).
+# grid_columns: column count the library grid last rendered with (grid nav reads it).
 #derive(accessors)
 struct JlwGuiApp {
     library; engine; queue; view; selected_index;
     search_query; search_results; library_view_mode; current_playing_id;
+    search_active; grid_columns;
 }
 
 # GuiApp::new_headless(library, engine) -- the egui-free constructor the tests use.
@@ -43,6 +46,8 @@ fn jlw_gui_app_new(library, engine) {
     JlwGuiApp_set_search_results(app, vec_new());
     JlwGuiApp_set_library_view_mode(app, JLW_GUI_LIBVIEW_LIST);
     JlwGuiApp_set_current_playing_id(app, 0);   # None
+    JlwGuiApp_set_search_active(app, 0);
+    JlwGuiApp_set_grid_columns(app, 1);
     return app;
 }
 

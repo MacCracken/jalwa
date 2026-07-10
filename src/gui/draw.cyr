@@ -25,6 +25,9 @@ var JLW_GUI_TRANSPORT_H = 64;
 var JLW_GUI_ROW_H       = 32;   # sidebar / list row height
 var JLW_GUI_PAD         = 8;
 var JLW_GUI_TEXT_DY     = 20;   # text baseline offset within a row
+var JLW_GUI_CELL_W      = 130;  # library grid cell width  (library.rs CELL_WIDTH)
+var JLW_GUI_CELL_H      = 170;  # library grid cell height (library.rs CELL_HEIGHT)
+var JLW_GUI_ART_SZ      = 100;  # album-art box size (grid + now-playing)
 
 #derive(accessors)
 struct JlwDrawCmd { kind; x; y; w; h; color; text; aux; }
@@ -63,6 +66,15 @@ fn jlw_gui_draw_text(cmds, x, y, color, text, max_chars) {
 }
 fn jlw_gui_draw_image(cmds, x, y, w, h, art_id) {
     vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_IMAGE, x, y, w, h, 0, art_id, 0));
+    return 0;
+}
+# clip subsequent draws to (x,y,w,h) until the matching pop (scroll viewports).
+fn jlw_gui_draw_clip_push(cmds, x, y, w, h) {
+    vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_CLIP_PUSH, x, y, w, h, 0, 0, 0));
+    return 0;
+}
+fn jlw_gui_draw_clip_pop(cmds) {
+    vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_CLIP_POP, 0, 0, 0, 0, 0, 0, 0));
     return 0;
 }
 
@@ -184,10 +196,58 @@ fn jlw_gui_lib_item_at(app, di) {
     return vec_get(items, di);
 }
 
-# ---- library view (views/library.rs), list mode ----
-# scrollable/virtualized track list: only the visible rows are emitted; the selected
-# row gets a widget-bg tint, and the playing/selected/default text color comes from
-# jlw_gui_row_color_code. Grid mode is deferred (falls back to the list here).
+# ---- library grid mode (views/library.rs grid_view) ----
+# CELL_W x CELL_H cells, `columns = w / CELL_W` per row; each cell = an album-art box
+# (raster draws a lettered placeholder) + truncated title + artist, tinted for the
+# selected cell and colored by playing/selected/default. Virtualized by cell-row. The
+# rendered column count is stashed on the app so grid nav (control.cyr) steps by it.
+fn jlw_gui_build_library_grid(app, x, y, w, h, cmds) {
+    var columns = w / JLW_GUI_CELL_W;
+    if (columns < 1) { columns = 1; }
+    JlwGuiApp_set_grid_columns(app, columns);
+    var count = jlw_gui_lib_count(app);
+    var sel = JlwGuiApp_selected_index(app);
+    var pid = JlwGuiApp_current_playing_id(app);
+    var rows_visible = h / JLW_GUI_CELL_H;
+    if (rows_visible < 1) { rows_visible = 1; }
+    var total_rows = (count + columns - 1) / columns;
+    var start_row = jlw_gui_scroll_start(sel / columns, rows_visible, total_rows);
+    var di = start_row * columns;
+    var shown = 0;
+    jlw_gui_draw_clip_push(cmds, x, y, w, h);          # keep cells inside the content region
+    while (di < count && shown < rows_visible) {
+        var col = 0;
+        while (col < columns && di < count) {
+            var item = jlw_gui_lib_item_at(app, di);
+            if (item != 0) {
+                var cx = x + col * JLW_GUI_CELL_W;
+                var cy = y + shown * JLW_GUI_CELL_H;
+                var is_playing = 0;
+                if (pid != 0) { if (jlw_uuid_eq(JlwMediaItem_id(item), pid) == 1) { is_playing = 1; } }
+                var is_selected = 0;
+                if (di == sel) { is_selected = 1; }
+                if (is_selected == 1) { jlw_gui_draw_rect(cmds, cx, cy, JLW_GUI_CELL_W, JLW_GUI_CELL_H, JLW_GUI_BG_WIDGET); }
+                var ax = cx + (JLW_GUI_CELL_W - JLW_GUI_ART_SZ) / 2;
+                jlw_gui_draw_image(cmds, ax, cy + JLW_GUI_PAD, JLW_GUI_ART_SZ, JLW_GUI_ART_SZ, JlwMediaItem_title(item));
+                var tcy = cy + JLW_GUI_ART_SZ + JLW_GUI_PAD * 2;
+                jlw_gui_draw_text(cmds, cx + JLW_GUI_PAD, tcy + 12, jlw_gui_row_color_code(is_playing, is_selected),
+                                  jlw_gui_truncate_str(JlwMediaItem_title(item), 16), 0);
+                jlw_gui_draw_text(cmds, cx + JLW_GUI_PAD, tcy + 32, JLW_GUI_TEXT_MUTED,
+                                  jlw_gui_truncate_str(jlw_gui_np_artist(JlwMediaItem_artist(item)), 16), 0);
+            }
+            col = col + 1;
+            di = di + 1;
+        }
+        shown = shown + 1;
+    }
+    jlw_gui_draw_clip_pop(cmds);
+    return vec_len(cmds);
+}
+
+# ---- library view (views/library.rs) ----
+# List mode: scrollable/virtualized track list; the selected row gets a widget-bg tint,
+# and playing/selected/default text color comes from jlw_gui_row_color_code. Grid mode
+# dispatches to jlw_gui_build_library_grid. Empty/no-match state per library.rs:74-88.
 fn jlw_gui_build_library(app, x, y, w, h, cmds) {
     jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
     var count = jlw_gui_lib_count(app);
@@ -199,6 +259,9 @@ fn jlw_gui_build_library(app, x, y, w, h, cmds) {
         jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + h / 2, JLW_GUI_TEXT_MUTED, msg, 0);
         return vec_len(cmds);
     }
+    if (JlwGuiApp_library_view_mode(app) == JLW_GUI_LIBVIEW_GRID) {
+        return jlw_gui_build_library_grid(app, x, y, w, h, cmds);
+    }
     var visible = h / JLW_GUI_ROW_H;
     if (visible < 1) { visible = 1; }
     var sel = JlwGuiApp_selected_index(app);
@@ -206,6 +269,7 @@ fn jlw_gui_build_library(app, x, y, w, h, cmds) {
     var end = start + visible;
     if (end > count) { end = count; }
     var pid = JlwGuiApp_current_playing_id(app);
+    jlw_gui_draw_clip_push(cmds, x, y, w, h);          # keep rows inside the content region
     for (var di = start; di < end; di = di + 1) {
         var item = jlw_gui_lib_item_at(app, di);
         if (item != 0) {
@@ -220,6 +284,7 @@ fn jlw_gui_build_library(app, x, y, w, h, cmds) {
                               jlw_gui_format_library_row(di, JlwMediaItem_title(item), JlwMediaItem_artist(item), JlwMediaItem_duration(item)), 0);
         }
     }
+    jlw_gui_draw_clip_pop(cmds);
     return vec_len(cmds);
 }
 
@@ -389,6 +454,7 @@ var JLW_GUI_ACT_EQ_TOGGLE  = 15;
 var JLW_GUI_ACT_NORMALIZE  = 16;
 var JLW_GUI_ACT_ENQUEUE    = 17;   # 'a' on selected library row (library.rs:148)
 var JLW_GUI_ACT_REMOVE     = 18;   # 'd' on selected queue row (queue.rs:102)
+var JLW_GUI_ACT_TOGGLE_GRID = 19;  # 'g' toggles library list/grid mode (library.rs:43-58)
 
 #must_use
 fn jlw_gui_key_to_action(key) {
@@ -411,5 +477,6 @@ fn jlw_gui_key_to_action(key) {
     if (key == 78)              { return JLW_GUI_ACT_NORMALIZE; }    # 'N'
     if (key == 97)              { return JLW_GUI_ACT_ENQUEUE; }      # 'a' (library: enqueue row)
     if (key == 100)             { return JLW_GUI_ACT_REMOVE; }       # 'd' (queue: remove row)
+    if (key == 103)             { return JLW_GUI_ACT_TOGGLE_GRID; }  # 'g' (library: list/grid)
     return JLW_GUI_ACT_NONE;
 }

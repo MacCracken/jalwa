@@ -173,6 +173,36 @@ assert_eq(count_px(fbuf, FW, 0, 0, JLW_GUI_SIDEBAR_W, 8, pan) > 0, 1, "sidebar c
 # dump a viewable PPM artifact of the rendered library frame
 assert_eq(jlw_gui_fb_dump_ppm(fbuf, FW, FH, "/tmp/jalwa_gui_raster.db.ppm"), JLW_ERR_NONE, "PPM dump ok");
 
+# ---- clip rect: draws outside the pushed clip are suppressed; reset per frame ----
+test_group("clip");
+jlw_gui_fb_clear(buf, W, H, bg);
+var cc = vec_new();
+jlw_gui_draw_clip_push(cc, 10, 10, 20, 10);              # clip to x10..30, y10..20
+jlw_gui_draw_rect(cc, 0, 0, 64, 48, JLW_GUI_ACCENT);    # full-screen fill, clipped
+jlw_gui_draw_clip_pop(cc);
+jlw_gui_raster(cc, buf, W, H);
+assert_eq(px(buf, W, 15, 15), ac, "inside clip painted");
+assert_eq(px(buf, W, 5, 5), bg, "outside clip (upper-left) untouched");
+assert_eq(px(buf, W, 35, 15), bg, "outside clip (right) untouched");
+assert_eq(px(buf, W, 15, 25), bg, "outside clip (below) untouched");
+assert_eq(count_px(buf, W, 10, 10, 20, 10, ac), 200, "exactly the 20x10 clip region filled");
+# a new raster() call resets the clip -> an unclipped draw paints anywhere
+var cc2 = vec_new();
+jlw_gui_draw_rect(cc2, 0, 0, 4, 4, JLW_GUI_TEXT_PRIMARY);
+jlw_gui_raster(cc2, buf, W, H);
+assert_eq(px(buf, W, 0, 0), jlw_gui_color_to_xrgb(JLW_GUI_TEXT_PRIMARY), "clip resets each frame");
+
+# ---- album-art lettered placeholder (IMAGE cmd draws box + border + first glyph) ----
+test_group("art_placeholder");
+jlw_gui_fb_clear(buf, W, H, bg);
+var ca = vec_new();
+jlw_gui_draw_image(ca, 4, 4, 40, 40, "Xylophone");       # 'X' centered in the box
+jlw_gui_raster(ca, buf, W, H);
+assert_eq(px(buf, W, 8, 8), jlw_gui_color_to_xrgb(JLW_GUI_BG_WIDGET), "art box filled with widget bg");
+assert_eq(px(buf, W, 4, 4), jlw_gui_color_to_xrgb(JLW_GUI_TEXT_MUTED), "art box has a muted border");
+var sec = jlw_gui_color_to_xrgb(JLW_GUI_TEXT_SECONDARY);
+assert_eq(count_px(buf, W, 4 + 40 / 2 - 4, 4 + 40 / 2 - 8, 8, 16, sec) > 0, 1, "art first-letter glyph centered");
+
 rm("/tmp/jalwa_gui_raster.db");
 var rc = assert_summary();
 syscall(60, rc);

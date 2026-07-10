@@ -184,6 +184,60 @@ assert_eq(jlw_gui_handle_key_event(k, 16, 0), JLW_GUI_RUN_QUIT, "evdev 'q' -> RU
 jlw_gui_handle_key_event(k, 15, 0);                       # Tab -> next view
 assert_eq(JlwGuiApp_view(k), JLW_GUI_VIEW_NOW_PLAYING, "evdev Tab cycled view");
 
+# ---- grid nav (±1 horizontal, ±columns vertical) + list/grid toggle ----
+test_group("grid_nav");
+var gc = jlw_gui_app_new(fresh_plib(), eng());
+mk(gc, "G0", "A"); mk(gc, "G1", "A"); mk(gc, "G2", "A");
+mk(gc, "G3", "A"); mk(gc, "G4", "A"); mk(gc, "G5", "A");   # 6 items
+JlwGuiApp_set_view(gc, JLW_GUI_VIEW_LIBRARY);
+JlwGuiApp_set_library_view_mode(gc, JLW_GUI_LIBVIEW_GRID);
+JlwGuiApp_set_grid_columns(gc, 3);
+JlwGuiApp_set_selected_index(gc, 0);
+jlw_gui_apply_action(gc, JLW_GUI_ACT_NAV_RIGHT);
+assert_eq(JlwGuiApp_selected_index(gc), 1, "grid right -> +1");
+jlw_gui_apply_action(gc, JLW_GUI_ACT_NAV_DOWN);
+assert_eq(JlwGuiApp_selected_index(gc), 4, "grid down -> +columns (1->4)");
+jlw_gui_apply_action(gc, JLW_GUI_ACT_NAV_UP);
+assert_eq(JlwGuiApp_selected_index(gc), 1, "grid up -> -columns (4->1)");
+jlw_gui_apply_action(gc, JLW_GUI_ACT_NAV_LEFT);
+assert_eq(JlwGuiApp_selected_index(gc), 0, "grid left -> -1");
+jlw_gui_apply_action(gc, JLW_GUI_ACT_NAV_UP);
+assert_eq(JlwGuiApp_selected_index(gc), 0, "grid up on top row -> stay");
+JlwGuiApp_set_selected_index(gc, 5);
+jlw_gui_apply_action(gc, JLW_GUI_ACT_NAV_DOWN);
+assert_eq(JlwGuiApp_selected_index(gc), 5, "grid down past end -> stay");
+JlwGuiApp_set_library_view_mode(gc, JLW_GUI_LIBVIEW_LIST);
+jlw_gui_apply_action(gc, JLW_GUI_ACT_TOGGLE_GRID);
+assert_eq(JlwGuiApp_library_view_mode(gc), JLW_GUI_LIBVIEW_GRID, "'g' toggles list -> grid");
+jlw_gui_apply_action(gc, JLW_GUI_ACT_TOGGLE_GRID);
+assert_eq(JlwGuiApp_library_view_mode(gc), JLW_GUI_LIBVIEW_LIST, "'g' toggles grid -> list");
+
+# ---- interactive search text-entry ----
+test_group("search_entry");
+var sc = jlw_gui_app_new(fresh_plib(), eng());
+mk(sc, "alpha", "A"); mk(sc, "beta", "B"); mk(sc, "alpine", "C");
+JlwGuiApp_set_view(sc, JLW_GUI_VIEW_QUEUE);
+jlw_gui_apply_action(sc, JLW_GUI_ACT_SEARCH);
+assert_eq(JlwGuiApp_search_active(sc), 1, "'/' begins search mode");
+assert_eq(JlwGuiApp_view(sc), JLW_GUI_VIEW_LIBRARY, "'/' switches to Library");
+jlw_gui_handle_key_event(sc, 30, 0);      # 'a'
+jlw_gui_handle_key_event(sc, 38, 0);      # 'l'
+jlw_gui_handle_key_event(sc, 25, 0);      # 'p'
+assert_eq(streq(JlwGuiApp_search_query(sc), "alp"), 1, "typing appends to the query");
+assert_eq(vec_len(JlwGuiApp_search_results(sc)), 2, "'alp' filters to alpha + alpine");
+jlw_gui_handle_key_event(sc, 14, 0);      # Backspace
+assert_eq(streq(JlwGuiApp_search_query(sc), "al"), 1, "Backspace drops the last char");
+jlw_gui_handle_key_event(sc, 57, 0);      # space -> types, does NOT play/pause
+assert_eq(streq(JlwGuiApp_search_query(sc), "al "), 1, "action keys type while searching");
+jlw_gui_handle_key_event(sc, 28, 0);      # Enter -> keep filter, exit
+assert_eq(JlwGuiApp_search_active(sc), 0, "Enter exits search mode");
+assert_eq(strlen(JlwGuiApp_search_query(sc)) > 0, 1, "Enter keeps the query");
+jlw_gui_apply_action(sc, JLW_GUI_ACT_SEARCH);
+jlw_gui_handle_key_event(sc, 18, 0);      # 'e'
+jlw_gui_handle_key_event(sc, 1, 0);       # Esc -> clear + exit
+assert_eq(JlwGuiApp_search_active(sc), 0, "Esc exits search mode");
+assert_eq(strlen(JlwGuiApp_search_query(sc)), 0, "Esc clears the query");
+
 rm("/tmp/jalwa_gui_control.db");
 var rc = assert_summary();
 syscall(60, rc);
