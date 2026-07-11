@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "jalwa — AI-native media player for AGNOS. Cyrius port of a 15,355-line Rust workspace (rust-old/)."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.4.29"
+cyrius = "6.4.43"
 
 [build]
 entry = "src/main.cyr"
@@ -16,11 +16,21 @@ stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "ass
 # mishran — the audio MIXER / routing server. jalwa streams its decoded PCM to
 # mishran (msh_client_*) so it shares the one hardware writer with every other
 # app, instead of grabbing vani directly. The client API needs `result` + `net`
-# (above). Local path-dep during development (picks up the backpressure latch);
-# switch to `tag = "0.4.1"` at release.
+# (above). Pinned to the 0.4.1 release — the two-proc cooperative-yield audio path
+# (msh_router_pump_nb + the transport sched_yield backoffs + the flow-control latch).
 [deps.mishran]
-path = "../mishran"
+git = "https://github.com/MacCracken/mishran.git"
+tag = "0.4.1"
 modules = ["dist/mishran.cyr"]
+
+# setu — the AGNOS native display protocol (client transport to the aethersafha
+# compositor over loopback:7700). jalwa's agnos GUI backend (src/gui/setu_present.cyr)
+# presents its XRGB8888 raster over setu, replacing the Wayland backend on agnos while
+# Linux keeps it. Same cross-platform pattern as vani (ALSA/snd). Needs the `net` stdlib.
+[deps.setu]
+git = "https://github.com/MacCracken/setu.git"
+tag = "0.4.0"
+modules = ["dist/setu.cyr"]
 
 [deps.dhvani]
 git = "https://github.com/MacCracken/dhvani.git"
@@ -53,7 +63,7 @@ modules = ["dist/shravan.cyr"]
 # shravan decode -> dhvani DSP -> vani out. Not tarang (video-only).
 [deps.vani]
 git = "https://github.com/MacCracken/vani.git"
-tag = "1.0.0"
+tag = "1.1.0"
 modules = ["dist/vani.cyr"]
 
 # kashi — freestanding VGA 8x16 font-data core (zero stdlib: load8/store8 + arithmetic).

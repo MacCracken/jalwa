@@ -141,12 +141,18 @@ fn jlw_scanner_extract_art(pics, out_mime, out_data) {
 # is reused across a directory scan, so total scan memory stays ~this size.
 var JLW_SCAN_CAP = 1048576;   # 1 MiB
 
-# true file size via lseek(fd, 0, SEEK_END). SEEK_END=2, lseek=syscall 8 (x86_64).
+# true file size via lseek(fd, 0, SEEK_END). SEEK_END=2. lseek is syscall 8 on
+# Linux x86_64 but #58 on agnos (its own syscall numbering) — gate it, else agnos
+# calls the wrong syscall and returns garbage (a 3-byte "size", breaking decode).
 #must_use
 fn jlw_file_size(path) {
     var fd = file_open(path, 0, 0);
     if (fd < 0) { return 0; }
-    var sz = syscall(8, fd, 0, 2);
+    #ifdef CYRIUS_TARGET_AGNOS
+    var sz = syscall(58, fd, 0, 2);   # agnos lseek(#58, fd, 0, SEEK_END)
+    #else
+    var sz = syscall(8, fd, 0, 2);    # Linux lseek(#8, fd, 0, SEEK_END)
+    #endif
     file_close(fd);
     if (sz < 0) { return 0; }
     return sz;

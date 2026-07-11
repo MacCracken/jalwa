@@ -37,8 +37,16 @@ include "src/gui/draw.cyr"
 include "src/gui/raster.cyr"
 include "src/gui/input.cyr"
 include "src/gui/control.cyr"
-include "src/gui/wayland.cyr"    # SMOKE-ONLY Wayland backend (forked from puka; unverifiable headless)
-include "src/gui/present.cyr"    # SMOKE-ONLY render loop over the jlw_win_* seam
+# Display backend — jalwa's GUI is cross-platform: agnos presents its XRGB8888 raster
+# over setu (the sovereign desktop -> aethersafha), Linux over Wayland. Both define the
+# same jlw_win_* seam that present.cyr drives; exactly one is included per target.
+#ifdef CYRIUS_TARGET_AGNOS
+include "src/gui/setu_present.cyr"    # AGNOS: setu display backend
+#endif
+#ifndef CYRIUS_TARGET_AGNOS
+include "src/gui/wayland.cyr"          # Linux: Wayland backend
+#endif
+include "src/gui/present.cyr"    # render loop over the jlw_win_* seam
 
 # ===== library open =====
 # mkdir -p: create each path component (0755); pre-existing dirs error harmlessly.

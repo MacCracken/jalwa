@@ -1,0 +1,135 @@
+# setu_present.cyr — jalwa's AGNOS GUI backend: the jlw_win_* window seam over the
+# setu display protocol (the sovereign AGNOS desktop). REPLACES gui/wayland.cyr on
+# agnos (selected via #ifdef in the assembly); Linux keeps the Wayland backend, so
+# jalwa's GUI is cross-platform — the same OS-agnostic pattern as vani (ALSA/snd) and
+# crab (the readdir #ifdef). jalwa's own draw-IR + kashi CPU rasterizer already
+# produce an XRGB8888 buffer (gui/raster.cyr) — exactly what setu ATTACH fmt=1 wants —
+# so the reseat is JUST this present/input shell, no toolkit change. Modeled on the
+# crab setu client. Requires [deps.setu] (+ the `net` stdlib, already pulled in).
+
+enum JlwWinAbi {
+    JLW_WIN_EV_NONE   = 0;
+    JLW_WIN_EV_RESIZE = 1;
+    JLW_WIN_EV_KEY    = 2;
+    JLW_WIN_EV_CLOSE  = 4;
+    JLW_WIN_EV_FRAME  = 8;
+    JLW_WIN_CAP_SHM   = 0;     # jlw_win_present_begin returns a CPU pixel buffer
+    JLW_WIN_CAP_GPU   = 1;
+}
+
+var jlw_win_w = 0;
+var jlw_win_h = 0;
+var jlw_shm_ptr = 0;          # the XRGB8888 present buffer jalwa rasters into
+var jlw_setu_client = 0;      # *SetuClient (setu.cyr)
+var jlw_setu_key = 0;         # latched pending USB-HID usage (0 = none)
+var jlw_setu_closed = 0;
+
+fn jlw_win_backend_select(): i64 { return 1; }   # 1 = setu (agnos native desktop)
+
+# The present buffer is a plain heap alloc; setu_client_present copies it into a setu
+# SHARED buffer at commit time (no memfd/wl_shm — that path is Wayland-only).
+fn jlw_shm_create(w, h): i64 {
+    jlw_shm_ptr = alloc(w * h * 4);
+    return jlw_shm_ptr;
+}
+fn jlw_shm_resize(w, h): i64 {
+    jlw_shm_ptr = alloc(w * h * 4);
+    return jlw_shm_ptr;
+}
+fn jlw_shm_fill(rgb): i64 {
+    var n = jlw_win_w * jlw_win_h;
+    var i = 0;
+    while (i < n) { store32(jlw_shm_ptr + i * 4, rgb); i = i + 1; }
+    return 0;
+}
+
+# Connect to the aethersafha compositor over setu (loopback:7700) + allocate the
+# present buffer. Returns 1, or 0 when no compositor is listening (jlw_gui_run then
+# reports cleanly, exactly like the Wayland "no compositor" path).
+fn jlw_win_open(title, init_w, init_h): i64 {
+    var path = "/tmp/aethersafha-setu.sock";     # advisory; the transport is loopback:7700
+    var c = setu_client_connect(path);
+    if (c == 0) { return 0; }
+    jlw_setu_client = c;
+    jlw_win_w = init_w;
+    jlw_win_h = init_h;
+    if (jlw_shm_create(jlw_win_w, jlw_win_h) == 0) { return 0; }
+    return 1;
+}
+
+fn jlw_win_caps(win): i64 { return JLW_WIN_CAP_SHM; }
+fn jlw_win_fd(win): i64 { return setu_client_fd(jlw_setu_client); }
+fn jlw_win_size_px(win, out16): i64 { store64(out16, jlw_win_w); store64(out16 + 8, jlw_win_h); return 0; }
+
+# CPU path: the writable XRGB8888 buffer the renderer blits into.
+fn jlw_win_present_begin(win): i64 { return jlw_shm_ptr; }
+
+# Present the rasterized buffer over setu (create-surface-once -> attach-by-buf ->
+# commit, all in setu_client_present). The x,y,w,h damage rect is ignored — setu
+# presents the whole surface.
+fn jlw_win_present_commit(win, x, y, w, h): i64 {
+    setu_client_present(jlw_setu_client, jlw_shm_ptr, jlw_win_w, jlw_win_h);
+    return 0;
+}
+
+# Non-blocking: drain ONE setu input frame. A SETU_INPUT_KEY latches its USB-HID
+# usage id; EOF/error surfaces CLOSE. Returns an OR-mask of JLW_WIN_EV_*.
+fn jlw_win_poll_events(win): i64 {
+    var msg = setu_msg_new();
+    var r = setu_poll_input(setu_client_fd(jlw_setu_client), msg);
+    if (r < 0) { jlw_setu_closed = 1; return JLW_WIN_EV_CLOSE; }
+    if (r == 0) { return JLW_WIN_EV_NONE; }
+    if (setu_msg_kind(msg) == SETU_INPUT_KEY) {
+        jlw_setu_key = setu_msg_arg(msg, 1);          # arg1 = USB HID usage id
+        return JLW_WIN_EV_KEY;
+    }
+    return JLW_WIN_EV_NONE;
+}
+
+fn jlw_win_resize_apply(win): i64 { return 0; }        # setu: fixed size for now
+
+# USB-HID usage (keyboard page 0x07) -> Linux evdev keycode, so jalwa's existing
+# input.cyr (jlw_gui_evdev_to_key) consumes setu keys unchanged. Covers the nav /
+# control keys + the letter row jalwa's GUI binds; unmapped usages return 0 (ignored).
+fn jlw_hid_to_evdev(u): i64 {
+    if (u == 0x52) { return 103; }   # Up    -> KEY_UP
+    if (u == 0x51) { return 108; }   # Down  -> KEY_DOWN
+    if (u == 0x50) { return 105; }   # Left  -> KEY_LEFT
+    if (u == 0x4F) { return 106; }   # Right -> KEY_RIGHT
+    if (u == 0x28) { return 28; }    # Enter -> KEY_ENTER
+    if (u == 0x29) { return 1; }     # Esc   -> KEY_ESC
+    if (u == 0x2C) { return 57; }    # Space -> KEY_SPACE
+    if (u == 0x2B) { return 15; }    # Tab   -> KEY_TAB
+    if (u == 0x2A) { return 14; }    # Backspace -> KEY_BACKSPACE
+    if (u == 0x14) { return 16; }    # q -> KEY_Q
+    if (u == 0x0B) { return 35; }    # h -> KEY_H
+    if (u == 0x0D) { return 36; }    # j -> KEY_J
+    if (u == 0x0E) { return 37; }    # k -> KEY_K
+    if (u == 0x0F) { return 38; }    # l -> KEY_L
+    if (u == 0x2F) { return 26; }    # [ -> KEY_LEFTBRACE
+    if (u == 0x30) { return 27; }    # ] -> KEY_RIGHTBRACE
+    if (u == 0x07) { return 32; }    # d -> KEY_D
+    if (u == 0x04) { return 30; }    # a -> KEY_A
+    if (u == 0x11) { return 49; }    # n -> KEY_N
+    if (u == 0x13) { return 25; }    # p -> KEY_P
+    if (u == 0x16) { return 31; }    # s -> KEY_S
+    return 0;
+}
+
+# Drain one key: out24[+0]=evdev keycode, [+8]=value(1=press), [+16]=mods. Returns 1
+# if a record was produced, 0 if none pending / the usage was unmapped.
+fn jlw_win_next_key(win, out24): i64 {
+    if (jlw_setu_key == 0) { return 0; }
+    var ev = jlw_hid_to_evdev(jlw_setu_key);
+    jlw_setu_key = 0;
+    if (ev == 0) { return 0; }
+    store64(out24, ev);
+    store64(out24 + 8, 1);       # press
+    store64(out24 + 16, 0);      # no modifiers
+    return 1;
+}
+
+fn jlw_win_close(win): i64 {
+    if (jlw_setu_client != 0) { setu_client_close(jlw_setu_client); jlw_setu_client = 0; }
+    return 0;
+}

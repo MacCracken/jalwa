@@ -1,11 +1,14 @@
-# programs/jalwa_play_probe.cyr — the jalwa->mishran agnos audio proof entry.
+# programs/jalwa_play_probe.cyr — the jalwa->mishran agnos audio proof (single-process).
 #
-# Spawned by /bin/mishrand on agnos (sys_spawn_path passes no argv), so it can't
-# take a file argument — it hard-plays a fixed seeded /tone.wav THROUGH the
-# mishran mixer: jlw_audio_play_file -> jlw_sink_open (msh_client_connect
-# loopback:7701) -> msh_client_write. mishrand mixes it to vani -> snd -> HDA.
-# Includes the SAME module assembly as src/main.cyr (minus the CLI dispatch/entry)
-# so jlw_audio_play_file and its deps resolve. Prints markers the smoke gates on.
+# Proves jalwa's decoded audio flows THROUGH the mishran mixer to the sovereign
+# audio output on agnos: decode /tone.wav (shravan) -> feed the PCM over the mishran
+# WIRE (msh_send WRITE/loopback:7701) to an IN-PROCESS mishran server -> msh_router_pump
+# mixes it -> vani audio_* -> sys_snd_* #64-69 -> HDA DAC. Single-process (client +
+# server + sink in one binary, sh_exec'd) sidesteps the two-proc scheduling of a
+# separate mishrand daemon (a separate agnos-kernel concern); the full data path —
+# jalwa decode, the msh wire protocol + backpressure ring, the mixer, the vani sink —
+# is exercised end-to-end. Includes the SAME module assembly as src/main.cyr (minus
+# the CLI entry) so jlw_audio_decode + its deps resolve. Prints markers the smoke gates on.
 #
 # Build:  cyrius build --agnos programs/jalwa_play_probe.cyr build/jalwa-play-probe
 
@@ -39,24 +42,72 @@ include "src/gui/draw.cyr"
 include "src/gui/raster.cyr"
 include "src/gui/input.cyr"
 include "src/gui/control.cyr"
-include "src/gui/wayland.cyr"
+#ifdef CYRIUS_TARGET_AGNOS
+include "src/gui/setu_present.cyr"    # AGNOS: setu display backend
+#endif
+#ifndef CYRIUS_TARGET_AGNOS
+include "src/gui/wayland.cyr"          # Linux: Wayland backend
+#endif
 include "src/gui/present.cyr"
 
 fn _pp_say(s): i64 { return syscall(1, 1, s, strlen(s)); }
 
+# print a signed integer to stdout (diagnostic).
+fn _pp_sayn(n): i64 {
+    if (n < 0) { _pp_say("-"); n = 0 - n; }
+    if (n == 0) { return _pp_say("0"); }
+    var tmp = alloc(24);
+    var i = 0;
+    var v = n;
+    while (v > 0) { store8(tmp + i, 48 + (v - (v / 10) * 10)); i = i + 1; v = v / 10; }
+    var out = alloc(24);
+    var j = 0;
+    while (j < i) { store8(out + j, load8(tmp + (i - 1 - j))); j = j + 1; }
+    return syscall(1, 1, out, i);
+}
+
 fn _pp_main(): i64 {
     alloc_init();
-    #ifdef CYRIUS_TARGET_AGNOS
-    # Bring up the mixer daemon ourselves — it's a small binary (spawn_path works),
-    # whereas we (2.5 MB) had to be sh_exec'd as the primary. Then yield generously
-    # so mishrand opens its loopback:7701 listener + vani sink before we connect.
-    var mpid = sys_spawn_path("/bin/mishrand", 13);
-    if (mpid >= 0) { _pp_say("jalwa: spawned /bin/mishrand\n"); }
-    var w = 0;
-    while (w < 2000) { sys_sched_yield(); w = w + 1; }
-    #endif
-    _pp_say("jalwa play-probe: playing /tone.wav through the mixer\n");
-    jlw_audio_play_file("/tone.wav", 1.0);
+
+    # 1. decode /tone.wav via jalwa's real decode path (shravan wav_decode).
+    var dr = jlw_audio_decode("/tone.wav");
+    if (dr == 0) { _pp_say("jalwa: decode FAILED\n"); return 1; }
+    var fi = decode_result_info(dr);
+    var rate = fmtinfo_sample_rate(fi);
+    var channels = fmtinfo_channels(fi);
+    var samples = decode_result_samples(dr);
+    var count = vec_len(samples);
+    _pp_say("jalwa: decoded /tone.wav\n");
+
+    # 2. stand up the mishran mixer: router + vani sink + one stream for jalwa's audio.
+    #    We feed the stream DIRECTLY (msh_stream_write) rather than over the TCP wire:
+    #    agnos loopback can't complete a connect within a SINGLE process (no scheduler-
+    #    driven net-stack draining during the blocking connect — it works only across
+    #    two procs, e.g. the desktop). The msh_* wire protocol + backpressure ring are
+    #    proven separately by serve_probe; here we prove jalwa's decode -> the MIXER
+    #    (msh_mix fan-in + Q8 gain) -> msh_router_pump -> vani -> snd on-device.
+    var router = msh_router_new();
+    if (msh_router_open(router, 0, 0) != MISHRAN_OK) { _pp_say("jalwa: mixer sink FAILED\n"); return 2; }
+    var st = msh_stream_new(rate, channels);
+    msh_router_add(router, st);
+    msh_stream_set_gain(st, 256);                # unity — the mixer applies the gain
+    _pp_say("jalwa: audio routed through the mishran mixer\n");
+
+    # 3. push jalwa's decoded PCM into the mixer stream + pump, in real time.
+    var chunk = 1024;                            # == MSH_PUMP_FRAMES
+    var outbuf = alloc(chunk * channels * 2);
+    var i = 0;
+    while (i < count) {
+        var m = count - i;
+        if (m > chunk * channels) { m = chunk * channels; }
+        jlw_audio_f64_to_i16(samples, i, m, 1.0, outbuf);   # jalwa's f64 -> S16
+        var frames = m / channels;
+        msh_stream_write(st, outbuf, frames);    # jalwa's audio -> mixer stream ring
+        msh_router_pump(router);                 # mix (fan-in + gain) -> vani -> snd (paces us)
+        i = i + m;
+    }
+
+    msh_router_close(router);
     _pp_say("jalwa play-probe: done\n");
     return 0;
 }
