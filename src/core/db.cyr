@@ -491,6 +491,20 @@ fn jlw_plib_open(path) {
     return plib;
 }
 
+# Fresh-desktop fallback: an in-memory PersistentLibrary with an empty library and
+# NO backing db (db=0). Used when jlw_open_library() can't open the on-disk db — e.g.
+# a fresh AGNOS desktop that has no library dir yet — so the GUI opens with an empty
+# library instead of faulting on a null handle. The GUI read path (jlw_plib_library)
+# is safe against db=0; only a db-write (scan / play-count persist) needs a real db,
+# which an empty idle library never triggers on its own.
+#must_use
+fn jlw_plib_new_empty() {
+    var plib = alloc(sizeof(JlwPersistentLibrary));
+    JlwPersistentLibrary_set_db(plib, 0);
+    JlwPersistentLibrary_set_library(plib, jlw_library_new());
+    return plib;
+}
+
 #inline
 #must_use
 fn jlw_plib_library(plib) { return JlwPersistentLibrary_library(plib); }

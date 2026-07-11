@@ -13,8 +13,18 @@
 # jlw_gui_handle_key_event -> repaint | quit; RESIZE: adopt size + repaint; engine
 # TrackFinished: advance queue + repaint; CLOSE: exit }.
 
+# Initial window size. On AGNOS the setu present path copies each whole frame through a
+# single 2 MB shm page (kernel SHM_MAX_SIZE), so W*H*4 must be <= 2 MB — 800x600 (1.92 MB)
+# fits with headroom and sits well inside the 1280-wide aethersafha desktop (which clips
+# anyway). Wayland can start at the larger default; the compositor may reconfigure.
+#ifdef CYRIUS_TARGET_AGNOS
+var JLW_GUI_WIN_W = 800;
+var JLW_GUI_WIN_H = 600;
+#endif
+#ifndef CYRIUS_TARGET_AGNOS
 var JLW_GUI_WIN_W = 900;    # initial window size (the compositor may reconfigure)
 var JLW_GUI_WIN_H = 600;
+#endif
 
 # write a cstr to stderr (fd 2).
 fn jlw_gui__eputs(s) { syscall(1, 2, s, strlen(s)); return 0; }

@@ -188,9 +188,23 @@ fn main() {
                                  &jlw_audio_play_stop, &jlw_audio_play_position, &jlw_audio_play_ctl);
     var n = argc();
     if (n < 2) {
+#ifdef CYRIUS_TARGET_AGNOS
+        # On the sovereign desktop the compositor spawns us as /bin/puka with NO args;
+        # default to the GUI window (mirrors doom booting its PM_SETU window with no
+        # args). A fresh desktop may have no library db yet — jlw_open_library() returns
+        # 0 when the on-disk db can't be opened — so fall back to an empty in-memory
+        # library rather than handing the render loop a null handle.
+        println("jalwa: agnos desktop gui starting");
+        var plib = jlw_open_library();
+        if (plib == 0) { plib = jlw_plib_new_empty(); }
+        jlw_gui_run(jlw_gui_app_new(plib, jlw_engine_new(jlw_engine_config_default())));
+        return 0;
+#endif
+#ifndef CYRIUS_TARGET_AGNOS
         println("jalwa -- AI-native media player for AGNOS");
         println("usage: jalwa <play|info|search|stats|scan|library|export|import|devices|tui|gui|mcp>");
         return 0;
+#endif
     }
     var cmd = argv(1);
     if (streq(cmd, "search") == 1)  { if (n >= 3) { println(jlw_cmd_search(jlw_open_library(), argv(2))); } return 0; }
