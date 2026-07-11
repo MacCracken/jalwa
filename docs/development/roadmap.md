@@ -4,12 +4,13 @@
 > [`state.md`](state.md); the full plan + module ledger in
 > [`port-audit.md`](port-audit.md). This file is the *order* and the *gates*.
 
-## Status: **v1.0.0 — every non-blocked wave shipped** ✅
+## Status: **v1.1.0 — every non-blocked wave shipped + composites on the AGNOS desktop** ✅
 
 All of jalwa-core, jalwa-playback (real audio), jalwa-ai, jalwa-ui, jalwa-gui, and
-the binary + MCP server are ported to Cyrius and green against `rust-old/`. The only
-remaining parity gap is **video**, which is hard-blocked on still-Rust dependencies
-(see P1 below).
+the binary + MCP server are ported to Cyrius and green against `rust-old/`. As of
+**v1.1.0** jalwa also runs as a **window on the sovereign AGNOS desktop** (aethersafha
+over setu; `aethersafha-jalwa-smoke.sh`). The only remaining parity gap is **video**,
+which is hard-blocked on still-Rust dependencies (see P1 below).
 
 ## v1.0 criteria
 

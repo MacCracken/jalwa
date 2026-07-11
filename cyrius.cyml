@@ -1,6 +1,6 @@
 [package]
 name = "jalwa"
-version = "1.0.0"
+version = "${file:VERSION}"
 description = "jalwa — AI-native media player for AGNOS. Cyrius port of a 15,355-line Rust workspace (rust-old/)."
 license = "GPL-3.0-only"
 language = "cyrius"

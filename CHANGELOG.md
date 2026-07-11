@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.1.0 — AGNOS desktop window (2026-07-10)
+
+jalwa now runs as a **window on the sovereign AGNOS desktop** — composited by the
+aethersafha compositor over the setu display protocol, alongside crab and cyrius-doom.
+All AGNOS changes are `#ifdef CYRIUS_TARGET_AGNOS`-gated; Linux/Wayland behavior is
+byte-unchanged.
+
+### Added
+- **AGNOS desktop launch.** Spawned bare on AGNOS (no args — how the compositor launches
+  a resident as `/bin/puka`), `main()` defaults to the GUI window instead of printing usage,
+  mirroring a desktop app booting its own window. The existing `src/gui/setu_present.cyr`
+  backend presents each frame through the `sys_shm` shared-buffer path
+  (`setu_buf_create → buf_write → attach_buf fmt=1 → commit`) — the same path cyrius-doom
+  uses. Validated: `agnos scripts/aethersafha-jalwa-smoke.sh` (QEMU; gnoboot+OVMF+NVMe) —
+  jalwa **and** crab both present surfaces in one run (a real multi-window desktop).
+- **`jlw_plib_new_empty()`** — an in-memory empty-library fallback (`src/core/db.cyr`). A
+  fresh desktop with no on-disk library db (`jlw_open_library()` returns 0) now opens an
+  empty library instead of faulting on a null handle at first paint.
+
+### Changed
+- **AGNOS GUI window is 800×600** (was 900×600). The AGNOS setu present copies each whole
+  frame through a single 2 MB shm page (kernel `SHM_MAX_SIZE`); 900×600×4 = 2.06 MB
+  overflowed it, so present failed. 800×600 = 1.92 MB fits (and sits inside the 1280-wide
+  desktop). Linux/Wayland keeps the 900×600 default.
+- Audio deps bumped to the two-proc mixer stack: **mishran 0.4.1** (cooperative-yield pump)
+  + **vani 1.1.0** (non-blocking sink API).
+
+### Notes
+- GUI startup touches **no audio** (audio fires only on a play action), so the compositing
+  path needs no mishran daemon resident.
+
 ## 1.0.0 — Rust → Cyrius port
 
 Complete port of the 5-crate Rust workspace (frozen at `rust-old/` as the parity
