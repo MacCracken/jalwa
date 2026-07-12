@@ -130,12 +130,21 @@ fn jlw_gui_theme_cycle(): i64 {
     return jlw_gui_theme_apply((jlw_gui_theme_id + 1) % JLW_GUI_THEME_COUNT);
 }
 
-# Human-readable name for a theme id (for a future on-screen theme label).
+# Human-readable name for a theme id (Settings label + a future on-screen theme tag).
 #must_use
 fn jlw_gui_theme_name(id) {
     if (id == JLW_GUI_THEME_CAUSTIC) { return "Caustic Glass"; }
     if (id == JLW_GUI_THEME_SACRED)  { return "Sacred Bloom"; }
     return "Aurora Void";
+}
+
+# Packed accent color for a theme id -- lets the Settings picker preview each theme's
+# accent as a swatch without applying the theme.
+#must_use
+fn jlw_gui_theme_accent(id) {
+    if (id == JLW_GUI_THEME_CAUSTIC) { return JLW_CAUSTIC_ACCENT; }
+    if (id == JLW_GUI_THEME_SACRED)  { return JLW_SACRED_ACCENT; }
+    return JLW_AURORA_ACCENT;
 }
 
 # Map a $JALWA_THEME value -> theme id (unknown / null -> Aurora). getenv returns 0 when

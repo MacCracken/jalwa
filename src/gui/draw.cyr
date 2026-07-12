@@ -113,7 +113,10 @@ fn jlw_gui_build_sidebar(app, x, y, w, h, cmds) {
         var e = vec_get(entries, i);
         var active = 0;
         if (JlwGuiNavEntry_view_code(e) == view) { active = 1; }
-        if (active == 1) { jlw_gui_draw_rect(cmds, x, ry, w, JLW_GUI_ROW_H, JLW_GUI_BG_WIDGET); }
+        if (active == 1) {
+            jlw_gui_draw_rect(cmds, x, ry, w, JLW_GUI_ROW_H, JLW_GUI_BG_WIDGET);   # active-row tint
+            jlw_gui_draw_rect(cmds, x, ry, 3, JLW_GUI_ROW_H, JLW_GUI_ACCENT);      # luminous edge bar
+        }
         jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, ry + JLW_GUI_TEXT_DY,
                           jlw_gui_nav_active_color(active),
                           jlw_gui_icon_label(JlwGuiNavEntry_icon(e), JlwGuiNavEntry_label(e)), 0);
@@ -152,6 +155,13 @@ fn jlw_gui_build_transport(app, x, y, w, h, cmds) {
     jlw_gui_draw_text(cmds, tx, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_PRIMARY,
                       jlw_gui_format_track_title(artist, title, has_item), 0);
 
+    # elapsed / total time readout (mono-feel, left of the volume block) when a track is up
+    if (has_item == 1) {
+        jlw_gui_draw_text(cmds, x + w - 232, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_MUTED,
+                          jlw_gui_transport_time(jlw_engine_position(engine),
+                                                 JlwPlaybackEngine_duration(engine)), 0);
+    }
+
     # volume % (right-aligned area)
     var vx = x + w - 120;
     jlw_gui_draw_text(cmds, vx, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_SECONDARY,
@@ -160,14 +170,18 @@ fn jlw_gui_build_transport(app, x, y, w, h, cmds) {
         jlw_gui_draw_text(cmds, vx + 48, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_MUTED, "x", 0);
     }
 
-    # progress / seek bar along the bottom of the transport strip
+    # progress / seek bar along the bottom of the transport strip -- the playhead emits
+    # light: the filled track glows in accent, capped by a small accent knob.
     var barx = x + JLW_GUI_PAD;
     var bary = y + h - JLW_GUI_PAD;
     var barw = w - JLW_GUI_PAD * 2;
     jlw_gui_draw_rect(cmds, barx, bary, barw, 3, JLW_GUI_BG_WIDGET);
     var ratio = jlw_gui_progress_ratio(jlw_engine_position(engine), JlwPlaybackEngine_duration(engine));
     var fillw = f64_to(f64_mul(ratio, f64_from(barw)));
-    if (fillw > 0) { jlw_gui_draw_rect(cmds, barx, bary, fillw, 3, JLW_GUI_ACCENT); }
+    if (fillw > 0) {
+        jlw_gui_draw_rect(cmds, barx, bary, fillw, 3, JLW_GUI_ACCENT);              # glowing fill
+        jlw_gui_draw_rect(cmds, barx + fillw - 2, bary - 2, 4, 7, JLW_GUI_ACCENT);  # playhead knob
+    }
     return vec_len(cmds);
 }
 
@@ -293,6 +307,9 @@ fn jlw_gui_build_library(app, x, y, w, h, cmds) {
 # "Nothing playing" when no track is loaded.
 fn jlw_gui_build_now_playing(app, x, y, w, h, cmds) {
     jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
+    var engine = JlwGuiApp_engine(app);
+    # accent eyebrow -- the hero's "NOW PLAYING" label (Visual-Language typography tier)
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_PAD + 4, JLW_GUI_ACCENT, "NOW PLAYING", 0);
     var cid = JlwGuiApp_current_playing_id(app);
     var item = 0;
     if (cid != 0) { item = jlw_library_find_by_id(jlw_gui_app_lib(app), cid); }
@@ -304,7 +321,8 @@ fn jlw_gui_build_now_playing(app, x, y, w, h, cmds) {
     }
     var artsz = 200;
     var ax = x + (w - artsz) / 2;
-    var ay = y + JLW_GUI_PAD * 2;
+    var ay = y + JLW_GUI_PAD + JLW_GUI_ROW_H;                      # below the eyebrow
+    jlw_gui_draw_border(cmds, ax - 2, ay - 2, artsz + 4, artsz + 4, JLW_GUI_ACCENT_DIM);  # frosted frame
     jlw_gui_draw_image(cmds, ax, ay, artsz, artsz, "");            # album art (id resolved by raster)
     var ty = ay + artsz + JLW_GUI_PAD;
     jlw_gui_draw_text(cmds, ax, ty,       JLW_GUI_TEXT_PRIMARY,   JlwMediaItem_title(item), 0);
@@ -317,6 +335,18 @@ fn jlw_gui_build_now_playing(app, x, y, w, h, cmds) {
     jlw_gui_draw_text(cmds, ax, ty + 92,  JLW_GUI_TEXT_MUTED,
                       jlw_gui_np_stats_line(JlwMediaItem_play_count(item),
                                             jlw_gui_np_rating(JlwMediaItem_rating(item))), 0);
+    # in-view luminous progress line (mirrors the transport playhead, hero-scaled)
+    var py = ty + 116;
+    jlw_gui_draw_rect(cmds, ax, py, artsz, 4, JLW_GUI_BG_WIDGET);
+    var ratio = jlw_gui_progress_ratio(jlw_engine_position(engine), JlwPlaybackEngine_duration(engine));
+    var fillw = f64_to(f64_mul(ratio, f64_from(artsz)));
+    if (fillw > 0) {
+        jlw_gui_draw_rect(cmds, ax, py, fillw, 4, JLW_GUI_ACCENT);
+        jlw_gui_draw_rect(cmds, ax + fillw - 2, py - 2, 4, 8, JLW_GUI_ACCENT);
+    }
+    jlw_gui_draw_text(cmds, ax, py + 14, JLW_GUI_TEXT_MUTED,
+                      jlw_gui_transport_time(jlw_engine_position(engine),
+                                             JlwPlaybackEngine_duration(engine)), 0);
     return vec_len(cmds);
 }
 
@@ -411,6 +441,37 @@ fn jlw_gui_build_video(app, x, y, w, h, cmds) {
     return vec_len(cmds);
 }
 
+# ---- settings view (jalwa-native: theme picker) ----
+# An accent eyebrow + a THEME section: one row per theme with an accent swatch, its
+# name, and an "active" tag on the current theme. The selected row gets a widget-bg
+# tint + accent edge bar (matching the sidebar); Up/Down move the selection and Enter
+# applies it (control.cyr), while 't' still cycles from anywhere.
+fn jlw_gui_build_settings(app, x, y, w, h, cmds) {
+    jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_PAD + 4, JLW_GUI_ACCENT, "SETTINGS", 0);
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_ROW_H + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_SECONDARY, "Theme", 0);
+    var sel = JlwGuiApp_selected_index(app);
+    var active = jlw_gui_theme_id;
+    var ry = y + JLW_GUI_ROW_H * 2;
+    for (var i = 0; i < JLW_GUI_THEME_COUNT; i = i + 1) {
+        if (i == sel) {
+            jlw_gui_draw_rect(cmds, x, ry, w, JLW_GUI_ROW_H, JLW_GUI_BG_WIDGET);   # selection tint
+            jlw_gui_draw_rect(cmds, x, ry, 3, JLW_GUI_ROW_H, JLW_GUI_ACCENT);      # accent edge bar
+        }
+        jlw_gui_draw_rect(cmds, x + JLW_GUI_PAD, ry + 10, 24, 12, jlw_gui_theme_accent(i));   # accent swatch
+        var col = JLW_GUI_TEXT_SECONDARY;
+        if (i == active) { col = JLW_GUI_ACCENT; }
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD + 34, ry + JLW_GUI_TEXT_DY, col, jlw_gui_theme_name(i), 0);
+        if (i == active) {
+            jlw_gui_draw_text(cmds, x + w - 72, ry + JLW_GUI_TEXT_DY, JLW_GUI_ACCENT, "active", 0);
+        }
+        ry = ry + JLW_GUI_ROW_H;
+    }
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, ry + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_MUTED,
+                      "Up/Down select  •  Enter apply  •  t cycles", 0);
+    return vec_len(cmds);
+}
+
 # ---- full frame: split the window into sidebar | content | transport, then
 # dispatch the content region to the active view's builder. Pure arithmetic.
 fn jlw_gui_build_frame(app, w, h, cmds) {
@@ -429,6 +490,7 @@ fn jlw_gui_build_frame(app, w, h, cmds) {
     if (view == JLW_GUI_VIEW_EQUALIZER)   { jlw_gui_build_equalizer(app, cx, 0, cw, ch, cmds); }
     if (view == JLW_GUI_VIEW_DEVICES)     { jlw_gui_build_devices(app, cx, 0, cw, ch, cmds); }
     if (view == JLW_GUI_VIEW_VIDEO)       { jlw_gui_build_video(app, cx, 0, cw, ch, cmds); }
+    if (view == JLW_GUI_VIEW_SETTINGS)    { jlw_gui_build_settings(app, cx, 0, cw, ch, cmds); }
     return vec_len(cmds);
 }
 

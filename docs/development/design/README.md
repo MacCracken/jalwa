@@ -24,15 +24,15 @@ Each per-view file renders the **three dark themes** side by side — **Aurora V
 
 ## Status
 
-- **Ported so far**: the **color layer** — the deep-void palette and the three
-  selectable dark themes ([ADR 0003](../../adr/003-visual-language-redesign.md)).
-  jalwa's GUI is a CPU-framebuffer rasterizer, so only colors/typography-intent
-  carry over today.
-- **Not yet ported / aspirational**: the GPU-era visualizers (aurora / caustic /
-  mandala), frosted-glass blur, and 60fps bloom in the north-star, plus the exact
-  per-view layouts in the Now-Playing / Library / Mini-Player / Queue files. These
-  wait on a future GPU path and are backlogged with video (see
-  [`../roadmap.md`](../roadmap.md)).
+Tracked as the **1.2.x design→code arc** in [`../roadmap.md`](../roadmap.md).
+
+- **Ported (v1.2.0)**: the **color layer** — deep-void palette + three selectable dark
+  themes ([ADR 0003](../../adr/003-visual-language-redesign.md)) — the **Settings**
+  theme picker, the **Now-Playing** hero, and the shared **sidebar + transport** chrome.
+- **Next (1.2.1–1.2.3)**: Library, Queue + Search, and Mini-player views.
+- **Aspirational**: the GPU-era visualizers (aurora / caustic / mandala), frosted-glass
+  blur, and 60fps bloom need a GPU path jalwa doesn't have (its GUI is a CPU-framebuffer
+  rasterizer), so they stay backlogged with video.
 
 > When these are folded into first-party design docs, replace this folder with the
 > re-documented versions and drop the raw exports.

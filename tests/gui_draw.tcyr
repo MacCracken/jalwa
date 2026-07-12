@@ -79,6 +79,8 @@ assert_eq(find_text(c1, "Library") != 0, 1, "Library entry drawn");
 assert_eq(find_text(c1, "Queue") != 0, 1, "Queue entry drawn");
 # the active (Library) row draws a widget-bg highlight rect; inactive rows do not
 assert_eq(count_rect_color(c1, JLW_GUI_BG_WIDGET), 1, "exactly one active-row highlight");
+# the active row also gets a luminous accent edge bar
+assert_eq(count_rect_color(c1, JLW_GUI_ACCENT), 1, "active row has one accent edge bar");
 # active entry text uses the accent color
 var libtxt = find_text(c1, "Library");
 assert_eq(JlwDrawCmd_color(libtxt), JLW_GUI_ACCENT, "active entry text = accent");
@@ -169,6 +171,29 @@ jlw_gui_build_now_playing(na, JLW_GUI_SIDEBAR_W, 0, 620, 500, cn1);
 assert_eq(find_text(cn1, "SongX") != 0, 1, "title drawn");
 assert_eq(find_text(cn1, "BandY") != 0, 1, "artist drawn");
 assert_eq(count_kind(cn1, JLW_DRAW_IMAGE), 1, "album-art image cmd emitted");
+assert_eq(find_text(cn1, "NOW PLAYING") != 0, 1, "hero accent eyebrow");
+assert_eq(JlwDrawCmd_color(find_text(cn1, "NOW PLAYING")), JLW_GUI_ACCENT, "eyebrow is accent");
+# empty state keeps the eyebrow too
+assert_eq(find_text(cn0, "NOW PLAYING") != 0, 1, "empty hero eyebrow");
+
+# ---- settings view (theme picker) ----
+test_group("build_settings");
+var sa = jlw_gui_app_new(fresh_plib(), eng());
+JlwGuiApp_set_view(sa, JLW_GUI_VIEW_SETTINGS);
+jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);                 # active = Aurora
+JlwGuiApp_set_selected_index(sa, 1);                       # selecting the Caustic row
+var cs = vec_new();
+jlw_gui_build_settings(sa, JLW_GUI_SIDEBAR_W, 0, 620, 400, cs);
+assert_eq(JlwDrawCmd_color(vec_get(cs, 0)), JLW_GUI_BG_DARK, "settings bg = dark");
+assert_eq(find_text(cs, "SETTINGS") != 0, 1, "settings eyebrow present");
+assert_eq(find_text(cs, "Aurora Void") != 0, 1, "aurora row drawn");
+assert_eq(find_text(cs, "Caustic Glass") != 0, 1, "caustic row drawn");
+assert_eq(find_text(cs, "Sacred Bloom") != 0, 1, "sacred row drawn");
+assert_eq(JlwDrawCmd_color(find_text(cs, "Aurora Void")), JLW_GUI_ACCENT, "active theme name = accent");
+assert_eq(JlwDrawCmd_color(find_text(cs, "Caustic Glass")), JLW_GUI_TEXT_SECONDARY, "inactive theme = secondary");
+assert_eq(find_text(cs, "active") != 0, 1, "active marker drawn");
+assert_eq(count_rect_color(cs, JLW_GUI_BG_WIDGET), 1, "one selected-row tint");
+assert_eq(count_kind(cs, JLW_DRAW_TEXT) >= 4, 1, "eyebrow + 3 theme rows at minimum");
 
 # ---- queue builder ----
 test_group("build_queue");

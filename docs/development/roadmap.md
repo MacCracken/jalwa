@@ -4,13 +4,34 @@
 > [`state.md`](state.md); the full plan + module ledger in
 > [`port-audit.md`](port-audit.md). This file is the *order* and the *gates*.
 
-## Status: **v1.1.0 — every non-blocked wave shipped + composites on the AGNOS desktop** ✅
+## Status: **v1.2.0 — visual-language arc begun (themes + settings + luminous chrome)** ✅
 
 All of jalwa-core, jalwa-playback (real audio), jalwa-ai, jalwa-ui, jalwa-gui, and
-the binary + MCP server are ported to Cyrius and green against `rust-old/`. As of
-**v1.1.0** jalwa also runs as a **window on the sovereign AGNOS desktop** (aethersafha
-over setu; `aethersafha-jalwa-smoke.sh`). The only remaining parity gap is **video**,
-which is hard-blocked on still-Rust dependencies (see P1 below).
+the binary + MCP server are ported to Cyrius and green against `rust-old/`. **v1.1.0**
+shipped jalwa as a **window on the sovereign AGNOS desktop** (aethersafha over setu;
+`aethersafha-jalwa-smoke.sh`). **v1.2.0** opens the **design→code arc** (below): the
+"Jalwa Visual Language" color system, three switchable dark themes, an in-app Settings
+picker, and the first restyled surfaces. The only remaining *parity* gap is **video**,
+hard-blocked on still-Rust dependencies (see P1 below).
+
+## v1.2.x — design → code arc
+
+Port the [`docs/development/design/`](design/README.md) mockups (the designer's
+per-view `.dc.html` files) into the CPU-raster GUI, one surface per release. Scope is
+the **color/layout/typography** layer only — the GPU-era visualizers (aurora/caustic/
+mandala), frosted-glass blur, and 60fps bloom in the north-star need a GPU path jalwa
+doesn't have yet and stay backlogged with video (P1).
+
+| Release | Surface | Source design | Status |
+|---|---|---|---|
+| **1.2.0** | Palette + 3 themes, Settings/theme-switcher, Now-Playing hero, sidebar + transport chrome | `Jalwa Visual Language` + `Jalwa Now-Playing` | ✅ shipped ([ADR 0003](../adr/003-visual-language-redesign.md)) |
+| **1.2.1** | Library view (grid/list, search, selection) | `Jalwa Library.dc.html` | ⏳ next |
+| **1.2.2** | Queue + Search views | `Jalwa Queue & Search.dc.html` | ⏳ |
+| **1.2.3** | Mini-player | `Jalwa Mini-Player.dc.html` | ⏳ |
+
+> The 8-slot active-palette contract (`src/gui/theme.cyr`) means each per-view port is
+> layout/typography work only — colors already resolve through the active theme, so all
+> three themes come free with every ported view.
 
 ## v1.0 criteria
 

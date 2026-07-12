@@ -62,7 +62,9 @@ assert_eq(JlwGuiApp_view(a), JLW_GUI_VIEW_NOW_PLAYING, "tab -> now playing");
 assert_eq(JlwGuiApp_selected_index(a), 0, "tab resets selection");
 JlwGuiApp_set_view(a, JLW_GUI_VIEW_DEVICES);
 jlw_gui_apply_action(a, JLW_GUI_ACT_NEXT_VIEW);
-assert_eq(JlwGuiApp_view(a), JLW_GUI_VIEW_LIBRARY, "tab wraps Devices -> Library");
+assert_eq(JlwGuiApp_view(a), JLW_GUI_VIEW_SETTINGS, "tab Devices -> Settings");
+jlw_gui_apply_action(a, JLW_GUI_ACT_NEXT_VIEW);
+assert_eq(JlwGuiApp_view(a), JLW_GUI_VIEW_LIBRARY, "tab wraps Settings -> Library");
 
 # ---- enqueue ('a') + activate/Enter ----
 test_group("enqueue_activate");
@@ -246,6 +248,16 @@ jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME);
 jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME);
 assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_AURORA, "three cycles wrap back to Aurora");
 jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);
+
+test_group("settings apply theme");
+JlwGuiApp_set_view(sc, JLW_GUI_VIEW_SETTINGS);
+assert_eq(jlw_gui_app_list_len(sc), JLW_GUI_THEME_COUNT, "settings list_len = theme count");
+JlwGuiApp_set_selected_index(sc, JLW_GUI_THEME_SACRED);    # select the Sacred row
+jlw_gui_apply_action(sc, JLW_GUI_ACT_ENTER);              # Enter applies the selected theme
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_SACRED, "Enter on a settings row applies that theme");
+JlwGuiApp_set_selected_index(sc, JLW_GUI_THEME_AURORA);
+jlw_gui_apply_action(sc, JLW_GUI_ACT_ENTER);
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_AURORA, "selecting Aurora + Enter restores it");
 
 rm("/tmp/jalwa_gui_control.db");
 var rc = assert_summary();

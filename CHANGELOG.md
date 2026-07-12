@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 — Visual language: themes, settings, luminous chrome (2026-07-12)
+
+The start of the **design→code arc** (see the 1.2.x plan in
+[`roadmap.md`](docs/development/roadmap.md)): jalwa's GUI adopts the "Jalwa Visual
+Language" north-star. This release lands the color system, an in-app theme switcher,
+and the first restyled surfaces (Now-Playing hero + shared chrome); subsequent 1.2.x
+releases port the remaining per-view designs.
+
+### Added
+- **Settings view with a theme picker** (`Tab` to it, or the `Settings` sidebar entry).
+  Up/Down select a theme, `Enter` applies it; each row previews the theme's accent as a
+  swatch and tags the active one. `t` still cycles from anywhere. New view
+  `JLW_GUI_VIEW_SETTINGS`; the picker reseats the active palette via `jlw_gui_theme_apply`.
+- **Now-Playing hero restyle** — an accent `NOW PLAYING` eyebrow, a framed album-art
+  panel, the primary/secondary/muted type hierarchy, and a luminous in-view seek line
+  (glowing accent fill + playhead knob + `M:SS / M:SS` readout).
+- **Luminous shared chrome** — the active sidebar row gains an accent edge bar; the
+  transport seek bar glows with an accent playhead knob and shows an elapsed/total time
+  readout.
 
 ### Changed
 - **Visual-language redesign of the GUI palette** ([ADR 0003](docs/adr/003-visual-language-redesign.md),

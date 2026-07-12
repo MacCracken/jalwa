@@ -157,14 +157,15 @@ assert_eq(f64_to(jlw_gui_seek_target(0.5, f64_from(200))), 100, "seek 0.5*200 = 
 # ============================================================================
 test_group("sidebar_entries");
 var e0 = jlw_gui_sidebar_entries(0);
-assert_eq(vec_len(e0), 5, "no video -> 5 entries");
+assert_eq(vec_len(e0), 6, "no video -> 6 entries (incl. Settings)");
 assert_eq(JlwGuiNavEntry_view_code(vec_get(e0, 0)), JLW_GUI_VIEW_LIBRARY, "0 Library");
 assert_eq(JlwGuiNavEntry_view_code(vec_get(e0, 1)), JLW_GUI_VIEW_NOW_PLAYING, "1 NowPlaying");
 assert_eq(JlwGuiNavEntry_view_code(vec_get(e0, 2)), JLW_GUI_VIEW_QUEUE, "2 Queue (no video)");
-assert_eq(JlwGuiNavEntry_view_code(vec_get(e0, 4)), JLW_GUI_VIEW_DEVICES, "4 Devices last");
+assert_eq(JlwGuiNavEntry_view_code(vec_get(e0, 4)), JLW_GUI_VIEW_DEVICES, "4 Devices");
+assert_eq(JlwGuiNavEntry_view_code(vec_get(e0, 5)), JLW_GUI_VIEW_SETTINGS, "5 Settings last");
 assert_streq(JlwGuiNavEntry_label(vec_get(e0, 3)), "EQ", "3 EQ label");
 var ev = jlw_gui_sidebar_entries(1);
-assert_eq(vec_len(ev), 6, "video -> 6 entries");
+assert_eq(vec_len(ev), 7, "video -> 7 entries");
 assert_eq(JlwGuiNavEntry_view_code(vec_get(ev, 2)), JLW_GUI_VIEW_VIDEO, "video inserted at index 2");
 assert_eq(JlwGuiNavEntry_view_code(vec_get(ev, 3)), JLW_GUI_VIEW_QUEUE, "queue shifts to 3");
 

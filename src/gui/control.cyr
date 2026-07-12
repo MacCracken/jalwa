@@ -64,6 +64,10 @@ fn jlw_gui_app_activate_selected(app) {
         }
         return 0;
     }
+    if (view == JLW_GUI_VIEW_SETTINGS) {                # Enter on a theme row applies it
+        jlw_gui_theme_apply(JlwGuiApp_selected_index(app));
+        return 0;
+    }
     return 0;
 }
 
@@ -101,7 +105,7 @@ fn jlw_gui_app_remove_selected_queue(app) {
 # (Library..Devices); Video is a placeholder but stays in the cycle.
 fn jlw_gui_app_cycle_view(app) {
     var v = JlwGuiApp_view(app) + 1;
-    if (v > JLW_GUI_VIEW_DEVICES) { v = JLW_GUI_VIEW_LIBRARY; }
+    if (v > JLW_GUI_VIEW_SETTINGS) { v = JLW_GUI_VIEW_LIBRARY; }
     JlwGuiApp_set_view(app, v);
     JlwGuiApp_set_selected_index(app, 0);
     return 0;

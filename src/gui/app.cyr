@@ -17,6 +17,7 @@ var JLW_GUI_VIEW_QUEUE       = 2;
 var JLW_GUI_VIEW_EQUALIZER   = 3;
 var JLW_GUI_VIEW_VIDEO       = 4;
 var JLW_GUI_VIEW_DEVICES     = 5;
+var JLW_GUI_VIEW_SETTINGS    = 6;   # theme picker + app settings (jalwa-native, no rust-old oracle)
 
 var JLW_GUI_LIBVIEW_LIST = 0;
 var JLW_GUI_LIBVIEW_GRID = 1;
@@ -92,6 +93,7 @@ fn jlw_gui_app_list_len(app) {
     }
     if (view == JLW_GUI_VIEW_QUEUE) { return jlw_queue_len(JlwGuiApp_queue(app)); }
     if (view == JLW_GUI_VIEW_EQUALIZER) { return 10; }
+    if (view == JLW_GUI_VIEW_SETTINGS)  { return JLW_GUI_THEME_COUNT; }   # theme rows
     return 0;   # NowPlaying | Video | Devices
 }
 

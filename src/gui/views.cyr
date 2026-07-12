@@ -166,6 +166,15 @@ fn jlw_gui_np_duration(dur_f64) {
     if (jlw_is_finite(dur_f64) == 1) { return jlw_format_duration(f64_to(dur_f64)); }
     return "?:??";
 }
+# "M:SS / M:SS" elapsed-over-total, for the luminous seek readout (transport + hero).
+#must_use
+fn jlw_gui_transport_time(pos_f64, dur_f64) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, jlw_gui_np_duration(pos_f64));
+    str_builder_add_cstr(sb, " / ");
+    str_builder_add_cstr(sb, jlw_gui_np_duration(dur_f64));
+    return str_cstr(str_builder_build(sb));
+}
 #must_use
 fn jlw_gui_np_codec(codec_code) {
     if (codec_code == (0 - 1)) { return "?"; }
@@ -340,6 +349,7 @@ fn jlw_gui_sidebar_entries(is_video) {
     vec_push(v, jlw_gui_nav_entry_new(JLW_GUI_VIEW_QUEUE,       "Queue",       "📋"));
     vec_push(v, jlw_gui_nav_entry_new(JLW_GUI_VIEW_EQUALIZER,   "EQ",          "🎚"));
     vec_push(v, jlw_gui_nav_entry_new(JLW_GUI_VIEW_DEVICES,     "Devices",     "🔌"));
+    vec_push(v, jlw_gui_nav_entry_new(JLW_GUI_VIEW_SETTINGS,    "Settings",    "⚙"));
     return v;
 }
 
