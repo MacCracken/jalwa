@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;background:#050507;}
+  body{font-family:'Hanken Grotesk',system-ui,sans-serif;color:#F2F3F7;-webkit-font-smoothing:antialiased;}
+  a{color:#3DE7FF;text-decoration:none;}
+  a:hover{color:#8fefff;}
+  *{box-sizing:border-box;}
+  ::selection{background:rgba(0,188,212,.35);}
+  @keyframes npspin{to{transform:rotate(360deg);}}
+</style>
+</helmet>
+
+<!-- ===================== TURN 1 : Now-Playing hero × 3 ===================== -->
+<section style="padding:46px 46px 70px;">
+  <div style="max-width:1180px;margin:0 auto 34px;">
+    <div style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:rgba(242,243,247,.42);">jalwa · now-playing hero · turn 1</div>
+    <div style="font-family:'Instrument Serif',serif;font-size:46px;color:#fff;margin-top:8px;line-height:1.05;">One screen, three lineages</div>
+    <div style="font-size:14px;line-height:1.6;color:rgba(242,243,247,.6);max-width:760px;margin-top:10px;">The live Now-Playing hero rendered in each visual direction. Every window is real: reactive backdrop, lit album art, luminous transport, live spectrum, and a working calm toggle. Reference them in chat as <a href="#1a">1a</a> / <a href="#1b">1b</a> / <a href="#1c">1c</a> — tell me which to carry forward, or mix traits.</div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start;justify-content:center;">
+
+    <!-- ========== 1a — AURORA VOID ========== -->
+    <div id="1a" data-hero="1a" data-screen-label="Now Playing — Aurora Void" style="width:1180px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+        <span style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:rgba(61,231,255,.12);border:1px solid rgba(61,231,255,.4);font-family:'Space Mono',monospace;font-weight:700;font-size:13px;color:#3DE7FF;">1a</span>
+        <div style="font-family:'Instrument Serif',serif;font-size:24px;color:#fff;">Aurora Void</div>
+        <div style="font-family:'Space Mono',monospace;font-size:11px;color:rgba(242,243,247,.45);">soft curtains of spectral light · cyan → violet</div>
+      </div>
+      <div style="position:relative;height:770px;border-radius:20px;overflow:hidden;background:#0a0a10;border:1px solid rgba(255,255,255,.1);box-shadow:0 40px 100px rgba(0,0,0,.6);">
+        <canvas data-viz="curtains" data-anim="1" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas>
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 100% at 50% 0%,rgba(10,10,16,.15),rgba(5,5,7,.72) 78%);pointer-events:none;"></div>
+
+        <!-- top chrome -->
+        <div style="position:absolute;top:0;left:0;right:0;height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;z-index:5;">
+          <div style="display:flex;align-items:center;gap:16px;">
+            <div style="display:flex;gap:7px;"><span style="width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.18);"></span><span style="width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.18);"></span><span style="width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.18);"></span></div>
+            <div style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.12em;color:rgba(242,243,247,.5);">jalwa · now playing</div>
+          </div>
+          <button data-calm style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:rgba(20,20,26,.5);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.14);border-radius:999px;color:#F2F3F7;font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.03em;cursor:pointer;">
+            <span data-dot style="width:7px;height:7px;border-radius:50%;background:#3DE7FF;box-shadow:0 0 10px #3DE7FF;display:inline-block;"></span><span data-calm-label>CALM · OFF</span>
+          </button>
+        </div>
+
+        <!-- center: art + metadata -->
+        <div style="position:absolute;left:0;right:0;top:96px;display:flex;flex-direction:column;align-items:center;z-index:4;">
+          <div style="position:relative;width:250px;height:250px;">
+            <div style="position:absolute;inset:-34px;border-radius:50%;background:radial-gradient(circle,rgba(61,231,255,.4),rgba(120,90,255,.14) 55%,transparent 72%);filter:blur(6px);"></div>
+            <div style="position:relative;width:250px;height:250px;border-radius:18px;overflow:hidden;box-shadow:0 26px 60px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.08) inset;background:conic-gradient(from 210deg at 32% 30%,#3DE7FF,#1f6fe0,#7a4dff,#00bcd4,#3DE7FF);">
+              <div style="position:absolute;inset:0;background:radial-gradient(80% 70% at 30% 25%,rgba(255,255,255,.5),transparent 55%);mix-blend-mode:screen;"></div>
+              <div style="position:absolute;inset:0;background:radial-gradient(60% 60% at 72% 82%,rgba(10,4,40,.65),transparent 60%);"></div>
+            </div>
+          </div>
+          <div style="font-family:'Instrument Serif',serif;font-size:52px;line-height:1;color:#fff;margin-top:30px;text-shadow:0 0 40px rgba(61,231,255,.35);">Liminal Drift</div>
+          <div style="font-size:17px;color:rgba(242,243,247,.78);margin-top:10px;">Aperiodic</div>
+          <div style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.05em;color:rgba(242,243,247,.45);margin-top:8px;">Tidal Fields · 24bit/96k · LUFS −14</div>
+        </div>
+
+        <!-- spectrum -->
+        <div style="position:absolute;left:210px;right:210px;bottom:158px;height:46px;z-index:3;"><canvas data-viz="spectrum" data-anim="1" style="width:100%;height:100%;display:block;"></canvas></div>
+
+        <!-- transport glass bar -->
+        <div style="position:absolute;left:50%;transform:translateX(-50%);bottom:34px;width:760px;padding:20px 26px;border-radius:18px;background:rgba(18,20,28,.42);backdrop-filter:blur(24px) saturate(1.3);-webkit-backdrop-filter:blur(24px) saturate(1.3);border:1px solid rgba(255,255,255,.14);box-shadow:0 22px 60px rgba(0,0,0,.5);z-index:6;">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <span style="font-family:'Space Mono',monospace;font-size:12px;color:rgba(242,243,247,.6);min-width:42px;">1:37</span>
+            <div style="flex:1;height:6px;border-radius:4px;background:rgba(255,255,255,.1);position:relative;">
+              <span style="position:absolute;left:0;top:0;bottom:0;width:42%;border-radius:4px;background:linear-gradient(90deg,#0a8ca0,#3DE7FF);box-shadow:0 0 16px #3DE7FF;"></span>
+              <span style="position:absolute;left:42%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 0 16px #3DE7FF,0 0 4px #fff;"></span>
+            </div>
+            <span style="font-family:'Space Mono',monospace;font-size:12px;color:rgba(242,243,247,.6);min-width:42px;text-align:right;">−3:41</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="color:rgba(242,243,247,.55);"><path d="M4 4l5 4-5 4V4zM16 4h2v16h-2z" fill="currentColor" opacity="0"/><path d="M18 5v14M4 7l7 5-7 5V7z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+            <div style="display:flex;align-items:center;gap:24px;">
+              <svg width="26" height="26" viewBox="0 0 24 24" style="color:#fff;cursor:pointer;"><path d="M18 5v14M15 12L4 5v14l11-7z" stroke="currentColor" stroke-width="1.7" fill="currentColor" stroke-linejoin="round"/></svg>
+              <button data-play style="width:64px;height:64px;border-radius:50%;border:none;cursor:pointer;background:radial-gradient(circle at 35% 30%,#3DE7FF,#00a5bd);box-shadow:0 0 30px rgba(61,231,255,.6),0 8px 20px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;">
+                <svg data-icon-play style="display:none;" width="26" height="26" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7V5z" fill="#04121a"/></svg>
+                <svg data-icon-pause width="24" height="24" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.3" fill="#04121a"/><rect x="14" y="5" width="4" height="14" rx="1.3" fill="#04121a"/></svg>
+              </button>
+              <svg width="26" height="26" viewBox="0 0 24 24" style="color:#fff;cursor:pointer;transform:scaleX(-1);"><path d="M18 5v14M15 12L4 5v14l11-7z" stroke="currentColor" stroke-width="1.7" fill="currentColor" stroke-linejoin="round"/></svg>
+            </div>
+            <div style="display:flex;align-items:center;gap:14px;">
+              <svg width="20" height="20" viewBox="0 0 24 24" style="color:rgba(242,243,247,.55);"><path d="M17 3l4 4-4 4M3 7h18M7 21l-4-4 4-4M21 17H3" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" style="color:rgba(242,243,247,.6);"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 8a5 5 0 010 8" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+                <div style="width:74px;height:5px;border-radius:3px;background:rgba(255,255,255,.1);position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:68%;border-radius:3px;background:#3DE7FF;box-shadow:0 0 10px #3DE7FF;"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 1b — CAUSTIC GLASS ========== -->
+    <div id="1b" data-hero="1b" data-screen-label="Now Playing — Caustic Glass" style="width:1180px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+        <span style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:rgba(111,230,255,.12);border:1px solid rgba(111,230,255,.4);font-family:'Space Mono',monospace;font-weight:700;font-size:13px;color:#6fe6ff;">1b</span>
+        <div style="font-family:'Instrument Serif',serif;font-size:24px;color:#fff;">Caustic Glass</div>
+        <div style="font-family:'Space Mono',monospace;font-size:11px;color:rgba(242,243,247,.45);">light refracted through water &amp; crystal · aqua/teal</div>
+      </div>
+      <div style="position:relative;height:770px;border-radius:20px;overflow:hidden;background:#04090c;border:1px solid rgba(255,255,255,.1);box-shadow:0 40px 100px rgba(0,0,0,.6);">
+        <canvas data-viz="caustic" data-anim="1" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas>
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 100% at 50% 0%,rgba(4,12,16,.1),rgba(2,6,10,.74) 78%);pointer-events:none;"></div>
+
+        <div style="position:absolute;top:0;left:0;right:0;height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;z-index:5;">
+          <div style="display:flex;align-items:center;gap:16px;">
+            <div style="display:flex;gap:7px;"><span style="width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.18);"></span><span style="width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.18);"></span><span style="width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.18);"></span></div>
+            <div style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.12em;color:rgba(242,243,247,.5);">jalwa · now playing</div>
+          </div>
+          <button data-calm style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:rgba(12,20,24,.5);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.14);border-radius:999px;color:#F2F3F7;font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.03em;cursor:pointer;">
+            <span data-dot style="width:7px;height:7px;border-radius:50%;background:#6fe6ff;box-shadow:0 0 10px #6fe6ff;display:inline-block;"></span><span data-calm-label>CALM · OFF</span>
+          </button>
+        </div>
+
+        <div style="position:absolute;left:0;right:0;top:96px;display:flex;flex-direction:column;align-items:center;z-index:4;">
+          <div style="position:relative;width:250px;height:250px;">
+            <div style="position:absolute;inset:-34px;border-radius:50%;background:radial-gradient(circle,rgba(111,230,255,.38),rgba(30,150,180,.12) 55%,transparent 72%);filter:blur(6px);"></div>
+            <div style="position:relative;width:250px;height:250px;border-radius:18px;overflow:hidden;box-shadow:0 26px 60px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.1) inset;background:linear-gradient(135deg,#9ff4ff,#2bbfe0 40%,#0a7fa0 72%,#053a4d);">
+              <div style="position:absolute;inset:0;background:repeating-linear-gradient(58deg,rgba(255,255,255,.22) 0 2px,transparent 2px 16px);mix-blend-mode:screen;opacity:.5;"></div>
+              <div style="position:absolute;inset:0;background:radial-gradient(70% 60% at 26% 22%,rgba(255,255,255,.6),transparent 55%);mix-blend-mode:screen;"></div>
+            </div>
+          </div>
+          <div style="font-family:'Instrument Serif',serif;font-size:52px;line-height:1;color:#fff;margin-top:30px;text-shadow:0 0 40px rgba(111,230,255,.35);">Refracted</div>
+          <div style="font-size:17px;color:rgba(242,243,247,.78);margin-top:10px;">Ensemble Vela</div>
+          <div style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.05em;color:rgba(242,243,247,.45);margin-top:8px;">Lucid Water · 24bit/96k · LUFS −14</div>
+        </div>
+
+        <div style="position:absolute;left:210px;right:210px;bottom:158px;height:46px;z-index:3;"><canvas data-viz="spectrum" data-anim="1" style="width:100%;height:100%;display:block;"></canvas></div>
+
+        <div style="position:absolute;left:50%;transform:translateX(-50%);bottom:34px;width:760px;padding:20px 26px;border-radius:18px;background:rgba(10,20,26,.4);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid rgba(160,230,255,.2);box-shadow:0 22px 60px rgba(0,0,0,.5);z-index:6;">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <span style="font-family:'Space Mono',monospace;font-size:12px;color:rgba(242,243,247,.6);min-width:42px;">2:12</span>
+            <div style="flex:1;height:6px;border-radius:4px;background:rgba(255,255,255,.1);position:relative;">
+              <span style="position:absolute;left:0;top:0;bottom:0;width:57%;border-radius:4px;background:linear-gradient(90deg,#0a7fa0,#6fe6ff);box-shadow:0 0 16px #6fe6ff;"></span>
+              <span style="position:absolute;left:57%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 0 16px #6fe6ff,0 0 4px #fff;"></span>
+            </div>
+            <span style="font-family:'Space Mono',monospace;font-size:12px;color:rgba(242,243,247,.6);min-width:42px;text-align:right;">−1:41</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="color:rgba(242,243,247,.55);"><path d="M18 5v14M4 7l7 5-7 5V7z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+            <div style="display:flex;align-items:center;gap:24px;">
+              <svg width="26" height="26" viewBox="0 0 24 24" style="color:#fff;cursor:pointer;"><path d="M18 5v14M15 12L4 5v14l11-7z" stroke="currentColor" stroke-width="1.7" fill="currentColor" stroke-linejoin="round"/></svg>
+              <button data-play style="width:64px;height:64px;border-radius:50%;border:none;cursor:pointer;background:radial-gradient(circle at 35% 30%,#9ff4ff,#1fa9cc);box-shadow:0 0 30px rgba(111,230,255,.6),0 8px 20px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;">
+                <svg data-icon-play style="display:none;" width="26" height="26" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7V5z" fill="#04121a"/></svg>
+                <svg data-icon-pause width="24" height="24" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.3" fill="#04121a"/><rect x="14" y="5" width="4" height="14" rx="1.3" fill="#04121a"/></svg>
+              </button>
+              <svg width="26" height="26" viewBox="0 0 24 24" style="color:#fff;cursor:pointer;transform:scaleX(-1);"><path d="M18 5v14M15 12L4 5v14l11-7z" stroke="currentColor" stroke-width="1.7" fill="currentColor" stroke-linejoin="round"/></svg>
+            </div>
+            <div style="display:flex;align-items:center;gap:14px;">
+              <svg width="20" height="20" viewBox="0 0 24 24" style="color:rgba(242,243,247,.55);"><path d="M17 3l4 4-4 4M3 7h18M7 21l-4-4 4-4M21 17H3" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" style="color:rgba(242,243,247,.6);"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 8a5 5 0 010 8" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+                <div style="width:74px;height:5px;border-radius:3px;background:rgba(255,255,255,.1);position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:52%;border-radius:3px;background:#6fe6ff;box-shadow:0 0 10px #6fe6ff;"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 1c — SACRED BLOOM ========== -->
+    <div id="1c" data-hero="1c" data-screen-label="Now Playing — Sacred Bloom" style="width:1180px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+        <span style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:rgba(255,215,107,.14);border:1px solid rgba(255,215,107,.45);font-family:'Space Mono',monospace;font-weight:700;font-size:13px;color:#ffd76b;">1c</span>
+        <div style="font-family:'Instrument Serif',serif;font-size:24px;color:#fff;">Sacred Bloom</div>
+        <div style="font-family:'Space Mono',monospace;font-size:11px;color:rgba(242,243,247,.45);">theophany as radial geometry · gold core, cyan corona</div>
+      </div>
+      <div style="position:relative;height:770px;border-radius:20px;overflow:hidden;background:#0b0906;border:1px solid rgba(255,255,255,.1);box-shadow:0 40px 100px rgba(0,0,0,.6);">
+        <canvas data-viz="mandala" data-anim="1" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas>
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 100% at 50% 0%,rgba(20,14,6,.08),rgba(7,5,2,.7) 80%);pointer-events:none;"></div>
+
+        <div style="position:absolute;top:0;left:0;right:0;height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;z-index:5;">
+          <div style="display:flex;align-items:center;gap:16px;">
+            <div style="display:flex;gap:7px;"><span style="width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.18);"></span><span style="width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.18);"></span><span style="width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.18);"></span></div>
+            <div style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.12em;color:rgba(242,243,247,.5);">jalwa · now playing</div>
+          </div>
+          <button data-calm style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:rgba(24,18,8,.5);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.14);border-radius:999px;color:#F2F3F7;font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.03em;cursor:pointer;">
+            <span data-dot style="width:7px;height:7px;border-radius:50%;background:#ffd76b;box-shadow:0 0 10px #ffd76b;display:inline-block;"></span><span data-calm-label>CALM · OFF</span>
+          </button>
+        </div>
+
+        <div style="position:absolute;left:0;right:0;top:96px;display:flex;flex-direction:column;align-items:center;z-index:4;">
+          <div style="position:relative;width:250px;height:250px;">
+            <div style="position:absolute;inset:-38px;border-radius:50%;background:radial-gradient(circle,rgba(255,215,107,.42),rgba(180,80,200,.12) 52%,transparent 72%);filter:blur(6px);"></div>
+            <div style="position:relative;width:250px;height:250px;border-radius:50%;overflow:hidden;box-shadow:0 26px 60px rgba(0,0,0,.55),0 0 0 1px rgba(255,215,107,.25) inset;background:conic-gradient(from 0deg,#ffd76b,#ff9e4d,#e0559a,#8b3ec9,#3DE7FF,#ffd76b);">
+              <div style="position:absolute;inset:34px;border-radius:50%;background:radial-gradient(circle,#1a1206,#0b0906 72%);box-shadow:0 0 40px rgba(255,215,107,.4) inset;"></div>
+              <div style="position:absolute;inset:112px;border-radius:50%;background:#ffd76b;box-shadow:0 0 26px #ffd76b;"></div>
+            </div>
+          </div>
+          <div style="font-family:'Instrument Serif',serif;font-size:52px;line-height:1;color:#fff;margin-top:30px;text-shadow:0 0 40px rgba(255,215,107,.4);">Vesper Bloom</div>
+          <div style="font-size:17px;color:rgba(242,243,247,.78);margin-top:10px;">Halcyon</div>
+          <div style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.05em;color:rgba(242,243,247,.45);margin-top:8px;">Rose Windows · 24bit/96k · LUFS −14</div>
+        </div>
+
+        <div style="position:absolute;left:210px;right:210px;bottom:158px;height:46px;z-index:3;"><canvas data-viz="spectrum" data-anim="1" style="width:100%;height:100%;display:block;"></canvas></div>
+
+        <div style="position:absolute;left:50%;transform:translateX(-50%);bottom:34px;width:760px;padding:20px 26px;border-radius:18px;background:rgba(22,16,8,.42);backdrop-filter:blur(24px) saturate(1.3);-webkit-backdrop-filter:blur(24px) saturate(1.3);border:1px solid rgba(255,215,107,.2);box-shadow:0 22px 60px rgba(0,0,0,.5);z-index:6;">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <span style="font-family:'Space Mono',monospace;font-size:12px;color:rgba(242,243,247,.6);min-width:42px;">0:54</span>
+            <div style="flex:1;height:6px;border-radius:4px;background:rgba(255,255,255,.1);position:relative;">
+              <span style="position:absolute;left:0;top:0;bottom:0;width:28%;border-radius:4px;background:linear-gradient(90deg,#c98a1e,#ffd76b);box-shadow:0 0 16px #ffd76b;"></span>
+              <span style="position:absolute;left:28%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 0 16px #ffd76b,0 0 4px #fff;"></span>
+            </div>
+            <span style="font-family:'Space Mono',monospace;font-size:12px;color:rgba(242,243,247,.6);min-width:42px;text-align:right;">−4:18</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="color:rgba(242,243,247,.55);"><path d="M18 5v14M4 7l7 5-7 5V7z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+            <div style="display:flex;align-items:center;gap:24px;">
+              <svg width="26" height="26" viewBox="0 0 24 24" style="color:#fff;cursor:pointer;"><path d="M18 5v14M15 12L4 5v14l11-7z" stroke="currentColor" stroke-width="1.7" fill="currentColor" stroke-linejoin="round"/></svg>
+              <button data-play style="width:64px;height:64px;border-radius:50%;border:none;cursor:pointer;background:radial-gradient(circle at 35% 30%,#ffe29a,#e0a324);box-shadow:0 0 30px rgba(255,215,107,.6),0 8px 20px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;">
+                <svg data-icon-play style="display:none;" width="26" height="26" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7V5z" fill="#1a1206"/></svg>
+                <svg data-icon-pause width="24" height="24" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.3" fill="#1a1206"/><rect x="14" y="5" width="4" height="14" rx="1.3" fill="#1a1206"/></svg>
+              </button>
+              <svg width="26" height="26" viewBox="0 0 24 24" style="color:#fff;cursor:pointer;transform:scaleX(-1);"><path d="M18 5v14M15 12L4 5v14l11-7z" stroke="currentColor" stroke-width="1.7" fill="currentColor" stroke-linejoin="round"/></svg>
+            </div>
+            <div style="display:flex;align-items:center;gap:14px;">
+              <svg width="20" height="20" viewBox="0 0 24 24" style="color:rgba(242,243,247,.55);"><path d="M17 3l4 4-4 4M3 7h18M7 21l-4-4 4-4M21 17H3" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" style="color:rgba(242,243,247,.6);"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 8a5 5 0 010 8" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+                <div style="width:74px;height:5px;border-radius:3px;background:rgba(255,255,255,.1);position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:80%;border-radius:3px;background:#ffd76b;box-shadow:0 0 10px #ffd76b;"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    const self = this;
+    const dpr = Math.min(1.75, window.devicePixelRatio || 1);
+    this.calm = {};   // heroId -> bool
+
+    // ---- cached glow sprites ----
+    const glowCache = new Map();
+    const makeGlow = (hue) => {
+      const key = Math.round(hue / 6) * 6;
+      let s = glowCache.get(key);
+      if (s) return s;
+      const R = 48;
+      s = document.createElement('canvas'); s.width = s.height = R * 2;
+      const g = s.getContext('2d');
+      const grd = g.createRadialGradient(R, R, 0, R, R, R);
+      grd.addColorStop(0, `hsla(${key},96%,64%,1)`);
+      grd.addColorStop(0.45, `hsla(${key},96%,60%,0.34)`);
+      grd.addColorStop(1, `hsla(${key},96%,60%,0)`);
+      g.fillStyle = grd; g.fillRect(0, 0, R * 2, R * 2);
+      glowCache.set(key, s);
+      return s;
+    };
+    const clampA = (a) => a < 0 ? 0 : (a > 1 ? 1 : a);
+
+    // ---- setup canvases ----
+    const nodes = Array.from(document.querySelectorAll('canvas[data-viz]'));
+    const items = nodes.map(cv => {
+      const w = cv.offsetWidth || 300, h = cv.offsetHeight || 200;
+      cv.width = Math.max(1, Math.round(w * dpr));
+      cv.height = Math.max(1, Math.round(h * dpr));
+      const ctx = cv.getContext('2d');
+      ctx.scale(dpr, dpr);
+      const heroEl = cv.closest('[data-hero]');
+      return { cv, ctx, w, h, kind: cv.dataset.viz, hero: heroEl ? heroEl.dataset.hero : '' };
+    });
+
+    const synth = (t, calm) => {
+      const N = 24, bands = new Float32Array(N);
+      const bi = 60 / 120, phase = (t % bi) / bi;
+      let beat = Math.pow(1 - phase, 2.4);
+      for (let i = 0; i < N; i++) {
+        const lo = Math.sin(t * (0.6 + i * 0.05) + i * 1.3);
+        const hi = Math.sin(t * (2.1 + i * 0.11) + i);
+        let v = 0.5 + 0.34 * lo + 0.16 * hi;
+        if (i < 5) v += beat * 0.5 * (1 - i / 5);
+        bands[i] = Math.max(0, Math.min(1, v));
+      }
+      if (calm) beat *= 0.3;
+      return { bands, beat };
+    };
+
+    const curtains = (o, a, t, calm) => {
+      const { ctx, w, h } = o;
+      ctx.globalCompositeOperation = 'source-over';
+      const bg = ctx.createLinearGradient(0, 0, 0, h);
+      bg.addColorStop(0, '#0a0a10'); bg.addColorStop(1, '#050507');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'lighter';
+      const N = a.bands.length, baseY = h * 0.82, halfW = (w / N) * 1.7;
+      for (let i = 0; i < N; i++) {
+        const band = a.bands[i];
+        const x = (i + 0.5) / N * w;
+        const amp = (0.28 + 0.72 * band) * (calm ? 0.5 : 1);
+        const hgt = h * 0.9 * amp * (1 + 0.3 * a.beat * (calm ? 0.3 : 1));
+        const hue = 186 + (i / N) * 96 + Math.sin(t * 0.15 + i * 0.2) * 12;
+        ctx.globalAlpha = clampA((0.07 + 0.4 * band) * (calm ? 0.55 : 1));
+        ctx.drawImage(makeGlow(hue), x - halfW, baseY - hgt, halfW * 2, hgt * 2);
+      }
+      ctx.globalAlpha = 1;
+      if (a.beat > 0.01) {
+        ctx.globalAlpha = clampA(a.beat * (calm ? 0.24 : 0.6));
+        const br = w * 0.5;
+        ctx.drawImage(makeGlow(190), w / 2 - br, baseY - br * 0.6, br * 2, br * 1.2);
+        ctx.globalAlpha = 1;
+      }
+    };
+
+    const caustic = (o, a, t, calm) => {
+      const { ctx, w, h } = o;
+      ctx.globalCompositeOperation = 'source-over';
+      const bg = ctx.createLinearGradient(0, 0, 0, h);
+      bg.addColorStop(0, '#04090c'); bg.addColorStop(1, '#02060a');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'lighter';
+      const lines = 26, ts = calm ? 0.4 : 1;
+      for (let i = 0; i < lines; i++) {
+        const p = i / lines;
+        const band = a.bands[i % a.bands.length];
+        const y = p * h;
+        ctx.beginPath();
+        for (let x = 0; x <= w; x += 9) {
+          const yy = y
+            + Math.sin(x * 0.018 + t * 1.3 * ts + i) * 18 * (0.4 + band)
+            + Math.sin(x * 0.005 - t * 0.8 * ts + i * 0.5) * 26
+            + Math.sin(x * 0.045 + t * 2.1 * ts + i * 1.7) * 6 * band;
+          if (x === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+        }
+        const hue = 188 + p * 34;
+        ctx.strokeStyle = `hsla(${hue},92%,72%,${0.04 + 0.11 * band + 0.08 * a.beat})`;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = clampA(0.16 + a.beat * (calm ? 0.12 : 0.45));
+      const br = w * 0.42;
+      ctx.drawImage(makeGlow(192), w / 2 - br, h * 0.44 - br, br * 2, br * 2);
+      ctx.globalAlpha = 1;
+    };
+
+    const mandala = (o, a, t, calm) => {
+      const { ctx, w, h } = o;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#070502'; ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'lighter';
+      const cx = w / 2, cy = h * 0.46, K = 10, P = 16;
+      const rot = t * 0.22 * (calm ? 0.4 : 1);
+      const S = Math.min(w, h) * 1.05;
+      for (let i = 0; i < P; i++) {
+        const band = a.bands[i];
+        const rr = (0.08 + (i / P) * 0.46 + band * 0.1) * S;
+        const size = (2 + band * 7 + a.beat * 4 * (calm ? 0.3 : 1)) * 3;
+        const hue = (i / P < 0.45) ? 42 + i * 1.4 : 190;
+        const sprite = makeGlow(hue);
+        ctx.globalAlpha = clampA((0.4 + 0.4 * band) * (calm ? 0.6 : 1));
+        for (let k = 0; k < K; k++) {
+          const ang = rot + (k / K) * Math.PI * 2 + i * 0.04;
+          const x = cx + Math.cos(ang) * rr;
+          const y = cy + Math.sin(ang) * rr;
+          ctx.drawImage(sprite, x - size, y - size, size * 2, size * 2);
+        }
+      }
+      ctx.globalAlpha = clampA(0.3 + a.beat * (calm ? 0.15 : 0.55));
+      const cr = S * 0.2;
+      ctx.drawImage(makeGlow(48), cx - cr, cy - cr, cr * 2, cr * 2);
+      ctx.globalAlpha = 1;
+    };
+
+    const spectrum = (o, a, t, calm) => {
+      const { ctx, w, h } = o;
+      ctx.clearRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'lighter';
+      const kind = { '1a': 'curtains', '1b': 'caustic', '1c': 'mandala' }[o.hero];
+      const baseHue = o.hero === '1c' ? 45 : (o.hero === '1b' ? 192 : 190);
+      const N = 40, gap = 3, bw = (w - (N - 1) * gap) / N;
+      for (let i = 0; i < N; i++) {
+        const band = a.bands[Math.floor(i / N * a.bands.length)];
+        const jitter = 0.5 + 0.5 * Math.sin(t * 4 + i * 0.7);
+        let v = band * (0.5 + 0.5 * jitter);
+        if (calm) v *= 0.55;
+        const bh = Math.max(2, v * h);
+        const x = i * (bw + gap);
+        const hue = baseHue + (o.hero === '1c' ? (i / N) * 30 : (i / N) * 40);
+        ctx.fillStyle = `hsla(${hue},95%,66%,${0.35 + 0.5 * v})`;
+        const y = (h - bh) / 2;
+        ctx.fillRect(x, y, bw, bh);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    };
+
+    const draw = (o, a, t, calm) => {
+      if (o.kind === 'curtains') curtains(o, a, t, calm);
+      else if (o.kind === 'caustic') caustic(o, a, t, calm);
+      else if (o.kind === 'mandala') mandala(o, a, t, calm);
+      else if (o.kind === 'spectrum') spectrum(o, a, t, calm);
+    };
+
+    // seed a frame
+    const seed = synth(9.1, false);
+    items.forEach(o => draw(o, seed, 9.1, false));
+
+    // only animate on-screen canvases
+    const vis = new Set();
+    this._io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) vis.add(e.target); else vis.delete(e.target); });
+    }, { threshold: 0.01 });
+    items.forEach(o => this._io.observe(o.cv));
+
+    let last = 0;
+    const loop = (now) => {
+      self._raf = requestAnimationFrame(loop);
+      if (now - last < 33) return;
+      last = now;
+      const t = now / 1000;
+      const cacheA = {};
+      for (const o of items) {
+        if (!vis.has(o.cv)) continue;
+        const calm = !!self.calm[o.hero];
+        const key = calm ? 'c' : 'n';
+        const a = cacheA[key] || (cacheA[key] = synth(t, calm));
+        draw(o, a, t, calm);
+      }
+    };
+    self._raf = requestAnimationFrame(loop);
+
+    // ---- interactions ----
+    document.querySelectorAll('[data-calm]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const hero = btn.closest('[data-hero]').dataset.hero;
+        const on = !self.calm[hero];
+        self.calm[hero] = on;
+        btn.querySelector('[data-calm-label]').textContent = on ? 'CALM · ON' : 'CALM · OFF';
+        btn.style.background = on ? 'rgba(120,130,150,.28)' : '';
+      });
+    });
+    document.querySelectorAll('[data-play]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = btn.querySelector('[data-icon-play]');
+        const pause = btn.querySelector('[data-icon-pause]');
+        const playing = pause.style.display !== 'none';
+        pause.style.display = playing ? 'none' : '';
+        p.style.display = playing ? '' : 'none';
+      });
+    });
+  }
+
+  componentWillUnmount() {
+    if (this._raf) cancelAnimationFrame(this._raf);
+    if (this._io) this._io.disconnect();
+  }
+}
+</script>
+</body>
+</html>

@@ -1,14 +1,18 @@
-# gui_theme.tcyr -- parity tests for src/gui/theme.cyr.
-# Ports theme_constants from jalwa-gui/src/theme.rs. DROPPED: theme_apply
-# (sets Visuals on an egui Context -- no Cyrius egui).
+# gui_theme.tcyr -- design-spec tests for src/gui/theme.cyr.
+#
+# NO LONGER a rust-old parity test: the "Jalwa Visual Language" redesign
+# (docs/adr/003-visual-language-redesign.md) deliberately replaces the oracle's single
+# egui palette with a deeper "void" base + THREE selectable dark themes. These asserts
+# pin the new visual language: the Aurora Void default, the per-theme anchor colors, and
+# the apply / cycle / name / from-env selection machinery.
 
 include "src/error.cyr"
 include "src/gui/theme.cyr"
 
 alloc_init();
 
-test_group("theme constants");
-# non-transparent (packed color != 0)
+test_group("aurora default (active palette)");
+# all 8 active slots opaque + non-transparent (packed color != 0)
 assert_eq(JLW_GUI_BG_DARK != 0, 1, "BG_DARK non-transparent");
 assert_eq(JLW_GUI_BG_PANEL != 0, 1, "BG_PANEL non-transparent");
 assert_eq(JLW_GUI_BG_WIDGET != 0, 1, "BG_WIDGET non-transparent");
@@ -17,17 +21,75 @@ assert_eq(JLW_GUI_ACCENT_DIM != 0, 1, "ACCENT_DIM non-transparent");
 assert_eq(JLW_GUI_TEXT_PRIMARY != 0, 1, "TEXT_PRIMARY non-transparent");
 assert_eq(JLW_GUI_TEXT_SECONDARY != 0, 1, "TEXT_SECONDARY non-transparent");
 assert_eq(JLW_GUI_TEXT_MUTED != 0, 1, "TEXT_MUTED non-transparent");
-# fully opaque (alpha == 255)
 assert_eq(jlw_gui_color_a(JLW_GUI_BG_DARK), 255, "BG_DARK alpha 255");
 assert_eq(jlw_gui_color_a(JLW_GUI_ACCENT), 255, "ACCENT alpha 255");
 assert_eq(jlw_gui_color_a(JLW_GUI_TEXT_PRIMARY), 255, "TEXT_PRIMARY alpha 255");
-# RGB round-trips
-assert_eq(jlw_gui_color_r(JLW_GUI_BG_DARK), 24, "BG_DARK r=24");
-assert_eq(jlw_gui_color_g(JLW_GUI_BG_DARK), 24, "BG_DARK g=24");
-assert_eq(jlw_gui_color_b(JLW_GUI_BG_DARK), 28, "BG_DARK b=28");
-assert_eq(jlw_gui_color_r(JLW_GUI_ACCENT), 0, "ACCENT r=0");
-assert_eq(jlw_gui_color_g(JLW_GUI_ACCENT), 188, "ACCENT g=188");
-assert_eq(jlw_gui_color_b(JLW_GUI_ACCENT), 212, "ACCENT b=212");
+# the void -- window fill is near-black (#0A0A10, designer's Aurora bg), not the old #18181C
+assert_eq(jlw_gui_color_r(JLW_GUI_BG_DARK), 10, "BG_DARK r=10 (void)");
+assert_eq(jlw_gui_color_g(JLW_GUI_BG_DARK), 10, "BG_DARK g=10");
+assert_eq(jlw_gui_color_b(JLW_GUI_BG_DARK), 16, "BG_DARK b=16");
+# luminous cyan accent (#3DE7FF) -- the soul, made to glow
+assert_eq(jlw_gui_color_r(JLW_GUI_ACCENT), 61, "ACCENT r=61 (luminous cyan)");
+assert_eq(jlw_gui_color_g(JLW_GUI_ACCENT), 231, "ACCENT g=231");
+assert_eq(jlw_gui_color_b(JLW_GUI_ACCENT), 255, "ACCENT b=255");
+# brightened primary text (#F2F3F7)
+assert_eq(jlw_gui_color_r(JLW_GUI_TEXT_PRIMARY), 242, "TEXT_PRIMARY r=242");
+assert_eq(jlw_gui_color_b(JLW_GUI_TEXT_PRIMARY), 247, "TEXT_PRIMARY b=247");
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_AURORA, "default active theme is Aurora");
+
+test_group("theme ids");
+assert_eq(JLW_GUI_THEME_AURORA, 0, "Aurora = 0");
+assert_eq(JLW_GUI_THEME_CAUSTIC, 1, "Caustic = 1");
+assert_eq(JLW_GUI_THEME_SACRED, 2, "Sacred = 2");
+assert_eq(JLW_GUI_THEME_COUNT, 3, "COUNT = 3");
+
+test_group("apply: caustic glass");
+assert_eq(jlw_gui_theme_apply(JLW_GUI_THEME_CAUSTIC), JLW_GUI_THEME_CAUSTIC, "apply returns the id");
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_CAUSTIC, "active theme is now Caustic");
+# bright cyan accent (#6FE6FF, designer's Caustic accent) reseated into the active palette
+assert_eq(jlw_gui_color_r(JLW_GUI_ACCENT), 111, "Caustic ACCENT r=111 (bright cyan)");
+assert_eq(jlw_gui_color_g(JLW_GUI_ACCENT), 230, "Caustic ACCENT g=230");
+assert_eq(jlw_gui_color_b(JLW_GUI_ACCENT), 255, "Caustic ACCENT b=255");
+assert_eq(jlw_gui_color_b(JLW_GUI_BG_DARK), 12, "Caustic BG_DARK b=12 (blue-black)");
+assert_eq(jlw_gui_color_a(JLW_GUI_BG_WIDGET), 255, "Caustic BG_WIDGET opaque");
+
+test_group("apply: sacred bloom");
+jlw_gui_theme_apply(JLW_GUI_THEME_SACRED);
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_SACRED, "active theme is now Sacred");
+# gold core (#FFD76B)
+assert_eq(jlw_gui_color_r(JLW_GUI_ACCENT), 255, "Sacred ACCENT r=255 (gold)");
+assert_eq(jlw_gui_color_g(JLW_GUI_ACCENT), 215, "Sacred ACCENT g=215");
+assert_eq(jlw_gui_color_b(JLW_GUI_ACCENT), 107, "Sacred ACCENT b=107");
+# warm void base (#0B0906)
+assert_eq(jlw_gui_color_r(JLW_GUI_BG_DARK), 11, "Sacred BG_DARK r=11 (warm void)");
+
+test_group("apply: back to aurora + out-of-range clamps");
+jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);
+assert_eq(jlw_gui_color_r(JLW_GUI_ACCENT), 61, "Aurora restored -> cyan accent");
+assert_eq(jlw_gui_theme_apply(99), JLW_GUI_THEME_AURORA, "id 99 clamps to Aurora");
+assert_eq(jlw_gui_theme_apply(0 - 1), JLW_GUI_THEME_AURORA, "id -1 clamps to Aurora");
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_AURORA, "clamp leaves Aurora active");
+
+test_group("cycle wraps aurora -> caustic -> sacred -> aurora");
+jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);
+assert_eq(jlw_gui_theme_cycle(), JLW_GUI_THEME_CAUSTIC, "aurora -> caustic");
+assert_eq(jlw_gui_theme_cycle(), JLW_GUI_THEME_SACRED, "caustic -> sacred");
+assert_eq(jlw_gui_theme_cycle(), JLW_GUI_THEME_AURORA, "sacred -> aurora (wrap)");
+
+test_group("theme names");
+assert_eq(streq(jlw_gui_theme_name(JLW_GUI_THEME_AURORA), "Aurora Void"), 1, "name aurora");
+assert_eq(streq(jlw_gui_theme_name(JLW_GUI_THEME_CAUSTIC), "Caustic Glass"), 1, "name caustic");
+assert_eq(streq(jlw_gui_theme_name(JLW_GUI_THEME_SACRED), "Sacred Bloom"), 1, "name sacred");
+
+test_group("from_name (JALWA_THEME selection)");
+assert_eq(jlw_gui_theme_from_name("aurora"), JLW_GUI_THEME_AURORA, "\"aurora\" -> 0");
+assert_eq(jlw_gui_theme_from_name("caustic"), JLW_GUI_THEME_CAUSTIC, "\"caustic\" -> 1");
+assert_eq(jlw_gui_theme_from_name("sacred"), JLW_GUI_THEME_SACRED, "\"sacred\" -> 2");
+assert_eq(jlw_gui_theme_from_name("bogus"), JLW_GUI_THEME_AURORA, "unknown -> Aurora");
+assert_eq(jlw_gui_theme_from_name(0), JLW_GUI_THEME_AURORA, "null (unset env) -> Aurora");
+
+# leave the active palette on the default for any downstream includer
+jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);
 
 var rc = assert_summary();
 syscall(60, rc);

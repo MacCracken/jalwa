@@ -95,6 +95,7 @@ fn jlw_gui_pump_engine(app) {
 # Run the GUI event loop over a live Wayland window. Returns 0 on clean exit, or -1 if
 # no display/compositor is available (jlw_win_open failed at connect).
 fn jlw_gui_run(app) {
+    jlw_gui_theme_init_from_env();                      # $JALWA_THEME -> palette (default Aurora)
     if (jlw_win_open("jalwa", JLW_GUI_WIN_W, JLW_GUI_WIN_H) == 0) {
         jlw_gui__eputs("jalwa gui: no Wayland compositor available.\n");
         jlw_gui__eputs("  Set WAYLAND_DISPLAY and run under a live display (aethersafha on AGNOS).\n");

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Visual-language redesign of the GUI palette** ([ADR 0003](docs/adr/003-visual-language-redesign.md),
+  from the "Jalwa Visual Language" north-star). `src/gui/theme.cyr` keeps jalwa's
+  dark-and-cyan soul but deepens the base to a near-black **void** the accent glows
+  against, and brightens primary text to ~#F2F3F7. This intentionally diverges from the
+  rust-old egui palette, so `tests/gui_theme.tcyr` is now a design-spec test (not a
+  parity test).
+
+### Added
+- **Three selectable dark themes**, colors taken from the designer's per-view mockups
+  in `docs/development/design/`. **Aurora Void** (default — luminous cyan `#3DE7FF`),
+  **Caustic Glass** (bright cyan `#6FE6FF`), and **Sacred Bloom** (gold core `#FFD76B`
+  over a warm void), all over a near-black void with `#F2F3F7` text. They reseat the
+  same 8 `JLW_GUI_*` slots every view
+  builder already reads, so switching is free downstream. Press **`t`** in the running
+  GUI to cycle themes; set **`JALWA_THEME=aurora|caustic|sacred`** to pick one at launch
+  (`jlw_gui_theme_apply` / `jlw_gui_theme_cycle` / `jlw_gui_theme_init_from_env`).
+
 ## 1.1.0 — AGNOS desktop window (2026-07-10)
 
 jalwa now runs as a **window on the sovereign AGNOS desktop** — composited by the

@@ -58,10 +58,10 @@ fn mk(app, title, artist) {
 alloc_init();
 
 # ---- color bridge: 0xRRGGBBAA -> XRGB8888 ----
-test_group("color_to_xrgb");
-assert_eq(jlw_gui_color_to_xrgb(JLW_GUI_ACCENT), 0x00BCD4, "accent -> 0x00BCD4");
-assert_eq(jlw_gui_color_to_xrgb(JLW_GUI_BG_DARK), 0x18181C, "bg dark -> 0x18181C");
-assert_eq(jlw_gui_color_to_xrgb(JLW_GUI_TEXT_PRIMARY), 0xE6E6EB, "text -> 0xE6E6EB");
+test_group("color_to_xrgb");   # strips alpha: 0xRRGGBBAA -> 0x00RRGGBB (Aurora Void default palette)
+assert_eq(jlw_gui_color_to_xrgb(JLW_GUI_ACCENT), 0x3DE7FF, "accent -> 0x3DE7FF (luminous cyan)");
+assert_eq(jlw_gui_color_to_xrgb(JLW_GUI_BG_DARK), 0x0A0A10, "bg dark -> 0x0A0A10 (void)");
+assert_eq(jlw_gui_color_to_xrgb(JLW_GUI_TEXT_PRIMARY), 0xF2F3F7, "text -> 0xF2F3F7");
 
 # ---- sidebar builder ----
 test_group("build_sidebar");
@@ -277,6 +277,7 @@ test_group("key_enqueue_remove");
 assert_eq(jlw_gui_key_to_action(97), JLW_GUI_ACT_ENQUEUE, "a -> enqueue");
 assert_eq(jlw_gui_key_to_action(100), JLW_GUI_ACT_REMOVE, "d -> remove");
 assert_eq(jlw_gui_key_to_action(103), JLW_GUI_ACT_TOGGLE_GRID, "g -> toggle grid");
+assert_eq(jlw_gui_key_to_action(116), JLW_GUI_ACT_CYCLE_THEME, "t -> cycle theme");
 
 # ---- library grid mode (library.rs grid_view) ----
 test_group("build_library_grid");

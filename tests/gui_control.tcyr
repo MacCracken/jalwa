@@ -238,6 +238,15 @@ jlw_gui_handle_key_event(sc, 1, 0);       # Esc -> clear + exit
 assert_eq(JlwGuiApp_search_active(sc), 0, "Esc exits search mode");
 assert_eq(strlen(JlwGuiApp_search_query(sc)), 0, "Esc clears the query");
 
+test_group("cycle_theme action");
+jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);
+assert_eq(jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME), JLW_GUI_RUN_CONTINUE, "cycle theme -> CONTINUE");
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_CAUSTIC, "action advanced Aurora -> Caustic");
+jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME);
+jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME);
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_AURORA, "three cycles wrap back to Aurora");
+jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);
+
 rm("/tmp/jalwa_gui_control.db");
 var rc = assert_summary();
 syscall(60, rc);

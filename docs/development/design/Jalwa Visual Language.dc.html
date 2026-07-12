@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;background:#050507;}
+  body{font-family:'Hanken Grotesk',system-ui,sans-serif;color:#F2F3F7;-webkit-font-smoothing:antialiased;}
+  a{color:#3DE7FF;text-decoration:none;}
+  a:hover{color:#8fefff;}
+  *{box-sizing:border-box;}
+  ::selection{background:rgba(0,188,212,.35);}
+  @keyframes jbreathe{0%,100%{opacity:.55;}50%{opacity:1;}}
+  @keyframes jfill{0%{width:8%;}100%{width:64%;}}
+  @keyframes jshimmer{0%{background-position:0% 50%;}100%{background-position:200% 50%;}}
+</style>
+</helmet>
+
+<div style="width:1320px;max-width:1320px;margin:0 auto;background:#050507;">
+
+  <!-- ============ HERO ============ -->
+  <section data-screen-label="Hero" style="position:relative;height:660px;overflow:hidden;border-bottom:1px solid rgba(255,255,255,.06);">
+    <canvas data-viz="curtains" data-anim="1" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas>
+    <div style="position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 118%,rgba(5,5,7,0) 30%,rgba(5,5,7,.55) 68%,rgba(5,5,7,.92) 100%);"></div>
+    <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(5,5,7,.55) 0%,rgba(5,5,7,0) 26%);"></div>
+
+    <button onClick="{{ toggleCalm }}" style="position:absolute;top:26px;right:28px;z-index:5;display:flex;align-items:center;gap:9px;padding:9px 15px;background:rgba(20,20,26,.55);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.12);border-radius:999px;color:#F2F3F7;font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.04em;cursor:pointer;">
+      <span style="width:7px;height:7px;border-radius:50%;background:#3DE7FF;box-shadow:0 0 10px #3DE7FF;display:inline-block;"></span>{{ calmLabel }}
+    </button>
+
+    <div style="position:absolute;left:64px;top:44px;z-index:4;font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.34em;text-transform:uppercase;color:rgba(242,243,247,.5);">AGNOS · media player · visual-language north-star</div>
+
+    <div style="position:absolute;left:64px;bottom:64px;z-index:4;">
+      <div style="font-family:'Instrument Serif',serif;font-size:216px;line-height:.82;letter-spacing:-.01em;color:#fff;text-shadow:0 0 60px rgba(61,231,255,.45),0 0 140px rgba(120,90,255,.35);">jalwa</div>
+      <div style="display:flex;align-items:baseline;gap:22px;margin-top:18px;">
+        <div style="font-family:'Instrument Serif',serif;font-style:italic;font-size:34px;color:rgba(242,243,247,.9);">the manifestation of sound as light</div>
+      </div>
+      <div style="max-width:720px;margin-top:16px;font-size:15px;line-height:1.6;color:rgba(242,243,247,.6);">A sovereign, GPU-era redesign of AGNOS's music player. A near-black void from which live audio manifests as volumetric light — auroras, caustics, particle nebulae, refractive glass. Sacred, alive, rendered at 60fps.</div>
+    </div>
+  </section>
+
+  <!-- ============ CONTEXT / THEN → NORTH STAR ============ -->
+  <section style="padding:64px 64px 48px;border-bottom:1px solid rgba(255,255,255,.06);display:grid;grid-template-columns:340px 1fr;gap:56px;align-items:center;">
+    <div>
+      <div style="font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:rgba(242,243,247,.42);margin-bottom:14px;">where we are today</div>
+      <div style="width:300px;height:225px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.09);background:#18181C;box-shadow:0 20px 50px rgba(0,0,0,.5);">
+        <div style="height:22px;background:#202026;display:flex;align-items:center;gap:5px;padding:0 8px;border-bottom:1px solid rgba(255,255,255,.06);">
+          <span style="width:7px;height:7px;border-radius:50%;background:#2C2C34;"></span>
+          <span style="width:7px;height:7px;border-radius:50%;background:#2C2C34;"></span>
+          <span style="font-family:'Space Mono',monospace;font-size:8px;color:rgba(242,243,247,.35);margin-left:6px;">jalwa — 800×600</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px;">
+          <div style="aspect-ratio:1;background:#2C2C34;border-radius:3px;"></div>
+          <div style="aspect-ratio:1;background:#2C2C34;border-radius:3px;"></div>
+          <div style="aspect-ratio:1;background:#2C2C34;border-radius:3px;"></div>
+          <div style="aspect-ratio:1;background:#2C2C34;border-radius:3px;"></div>
+          <div style="aspect-ratio:1;background:#2C2C34;border-radius:3px;"></div>
+          <div style="aspect-ratio:1;background:#2C2C34;border-radius:3px;"></div>
+          <div style="aspect-ratio:1;background:#2C2C34;border-radius:3px;"></div>
+          <div style="aspect-ratio:1;background:#2C2C34;border-radius:3px;"></div>
+        </div>
+        <div style="margin:0 10px;height:3px;background:#2C2C34;border-radius:2px;position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:38%;background:#00BCD4;border-radius:2px;"></span></div>
+      </div>
+      <div style="font-size:12.5px;line-height:1.55;color:rgba(242,243,247,.5);margin-top:14px;">CPU-rasterized dark UI · one cyan accent · a competent, quiet grid.</div>
+    </div>
+    <div>
+      <div style="font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:rgba(61,231,255,.7);margin-bottom:16px;">the north star</div>
+      <div style="font-family:'Instrument Serif',serif;font-size:44px;line-height:1.12;color:#fff;max-width:640px;">Keep the dark-and-cyan soul. Then let the GPU make it <span style="font-style:italic;color:#3DE7FF;">luminous</span> — sound rendered as living light.</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;">
+        <span style="padding:7px 14px;border:1px solid rgba(255,255,255,.12);border-radius:999px;font-size:12px;color:rgba(242,243,247,.72);">volumetric bloom</span>
+        <span style="padding:7px 14px;border:1px solid rgba(255,255,255,.12);border-radius:999px;font-size:12px;color:rgba(242,243,247,.72);">frosted glass depth</span>
+        <span style="padding:7px 14px;border:1px solid rgba(255,255,255,.12);border-radius:999px;font-size:12px;color:rgba(242,243,247,.72);">audio-reactive at 60fps</span>
+        <span style="padding:7px 14px;border:1px solid rgba(255,255,255,.12);border-radius:999px;font-size:12px;color:rgba(242,243,247,.72);">adaptive album palette</span>
+        <span style="padding:7px 14px;border:1px solid rgba(255,255,255,.12);border-radius:999px;font-size:12px;color:rgba(242,243,247,.72);">AI-optional</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COLOR & LIGHT ============ -->
+  <section style="padding:66px 64px 56px;border-bottom:1px solid rgba(255,255,255,.06);">
+    <div style="font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:rgba(242,243,247,.42);margin-bottom:8px;">01 — color &amp; light</div>
+    <div style="font-family:'Instrument Serif',serif;font-size:40px;color:#fff;margin-bottom:38px;">The void, and what glows from it</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:48px;">
+      <div>
+        <div style="font-size:12px;letter-spacing:.04em;color:rgba(242,243,247,.55);margin-bottom:12px;">VOID — the canvas of near-black</div>
+        <div style="display:flex;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.08);">
+          <div style="flex:1;height:92px;background:#050507;"></div>
+          <div style="flex:1;height:92px;background:#101014;"></div>
+          <div style="flex:1;height:92px;background:#18181C;"></div>
+          <div style="flex:1;height:92px;background:#202026;"></div>
+          <div style="flex:1;height:92px;background:#2C2C34;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-family:'Space Mono',monospace;font-size:9.5px;color:rgba(242,243,247,.4);margin-top:7px;">
+          <span>#050507</span><span>#101014</span><span>#18181C</span><span>#202026</span><span>#2C2C34</span>
+        </div>
+        <div style="font-size:12.5px;line-height:1.55;color:rgba(242,243,247,.5);margin-top:16px;">Panels float on the deepest void. Surfaces lighten as they come forward; the darkest layer is reserved for light to bloom against.</div>
+      </div>
+
+      <div>
+        <div style="font-size:12px;letter-spacing:.04em;color:rgba(242,243,247,.55);margin-bottom:12px;">ANCHOR — luminous cyan, extended into a full spectrum</div>
+        <div style="display:flex;align-items:stretch;gap:14px;">
+          <div style="width:150px;height:118px;border-radius:8px;background:radial-gradient(120% 120% at 30% 20%,#3DE7FF,#00BCD4 60%,#0a8ca0);box-shadow:0 0 42px rgba(0,188,212,.55);display:flex;flex-direction:column;justify-content:flex-end;padding:12px;">
+            <span style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(5,5,7,.72);font-weight:700;">#00BCD4</span>
+            <span style="font-size:11px;color:rgba(5,5,7,.6);">the soul, kept</span>
+          </div>
+          <div style="flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+            <div style="border-radius:7px;background:oklch(.78 .15 200);box-shadow:0 0 22px oklch(.78 .15 200 / .5);"></div>
+            <div style="border-radius:7px;background:oklch(.78 .15 165);box-shadow:0 0 22px oklch(.78 .15 165 / .5);"></div>
+            <div style="border-radius:7px;background:oklch(.78 .15 285);box-shadow:0 0 22px oklch(.78 .15 285 / .5);"></div>
+            <div style="border-radius:7px;background:oklch(.78 .15 330);box-shadow:0 0 22px oklch(.78 .15 330 / .5);"></div>
+            <div style="border-radius:7px;background:oklch(.8 .15 95);box-shadow:0 0 22px oklch(.8 .15 95 / .5);"></div>
+            <div style="border-radius:7px;background:oklch(.78 .15 25);box-shadow:0 0 22px oklch(.78 .15 25 / .5);"></div>
+          </div>
+        </div>
+        <div style="font-size:12.5px;line-height:1.55;color:rgba(242,243,247,.5);margin-top:16px;">Cyan stays the home key. The spectrum shares one lightness and chroma — only hue rotates — so any accent glows at equal intensity. Light is always additive, never a flat fill.</div>
+      </div>
+    </div>
+
+    <!-- adaptive theming demo -->
+    <div style="margin-top:44px;padding:28px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:linear-gradient(180deg,rgba(24,24,28,.6),rgba(16,16,20,.6));">
+      <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:22px;">
+        <div style="font-family:'Instrument Serif',serif;font-size:24px;color:#fff;">Adaptive theming</div>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:rgba(242,243,247,.45);">the whole UI breathes with the current cover</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;">
+
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div style="height:118px;border-radius:9px;background:radial-gradient(130% 130% at 25% 15%,#4dd6e6,#0b8ba3 55%,#062b3a);box-shadow:0 12px 40px rgba(0,188,212,.28);"></div>
+          <div style="display:flex;align-items:center;gap:8px;"><span style="width:12px;height:12px;border-radius:3px;background:#4dd6e6;"></span><span style="width:12px;height:12px;border-radius:3px;background:#0b8ba3;"></span><span style="width:12px;height:12px;border-radius:3px;background:#0e5566;"></span><span style="font-family:'Space Mono',monospace;font-size:9.5px;color:rgba(242,243,247,.4);margin-left:4px;">extracted</span></div>
+          <div style="padding:12px;border-radius:9px;background:rgba(8,10,12,.7);border:1px solid rgba(77,214,230,.25);box-shadow:0 0 30px rgba(77,214,230,.12) inset;">
+            <div style="font-size:13px;color:#fff;">Liminal Drift</div>
+            <div style="font-size:11px;color:rgba(242,243,247,.5);margin-bottom:10px;">Aperiodic</div>
+            <div style="height:4px;border-radius:3px;background:rgba(255,255,255,.08);position:relative;"><span style="position:absolute;inset:0 55% 0 0;background:#4dd6e6;border-radius:3px;box-shadow:0 0 10px #4dd6e6;"></span></div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div style="height:118px;border-radius:9px;background:radial-gradient(130% 130% at 25% 15%,#ffd76b,#d98a2b 55%,#5a3410);box-shadow:0 12px 40px rgba(217,138,43,.28);"></div>
+          <div style="display:flex;align-items:center;gap:8px;"><span style="width:12px;height:12px;border-radius:3px;background:#ffd76b;"></span><span style="width:12px;height:12px;border-radius:3px;background:#d98a2b;"></span><span style="width:12px;height:12px;border-radius:3px;background:#7a4d1a;"></span><span style="font-family:'Space Mono',monospace;font-size:9.5px;color:rgba(242,243,247,.4);margin-left:4px;">extracted</span></div>
+          <div style="padding:12px;border-radius:9px;background:rgba(12,9,6,.7);border:1px solid rgba(255,215,107,.28);box-shadow:0 0 30px rgba(255,215,107,.12) inset;">
+            <div style="font-size:13px;color:#fff;">Gilt Meridian</div>
+            <div style="font-size:11px;color:rgba(242,243,247,.5);margin-bottom:10px;">Ensemble Vela</div>
+            <div style="height:4px;border-radius:3px;background:rgba(255,255,255,.08);position:relative;"><span style="position:absolute;inset:0 62% 0 0;background:#ffd76b;border-radius:3px;box-shadow:0 0 10px #ffd76b;"></span></div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div style="height:118px;border-radius:9px;background:radial-gradient(130% 130% at 25% 15%,#f57edb,#8b3ec9 55%,#3a1660);box-shadow:0 12px 40px rgba(180,80,200,.28);"></div>
+          <div style="display:flex;align-items:center;gap:8px;"><span style="width:12px;height:12px;border-radius:3px;background:#f57edb;"></span><span style="width:12px;height:12px;border-radius:3px;background:#8b3ec9;"></span><span style="width:12px;height:12px;border-radius:3px;background:#4d2170;"></span><span style="font-family:'Space Mono',monospace;font-size:9.5px;color:rgba(242,243,247,.4);margin-left:4px;">extracted</span></div>
+          <div style="padding:12px;border-radius:9px;background:rgba(11,7,14,.7);border:1px solid rgba(245,126,219,.28);box-shadow:0 0 30px rgba(245,126,219,.12) inset;">
+            <div style="font-size:13px;color:#fff;">Vesper Bloom</div>
+            <div style="font-size:11px;color:rgba(242,243,247,.5);margin-bottom:10px;">Halcyon</div>
+            <div style="height:4px;border-radius:3px;background:rgba(255,255,255,.08);position:relative;"><span style="position:absolute;inset:0 40% 0 0;background:#f57edb;border-radius:3px;box-shadow:0 0 10px #f57edb;"></span></div>
+          </div>
+        </div>
+
+      </div>
+      <div style="font-family:'Space Mono',monospace;font-size:11px;line-height:1.6;color:rgba(242,243,247,.45);margin-top:20px;">rule → sample cover · k-means dominant + brightest accent · constrain accent to WCAG-safe glow on void · ease all UI hues over 600ms spring on track change. AI-optional; pure pixel math, no model required.</div>
+    </div>
+  </section>
+
+  <!-- ============ TYPOGRAPHY ============ -->
+  <section style="padding:66px 64px 56px;border-bottom:1px solid rgba(255,255,255,.06);">
+    <div style="font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:rgba(242,243,247,.42);margin-bottom:8px;">02 — typography</div>
+    <div style="font-family:'Instrument Serif',serif;font-size:40px;color:#fff;margin-bottom:38px;">Editorial serif, sovereign grotesk, technical mono</div>
+    <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:32px;">
+      <div style="padding:26px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(16,16,20,.5);">
+        <div style="font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.2em;color:rgba(61,231,255,.7);margin-bottom:16px;">DISPLAY · INSTRUMENT SERIF</div>
+        <div style="font-family:'Instrument Serif',serif;font-size:78px;line-height:.9;color:#fff;">jalwa</div>
+        <div style="font-family:'Instrument Serif',serif;font-style:italic;font-size:28px;color:rgba(242,243,247,.75);margin-top:8px;">Vesper Bloom</div>
+        <div style="font-size:12px;color:rgba(242,243,247,.45);margin-top:16px;line-height:1.5;">The luminous, slightly sacred voice — wordmark, track titles, section heads. Never for UI chrome.</div>
+      </div>
+      <div style="padding:26px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(16,16,20,.5);">
+        <div style="font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.2em;color:rgba(61,231,255,.7);margin-bottom:16px;">UI · HANKEN GROTESK</div>
+        <div style="font-size:26px;font-weight:600;color:#fff;">Now Playing</div>
+        <div style="font-size:15px;color:rgba(242,243,247,.7);margin-top:6px;">Library · Queue · Search</div>
+        <div style="display:flex;gap:8px;margin-top:16px;"><span style="font-size:11px;font-weight:600;padding:5px 11px;background:rgba(255,255,255,.07);border-radius:6px;">Shuffle</span><span style="font-size:11px;font-weight:600;padding:5px 11px;background:rgba(255,255,255,.07);border-radius:6px;">Repeat</span></div>
+        <div style="font-size:12px;color:rgba(242,243,247,.45);margin-top:16px;line-height:1.5;">Calm, legible, dependable — every control, label, and list. Weights 300–700.</div>
+      </div>
+      <div style="padding:26px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(16,16,20,.5);">
+        <div style="font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.2em;color:rgba(61,231,255,.7);margin-bottom:16px;">SYSTEM · SPACE MONO</div>
+        <div style="font-family:'Space Mono',monospace;font-size:22px;color:#fff;">-03:41 · 24bit/96k</div>
+        <div style="font-family:'Space Mono',monospace;font-size:13px;color:rgba(242,243,247,.6);margin-top:10px;">EQ +3.5dB · LUFS -14</div>
+        <div style="font-family:'Space Mono',monospace;font-size:13px;color:rgba(242,243,247,.6);margin-top:4px;">FFT 2048 · 60fps</div>
+        <div style="font-size:12px;color:rgba(242,243,247,.45);margin-top:16px;line-height:1.5;">Timecodes, DSP readouts, the shader/technical layer. Signals the sovereign lineage.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MATERIAL & MOTION ============ -->
+  <section style="padding:66px 64px 56px;border-bottom:1px solid rgba(255,255,255,.06);position:relative;overflow:hidden;">
+    <canvas data-viz="curtains" data-anim="1" style="position:absolute;inset:0;width:100%;height:100%;display:block;opacity:.28;"></canvas>
+    <div style="position:absolute;inset:0;background:rgba(5,5,7,.55);"></div>
+    <div style="position:relative;">
+      <div style="font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:rgba(242,243,247,.42);margin-bottom:8px;">03 — material &amp; motion</div>
+      <div style="font-family:'Instrument Serif',serif;font-size:40px;color:#fff;margin-bottom:38px;">Glass, bloom, and springs — over a living backdrop</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;">
+        <div style="padding:24px;border-radius:14px;background:rgba(20,22,28,.4);backdrop-filter:blur(22px) saturate(1.3);-webkit-backdrop-filter:blur(22px) saturate(1.3);border:1px solid rgba(255,255,255,.14);box-shadow:0 18px 50px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.03) inset;">
+          <div style="font-size:15px;font-weight:600;color:#fff;">Frosted glass</div>
+          <div style="font-size:12.5px;line-height:1.55;color:rgba(242,243,247,.6);margin-top:8px;">GPU-composited blur lets panels sit ON the light without hiding it. Chrome is glass; content is light behind it.</div>
+        </div>
+        <div style="padding:24px;border-radius:14px;background:rgba(16,16,20,.6);border:1px solid rgba(255,255,255,.1);">
+          <div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:14px;">Bloom &amp; glow</div>
+          <div style="display:flex;gap:14px;align-items:center;">
+            <span style="width:40px;height:40px;border-radius:50%;background:#00BCD4;box-shadow:0 0 8px #00BCD4;animation:jbreathe 3s ease-in-out infinite;"></span>
+            <span style="width:40px;height:40px;border-radius:50%;background:oklch(.78 .15 285);box-shadow:0 0 26px oklch(.78 .15 285),0 0 60px oklch(.78 .15 285 / .5);"></span>
+            <span style="width:40px;height:40px;border-radius:50%;background:oklch(.8 .15 95);box-shadow:0 0 40px oklch(.8 .15 95),0 0 90px oklch(.8 .15 95 / .6);"></span>
+          </div>
+          <div style="font-size:12px;color:rgba(242,243,247,.5);margin-top:14px;">Intensity encodes energy. Idle controls breathe; active ones bloom.</div>
+        </div>
+        <div style="padding:24px;border-radius:14px;background:rgba(16,16,20,.6);border:1px solid rgba(255,255,255,.1);">
+          <div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:16px;">Seek-bar emits light</div>
+          <div style="height:6px;border-radius:4px;background:rgba(255,255,255,.08);position:relative;overflow:visible;">
+            <span style="position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,#0a8ca0,#3DE7FF);border-radius:4px;box-shadow:0 0 16px #3DE7FF;animation:jfill 4s ease-in-out infinite alternate;"></span>
+          </div>
+          <div style="font-size:12px;color:rgba(242,243,247,.5);margin-top:16px;">The playhead is a light source; the filled track glows, the remainder is dark void.</div>
+        </div>
+      </div>
+      <div style="font-family:'Space Mono',monospace;font-size:11px;line-height:1.7;color:rgba(242,243,247,.5);margin-top:26px;max-width:900px;">
+        motion → springs, not linear tweens (mass .9 · stiffness 170 · damping 22) · momentum scroll with rubber-band · art ripples outward on track change · every beat emits a soft global bloom pulse · <span style="color:rgba(61,231,255,.75)">calm mode halves motion, dims bloom 60%, freezes particles</span>.
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ THREE DIRECTIONS ============ -->
+  <section style="padding:66px 64px 56px;border-bottom:1px solid rgba(255,255,255,.06);">
+    <div style="font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:rgba(242,243,247,.42);margin-bottom:8px;">04 — three ways to manifest</div>
+    <div style="font-family:'Instrument Serif',serif;font-size:40px;color:#fff;margin-bottom:10px;">Pick a lineage <span style="font-style:italic;color:rgba(242,243,247,.5);font-size:26px;">— A, B, or C</span></div>
+    <div style="font-size:13.5px;color:rgba(242,243,247,.55);max-width:760px;margin-bottom:36px;">Three whole visual languages, all faithful to the dark-and-cyan soul. Tell me which to carry into the live Now-Playing hero — or mix traits across them.</div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;">
+
+      <div id="dir-a" style="border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#0a0a0e;box-shadow:0 24px 60px rgba(0,0,0,.5);">
+        <div style="position:relative;height:230px;">
+          <canvas data-viz="curtains" data-anim="1" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas>
+          <div style="position:absolute;top:14px;left:14px;display:flex;align-items:center;gap:8px;"><span style="width:26px;height:26px;border-radius:7px;background:rgba(5,5,7,.6);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-weight:700;font-size:12px;color:#fff;">A</span></div>
+          <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,10,14,0) 55%,rgba(10,10,14,.9));"></div>
+          <div style="position:absolute;bottom:14px;left:16px;font-family:'Instrument Serif',serif;font-size:30px;color:#fff;">Aurora Void</div>
+        </div>
+        <div style="padding:20px;">
+          <div style="font-family:'Instrument Serif',serif;font-style:italic;font-size:16px;color:#3DE7FF;margin-bottom:12px;">soft curtains of spectral light</div>
+          <div style="font-size:12.5px;line-height:1.6;color:rgba(242,243,247,.62);">Flowing bands of luminous color rise from the base like a spectrum aurora. Atmospheric, ambient, endlessly calm-able. The truest evolution of today's identity.</div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:16px;font-family:'Space Mono',monospace;font-size:10.5px;color:rgba(242,243,247,.45);">
+            <span>palette · cyan → violet drift</span><span>light · additive curtains, low-freq bloom</span><span>mood · meditative, oceanic</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="dir-b" style="border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#070a0c;box-shadow:0 24px 60px rgba(0,0,0,.5);">
+        <div style="position:relative;height:230px;">
+          <canvas data-viz="caustic" data-anim="1" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas>
+          <div style="position:absolute;top:14px;left:14px;display:flex;align-items:center;gap:8px;"><span style="width:26px;height:26px;border-radius:7px;background:rgba(5,5,7,.6);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-weight:700;font-size:12px;color:#fff;">B</span></div>
+          <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(7,10,12,0) 55%,rgba(7,10,12,.9));"></div>
+          <div style="position:absolute;bottom:14px;left:16px;font-family:'Instrument Serif',serif;font-size:30px;color:#fff;">Caustic Glass</div>
+        </div>
+        <div style="padding:20px;">
+          <div style="font-family:'Instrument Serif',serif;font-style:italic;font-size:16px;color:#3DE7FF;margin-bottom:12px;">light refracted through water &amp; crystal</div>
+          <div style="font-size:12.5px;line-height:1.6;color:rgba(242,243,247,.62);">Rippling caustic filaments and prismatic refraction. Sharper, cooler, architectural — glass panels catch and bend the light. For a crisper, higher-contrast jalwa.</div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:16px;font-family:'Space Mono',monospace;font-size:10.5px;color:rgba(242,243,247,.45);">
+            <span>palette · aqua → teal, prismatic edges</span><span>light · caustic filaments, sharp specular</span><span>mood · lucid, crystalline</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="dir-c" style="border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#0b0906;box-shadow:0 24px 60px rgba(0,0,0,.5);">
+        <div style="position:relative;height:230px;">
+          <canvas data-viz="mandala" data-anim="1" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas>
+          <div style="position:absolute;top:14px;left:14px;display:flex;align-items:center;gap:8px;"><span style="width:26px;height:26px;border-radius:7px;background:rgba(5,5,7,.6);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-weight:700;font-size:12px;color:#fff;">C</span></div>
+          <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,9,6,0) 55%,rgba(11,9,6,.9));"></div>
+          <div style="position:absolute;bottom:14px;left:16px;font-family:'Instrument Serif',serif;font-size:30px;color:#fff;">Sacred Bloom</div>
+        </div>
+        <div style="padding:20px;">
+          <div style="font-family:'Instrument Serif',serif;font-style:italic;font-size:16px;color:#ffd76b;margin-bottom:12px;">theophany as radial geometry</div>
+          <div style="font-size:12.5px;line-height:1.6;color:rgba(242,243,247,.62);">Symmetrical particle mandalas bloom from the center — sacred geometry rendered in gold and cyan. The most explicitly reverent reading of jalwa. Ritual, not gimmick.</div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:16px;font-family:'Space Mono',monospace;font-size:10.5px;color:rgba(242,243,247,.45);">
+            <span>palette · gold core, cyan corona</span><span>light · k-fold radial particles</span><span>mood · sacred, ceremonial</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ VISUALIZER CONCEPTS ============ -->
+  <section style="padding:66px 64px 56px;border-bottom:1px solid rgba(255,255,255,.06);">
+    <div style="font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:rgba(242,243,247,.42);margin-bottom:8px;">05 — the theophany mode</div>
+    <div style="font-family:'Instrument Serif',serif;font-size:40px;color:#fff;margin-bottom:10px;">Three visualizer concepts</div>
+    <div style="font-size:13.5px;color:rgba(242,243,247,.55);max-width:760px;margin-bottom:36px;">The full-screen visualizer is the philosophical center of jalwa — music becomes pure light. Each concept maps the live audio pipeline (PCM · FFT · DSP bands · optional AI mood) to a different manifestation.</div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;">
+
+      <div style="border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#0a0a0e;">
+        <div style="position:relative;height:210px;"><canvas data-viz="curtains" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas></div>
+        <div style="padding:20px;">
+          <div style="display:flex;align-items:baseline;gap:10px;"><div style="font-family:'Instrument Serif',serif;font-size:26px;color:#fff;">Manifest</div><div style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(61,231,255,.7);">volumetric aurora</div></div>
+          <div style="font-size:12.5px;line-height:1.55;color:rgba(242,243,247,.6);margin:10px 0 16px;">Curtains of light rise and part with the spectrum — the album's palette becomes the sky.</div>
+          <div style="display:flex;flex-direction:column;gap:5px;font-family:'Space Mono',monospace;font-size:10.5px;color:rgba(242,243,247,.5);border-top:1px solid rgba(255,255,255,.08);padding-top:14px;">
+            <span><span style="color:#3DE7FF">bass</span> → curtain height &amp; bloom</span>
+            <span><span style="color:#3DE7FF">mids</span> → hue rotation across sky</span>
+            <span><span style="color:#3DE7FF">treble</span> → shimmer / star sparkle</span>
+            <span><span style="color:#3DE7FF">beat</span> → global bloom pulse</span>
+            <span><span style="color:rgba(242,243,247,.4)">ai-opt</span> → mood sets base hue band</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#070a0c;">
+        <div style="position:relative;height:210px;"><canvas data-viz="caustic" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas></div>
+        <div style="padding:20px;">
+          <div style="display:flex;align-items:baseline;gap:10px;"><div style="font-family:'Instrument Serif',serif;font-size:26px;color:#fff;">Caustic</div><div style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(61,231,255,.7);">refractive water-light</div></div>
+          <div style="font-size:12.5px;line-height:1.55;color:rgba(242,243,247,.6);margin:10px 0 16px;">Light rippling through unseen water. Beats send caustic waves outward from the center.</div>
+          <div style="display:flex;flex-direction:column;gap:5px;font-family:'Space Mono',monospace;font-size:10.5px;color:rgba(242,243,247,.5);border-top:1px solid rgba(255,255,255,.08);padding-top:14px;">
+            <span><span style="color:#3DE7FF">spectrum</span> → caustic density &amp; warp</span>
+            <span><span style="color:#3DE7FF">loudness</span> → surface brightness</span>
+            <span><span style="color:#3DE7FF">beat</span> → ripple emitted from core</span>
+            <span><span style="color:#3DE7FF">stereo</span> → refraction drift L/R</span>
+            <span><span style="color:rgba(242,243,247,.4)">ai-opt</span> → tempo sets flow speed</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#0b0906;">
+        <div style="position:relative;height:210px;"><canvas data-viz="mandala" style="position:absolute;inset:0;width:100%;height:100%;display:block;"></canvas></div>
+        <div style="padding:20px;">
+          <div style="display:flex;align-items:baseline;gap:10px;"><div style="font-family:'Instrument Serif',serif;font-size:26px;color:#fff;">Mandala</div><div style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(255,215,107,.8);">sacred particle bloom</div></div>
+          <div style="font-size:12.5px;line-height:1.55;color:rgba(242,243,247,.6);margin:10px 0 16px;">A living rose window. FFT bins become radial petals; onsets snap the symmetry into new form.</div>
+          <div style="display:flex;flex-direction:column;gap:5px;font-family:'Space Mono',monospace;font-size:10.5px;color:rgba(242,243,247,.5);border-top:1px solid rgba(255,255,255,.08);padding-top:14px;">
+            <span><span style="color:#ffd76b">fft bins</span> → petal radius per ring</span>
+            <span><span style="color:#ffd76b">rms</span> → overall bloom radius</span>
+            <span><span style="color:#ffd76b">onset</span> → rotation snap + flare</span>
+            <span><span style="color:#ffd76b">beat</span> → center supernova pulse</span>
+            <span><span style="color:rgba(242,243,247,.4)">ai-opt</span> → genre sets symmetry order</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ RATIONALE / NEXT ============ -->
+  <section style="padding:66px 64px 90px;">
+    <div style="display:grid;grid-template-columns:1fr 360px;gap:56px;align-items:start;">
+      <div>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:rgba(242,243,247,.42);margin-bottom:16px;">the rationale</div>
+        <div style="font-family:'Instrument Serif',serif;font-size:34px;line-height:1.25;color:#fff;max-width:680px;">jalwa means <span style="font-style:italic;color:#3DE7FF;">theophany</span> — the dazzling manifestation of the divine as radiant light. So the app does exactly that: it takes the invisible (sound) and manifests it as light and form. The void is reverent emptiness; every glow is a note made visible. We keep the near-black-and-cyan soul the app already has, and let the GPU turn a quiet grid into something that feels, briefly, sacred.</div>
+      </div>
+      <div style="padding:24px;border:1px solid rgba(61,231,255,.2);border-radius:12px;background:rgba(0,188,212,.05);">
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.2em;color:rgba(61,231,255,.8);margin-bottom:14px;">NEXT — you tell me</div>
+        <div style="font-size:13px;line-height:1.6;color:rgba(242,243,247,.72);">Pick a lineage (A Aurora, B Caustic, C Sacred) and I'll build the live <b style="color:#fff">Now-Playing hero</b> in it — full-bleed reactive backdrop, luminous transport, adaptive palette, and the calm-mode toggle wired for real.</div>
+        <div style="font-size:12.5px;line-height:1.6;color:rgba(242,243,247,.5);margin-top:14px;">Try: <span style="color:#3DE7FF">"build the hero in direction B"</span> · <span style="color:#3DE7FF">"mix A's palette with C's geometry"</span> · <span style="color:#3DE7FF">"add the Library gallery next"</span></div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { calm: false };
+
+  renderVals() {
+    return {
+      toggleCalm: () => this.setState(s => ({ calm: !s.calm })),
+      calmLabel: this.state.calm ? 'CALM MODE · ON' : 'CALM MODE · OFF',
+    };
+  }
+
+  componentDidMount() {
+    const self = this;
+    const dpr = Math.min(1.75, window.devicePixelRatio || 1);
+    const nodes = Array.from(document.querySelectorAll('canvas[data-viz]'));
+    const items = nodes.map(cv => {
+      const w = cv.offsetWidth || 300, h = cv.offsetHeight || 200;
+      cv.width = Math.max(1, Math.round(w * dpr));
+      cv.height = Math.max(1, Math.round(h * dpr));
+      const ctx = cv.getContext('2d');
+      ctx.scale(dpr, dpr);
+      return { cv, ctx, w, h, kind: cv.dataset.viz, anim: cv.dataset.anim === '1' };
+    });
+    this._items = items;
+
+    // cached glow sprites — no per-frame gradient allocation
+    const glowCache = new Map();
+    const makeGlow = (hue) => {
+      const key = Math.round(hue / 6) * 6;
+      let s = glowCache.get(key);
+      if (s) return s;
+      const R = 48;
+      s = document.createElement('canvas'); s.width = s.height = R * 2;
+      const g2 = s.getContext('2d');
+      const grd = g2.createRadialGradient(R, R, 0, R, R, R);
+      grd.addColorStop(0, `hsla(${key},96%,64%,1)`);
+      grd.addColorStop(0.45, `hsla(${key},96%,60%,0.34)`);
+      grd.addColorStop(1, `hsla(${key},96%,60%,0)`);
+      g2.fillStyle = grd; g2.fillRect(0, 0, R * 2, R * 2);
+      glowCache.set(key, s);
+      return s;
+    };
+    const clampA = (a) => a < 0 ? 0 : (a > 1 ? 1 : a);
+
+    const synth = (t, calm) => {
+      const N = 24, bands = new Float32Array(N);
+      const bi = 60 / 118, phase = (t % bi) / bi;
+      let beat = Math.pow(1 - phase, 2.4);
+      let rms = 0;
+      for (let i = 0; i < N; i++) {
+        const lo = Math.sin(t * (0.6 + i * 0.05) + i * 1.3);
+        const hi = Math.sin(t * (2.1 + i * 0.11) + i);
+        let v = 0.5 + 0.34 * lo + 0.16 * hi;
+        if (i < 5) v += beat * 0.5 * (1 - i / 5);
+        v = Math.max(0, Math.min(1, v));
+        bands[i] = v; rms += v;
+      }
+      rms /= N;
+      if (calm) beat *= 0.3;
+      return { bands, beat, rms };
+    };
+
+    const curtains = (o, a, t, calm) => {
+      const { ctx, w, h } = o;
+      ctx.globalCompositeOperation = 'source-over';
+      const bg = ctx.createLinearGradient(0, 0, 0, h);
+      bg.addColorStop(0, '#0a0a10'); bg.addColorStop(1, '#050507');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'lighter';
+      const N = a.bands.length, baseY = h * 0.72, halfW = (w / N) * 1.7;
+      for (let i = 0; i < N; i++) {
+        const band = a.bands[i];
+        const x = (i + 0.5) / N * w;
+        const amp = (0.28 + 0.72 * band) * (calm ? 0.5 : 1);
+        const hgt = h * 0.82 * amp * (1 + 0.3 * a.beat * (calm ? 0.3 : 1));
+        const hue = 186 + (i / N) * 96 + Math.sin(t * 0.15 + i * 0.2) * 12;
+        ctx.globalAlpha = clampA((0.08 + 0.42 * band) * (calm ? 0.55 : 1));
+        ctx.drawImage(makeGlow(hue), x - halfW, baseY - hgt, halfW * 2, hgt * 2);
+      }
+      ctx.globalAlpha = 1;
+      if (a.beat > 0.01) {
+        ctx.globalAlpha = clampA(a.beat * (calm ? 0.28 : 0.7));
+        const br = w * 0.6;
+        ctx.drawImage(makeGlow(190), w / 2 - br, baseY - br * 0.5, br * 2, br);
+        ctx.globalAlpha = 1;
+      }
+    };
+
+    const caustic = (o, a, t, calm) => {
+      const { ctx, w, h } = o;
+      ctx.globalCompositeOperation = 'source-over';
+      const bg = ctx.createLinearGradient(0, 0, 0, h);
+      bg.addColorStop(0, '#04090c'); bg.addColorStop(1, '#02060a');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'lighter';
+      const lines = 30, ts = calm ? 0.4 : 1;
+      for (let i = 0; i < lines; i++) {
+        const p = i / lines;
+        const band = a.bands[i % a.bands.length];
+        const y = p * h;
+        ctx.beginPath();
+        for (let x = 0; x <= w; x += 7) {
+          const yy = y
+            + Math.sin(x * 0.021 + t * 1.3 * ts + i) * 16 * (0.4 + band)
+            + Math.sin(x * 0.006 - t * 0.8 * ts + i * 0.5) * 22
+            + Math.sin(x * 0.05 + t * 2.1 * ts + i * 1.7) * 5 * band;
+          if (x === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+        }
+        const hue = 188 + p * 34;
+        ctx.strokeStyle = `hsla(${hue},92%,72%,${0.04 + 0.11 * band + 0.09 * a.beat})`;
+        ctx.lineWidth = 1.1;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = clampA(0.18 + a.beat * (calm ? 0.14 : 0.5));
+      const br = w * 0.5;
+      ctx.drawImage(makeGlow(192), w / 2 - br, h / 2 - br, br * 2, br * 2);
+      ctx.globalAlpha = 1;
+    };
+
+    const mandala = (o, a, t, calm) => {
+      const { ctx, w, h } = o;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#070502'; ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'lighter';
+      const cx = w / 2, cy = h / 2, K = 8, P = 14;
+      const rot = t * 0.25 * (calm ? 0.4 : 1);
+      const S = Math.min(w, h);
+      for (let i = 0; i < P; i++) {
+        const band = a.bands[i];
+        const rr = (0.1 + (i / P) * 0.44 + band * 0.1) * S;
+        const size = (2 + band * 6 + a.beat * 4 * (calm ? 0.3 : 1)) * 3;
+        const hue = (i / P < 0.45) ? 42 + i * 1.5 : 190;
+        const sprite = makeGlow(hue);
+        ctx.globalAlpha = clampA((0.45 + 0.4 * band) * (calm ? 0.6 : 1));
+        for (let k = 0; k < K; k++) {
+          const ang = rot + (k / K) * Math.PI * 2 + i * 0.05;
+          const x = cx + Math.cos(ang) * rr;
+          const y = cy + Math.sin(ang) * rr;
+          ctx.drawImage(sprite, x - size, y - size, size * 2, size * 2);
+        }
+      }
+      ctx.globalAlpha = clampA(0.35 + a.beat * (calm ? 0.15 : 0.6));
+      const cr = S * 0.24;
+      ctx.drawImage(makeGlow(48), cx - cr, cy - cr, cr * 2, cr * 2);
+      ctx.globalAlpha = 1;
+    };
+
+    const draw = (o, a, t, calm) => {
+      if (o.kind === 'curtains') curtains(o, a, t, calm);
+      else if (o.kind === 'caustic') caustic(o, a, t, calm);
+      else if (o.kind === 'mandala') mandala(o, a, t, calm);
+    };
+
+    // static frames (visualizer panels) — a rich single frame
+    const sa = synth(13.4, false);
+    items.filter(o => !o.anim).forEach(o => draw(o, sa, 13.4, false));
+
+    const animated = items.filter(o => o.anim);
+    // seed a frame so nothing is blank before the observer/loop kicks in
+    const seed = synth(9.1, false);
+    animated.forEach(o => draw(o, seed, 9.1, false));
+
+    // only draw canvases currently on screen
+    const vis = new Set();
+    this._vis = vis;
+    this._io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) vis.add(e.target); else vis.delete(e.target); });
+    }, { threshold: 0.01 });
+    animated.forEach(o => this._io.observe(o.cv));
+
+    let last = 0;
+    const loop = (now) => {
+      self._raf = requestAnimationFrame(loop);
+      if (now - last < 33) return;          // cap ~30fps
+      last = now;
+      const t = now / 1000;
+      const calm = self.state.calm;
+      const a = synth(t, calm);
+      for (const o of animated) { if (vis.has(o.cv)) draw(o, a, t, calm); }
+    };
+    self._raf = requestAnimationFrame(loop);
+  }
+
+  componentWillUnmount() {
+    if (this._raf) cancelAnimationFrame(this._raf);
+    if (this._io) this._io.disconnect();
+  }
+}
+</script>
+</body>
+</html>

@@ -19,4 +19,6 @@ Decisions about jalwa — what we chose, the context, and the consequences we ac
 
 ## Index
 
-_No ADRs yet. Add the first as `0001-kebab-case-title.md`._
+- [0001 — Linear-scan library indexes](001-linear-scan-library-indexes.md)
+- [0002 — Audio probe/tags via shravan (tarang is video-only); album art dropped](002-audio-probe-via-shravan-no-album-art.md)
+- [0003 — Visual-language redesign: deep-void palette + three selectable dark themes](003-visual-language-redesign.md)

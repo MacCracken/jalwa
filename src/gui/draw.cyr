@@ -455,6 +455,7 @@ var JLW_GUI_ACT_NORMALIZE  = 16;
 var JLW_GUI_ACT_ENQUEUE    = 17;   # 'a' on selected library row (library.rs:148)
 var JLW_GUI_ACT_REMOVE     = 18;   # 'd' on selected queue row (queue.rs:102)
 var JLW_GUI_ACT_TOGGLE_GRID = 19;  # 'g' toggles library list/grid mode (library.rs:43-58)
+var JLW_GUI_ACT_CYCLE_THEME = 20;  # 't' cycles the dark theme (Aurora -> Caustic -> Sacred)
 
 #must_use
 fn jlw_gui_key_to_action(key) {
@@ -478,5 +479,6 @@ fn jlw_gui_key_to_action(key) {
     if (key == 97)              { return JLW_GUI_ACT_ENQUEUE; }      # 'a' (library: enqueue row)
     if (key == 100)             { return JLW_GUI_ACT_REMOVE; }       # 'd' (queue: remove row)
     if (key == 103)             { return JLW_GUI_ACT_TOGGLE_GRID; }  # 'g' (library: list/grid)
+    if (key == 116)             { return JLW_GUI_ACT_CYCLE_THEME; }  # 't' (cycle dark theme)
     return JLW_GUI_ACT_NONE;
 }

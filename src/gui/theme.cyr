@@ -1,18 +1,77 @@
-# gui/theme.cyr -- dark theme palette for the jalwa GUI.
-# Ports rust-old/crates/jalwa-gui/src/theme.rs. L3. The egui `apply(ctx)` (sets
-# Visuals on an egui Context) is DEFERRED to the dhancha style API. The color
-# CONSTANTS port as packed 0xRRGGBBAA ints (alpha 0xFF = fully opaque), with
-# byte accessors -- the tested, egui-independent part.
+# gui/theme.cyr -- jalwa's visual-language palette + selectable dark themes.
+#
+# ORIGINALLY a straight port of rust-old/crates/jalwa-gui/src/theme.rs -- one
+# "AGNOS-standard" dark palette (BG 0x18181C.., cyan 0x00BCD4). SUPERSEDED by the
+# "Jalwa Visual Language" north-star (docs/adr/003-visual-language-redesign.md): jalwa
+# keeps its dark-and-cyan SOUL but deepens the base to a near-black "void" from which
+# the accent glows, and ships THREE dark themes faithful to that language --
+#   A  Aurora Void   -- luminous cyan drifting into violet  (DEFAULT; today's identity, evolved)
+#   B  Caustic Glass -- aqua -> teal, crisper / higher-contrast
+#   C  Sacred Bloom  -- a gold core over a warm void
+# This DIVERGES from the Rust oracle's palette BY DESIGN (an ADR-blessed departure), so
+# tests/gui_theme.tcyr is now a design-spec test, not a rust-old parity test.
+#
+# Colors are packed 0xRRGGBBAA ints (alpha 0xFF = opaque), read via the byte accessors
+# and jlw_gui_color_to_xrgb (draw.cyr). The 8 JLW_GUI_* below are the ACTIVE palette:
+# mutable globals every view builder reads. jlw_gui_theme_apply(id) RESEATS them, so
+# switching a theme costs nothing at any of the ~50 call sites -- they keep reading the
+# same symbols. egui's apply(ctx) stays DEFERRED (no Cyrius egui).
 
-var JLW_GUI_BG_DARK        = 0x18181CFF;   # (24, 24, 28)
-var JLW_GUI_BG_PANEL       = 0x202026FF;   # (32, 32, 38)
-var JLW_GUI_BG_WIDGET      = 0x2C2C34FF;   # (44, 44, 52)
-var JLW_GUI_ACCENT         = 0x00BCD4FF;   # (0, 188, 212) cyan
-var JLW_GUI_ACCENT_DIM     = 0x008394FF;   # (0, 131, 148)
-var JLW_GUI_TEXT_PRIMARY   = 0xE6E6EBFF;   # (230, 230, 235)
-var JLW_GUI_TEXT_SECONDARY = 0xA0A0AAFF;   # (160, 160, 170)
-var JLW_GUI_TEXT_MUTED     = 0x64646EFF;   # (100, 100, 110)
+# ---- theme ids ----
+var JLW_GUI_THEME_AURORA  = 0;
+var JLW_GUI_THEME_CAUSTIC = 1;
+var JLW_GUI_THEME_SACRED  = 2;
+var JLW_GUI_THEME_COUNT   = 3;
 
+# Exact anchors below are lifted from the designer's per-view mockups
+# (docs/development/design/*.dc.html): the void bg, accent, accent-dim, and the
+# #F2F3F7 text base are the designer's literal values; TEXT_SECONDARY / TEXT_MUTED
+# are the opaque equivalents of the design's rgba(242,243,247, .6 / .45) text ramp
+# composited over the void (jalwa draws opaque text -- no per-glyph alpha blend).
+
+# ---- A: Aurora Void -- soft curtains of cyan drifting into violet (the default) ----
+var JLW_AURORA_BG_DARK        = 0x0A0A10FF;   # (10,10,16)    the void -- light blooms against it
+var JLW_AURORA_BG_PANEL       = 0x0F1020FF;   # (15,16,32)    a panel floating on the void
+var JLW_AURORA_BG_WIDGET      = 0x171A2EFF;   # (23,26,46)    widget surface (violet-cool)
+var JLW_AURORA_ACCENT         = 0x3DE7FFFF;   # (61,231,255)  luminous cyan -- the soul, made to glow
+var JLW_AURORA_ACCENT_DIM     = 0x0A8CA0FF;   # (10,140,160)  deep teal (gradient tail)
+var JLW_AURORA_TEXT_PRIMARY   = 0xF2F3F7FF;   # (242,243,247)
+var JLW_AURORA_TEXT_SECONDARY = 0x95969BFF;   # (149,150,155)
+var JLW_AURORA_TEXT_MUTED     = 0x727378FF;   # (114,115,120)
+
+# ---- B: Caustic Glass -- refracted water-light, lucid & crystalline ----
+var JLW_CAUSTIC_BG_DARK        = 0x04090CFF;   # (4,9,12)      blue-black void
+var JLW_CAUSTIC_BG_PANEL       = 0x071319FF;   # (7,19,25)
+var JLW_CAUSTIC_BG_WIDGET      = 0x0C1E26FF;   # (12,30,38)    teal-tinted glass
+var JLW_CAUSTIC_ACCENT         = 0x6FE6FFFF;   # (111,230,255) bright cyan specular
+var JLW_CAUSTIC_ACCENT_DIM     = 0x0A7FA0FF;   # (10,127,160)  teal (gradient tail)
+var JLW_CAUSTIC_TEXT_PRIMARY   = 0xF2F3F7FF;   # (242,243,247)
+var JLW_CAUSTIC_TEXT_SECONDARY = 0x939599FF;   # (147,149,153)
+var JLW_CAUSTIC_TEXT_MUTED     = 0x6F7276FF;   # (111,114,118)
+
+# ---- C: Sacred Bloom -- gold core, cyan corona, ceremonial warm void ----
+var JLW_SACRED_BG_DARK        = 0x0B0906FF;   # (11,9,6)      warm near-black void
+var JLW_SACRED_BG_PANEL       = 0x150F08FF;   # (21,15,8)
+var JLW_SACRED_BG_WIDGET      = 0x201810FF;   # (32,24,16)    warm brown-grey
+var JLW_SACRED_ACCENT         = 0xFFD76BFF;   # (255,215,107) gold core
+var JLW_SACRED_ACCENT_DIM     = 0xC98A1EFF;   # (201,138,30)  amber (gradient tail)
+var JLW_SACRED_TEXT_PRIMARY   = 0xF2F3F7FF;   # (242,243,247)
+var JLW_SACRED_TEXT_SECONDARY = 0x969597FF;   # (150,149,151)
+var JLW_SACRED_TEXT_MUTED     = 0x737272FF;   # (115,114,114)
+
+# ---- ACTIVE palette (initialized to Aurora Void) -- every view builder reads THESE ----
+var JLW_GUI_BG_DARK        = 0x0A0A10FF;
+var JLW_GUI_BG_PANEL       = 0x0F1020FF;
+var JLW_GUI_BG_WIDGET      = 0x171A2EFF;
+var JLW_GUI_ACCENT         = 0x3DE7FFFF;
+var JLW_GUI_ACCENT_DIM     = 0x0A8CA0FF;
+var JLW_GUI_TEXT_PRIMARY   = 0xF2F3F7FF;
+var JLW_GUI_TEXT_SECONDARY = 0x95969BFF;
+var JLW_GUI_TEXT_MUTED     = 0x727378FF;
+
+var jlw_gui_theme_id = 0;   # which theme is active (a JLW_GUI_THEME_*)
+
+# ---- byte accessors (packed 0xRRGGBBAA -> channel) ----
 #inline
 #must_use
 fn jlw_gui_color_r(c) { return (c / 16777216) & 0xFF; }   # >> 24
@@ -25,3 +84,72 @@ fn jlw_gui_color_b(c) { return (c / 256) & 0xFF; }        # >> 8
 #inline
 #must_use
 fn jlw_gui_color_a(c) { return c & 0xFF; }
+
+# Reseat the ACTIVE palette to theme `id` (out-of-range -> Aurora). Returns the id set.
+fn jlw_gui_theme_apply(id): i64 {
+    var t = id;
+    if (t < 0) { t = JLW_GUI_THEME_AURORA; }
+    if (t >= JLW_GUI_THEME_COUNT) { t = JLW_GUI_THEME_AURORA; }
+    if (t == JLW_GUI_THEME_CAUSTIC) {
+        JLW_GUI_BG_DARK        = JLW_CAUSTIC_BG_DARK;
+        JLW_GUI_BG_PANEL       = JLW_CAUSTIC_BG_PANEL;
+        JLW_GUI_BG_WIDGET      = JLW_CAUSTIC_BG_WIDGET;
+        JLW_GUI_ACCENT         = JLW_CAUSTIC_ACCENT;
+        JLW_GUI_ACCENT_DIM     = JLW_CAUSTIC_ACCENT_DIM;
+        JLW_GUI_TEXT_PRIMARY   = JLW_CAUSTIC_TEXT_PRIMARY;
+        JLW_GUI_TEXT_SECONDARY = JLW_CAUSTIC_TEXT_SECONDARY;
+        JLW_GUI_TEXT_MUTED     = JLW_CAUSTIC_TEXT_MUTED;
+    } else {
+        if (t == JLW_GUI_THEME_SACRED) {
+            JLW_GUI_BG_DARK        = JLW_SACRED_BG_DARK;
+            JLW_GUI_BG_PANEL       = JLW_SACRED_BG_PANEL;
+            JLW_GUI_BG_WIDGET      = JLW_SACRED_BG_WIDGET;
+            JLW_GUI_ACCENT         = JLW_SACRED_ACCENT;
+            JLW_GUI_ACCENT_DIM     = JLW_SACRED_ACCENT_DIM;
+            JLW_GUI_TEXT_PRIMARY   = JLW_SACRED_TEXT_PRIMARY;
+            JLW_GUI_TEXT_SECONDARY = JLW_SACRED_TEXT_SECONDARY;
+            JLW_GUI_TEXT_MUTED     = JLW_SACRED_TEXT_MUTED;
+        } else {
+            JLW_GUI_BG_DARK        = JLW_AURORA_BG_DARK;
+            JLW_GUI_BG_PANEL       = JLW_AURORA_BG_PANEL;
+            JLW_GUI_BG_WIDGET      = JLW_AURORA_BG_WIDGET;
+            JLW_GUI_ACCENT         = JLW_AURORA_ACCENT;
+            JLW_GUI_ACCENT_DIM     = JLW_AURORA_ACCENT_DIM;
+            JLW_GUI_TEXT_PRIMARY   = JLW_AURORA_TEXT_PRIMARY;
+            JLW_GUI_TEXT_SECONDARY = JLW_AURORA_TEXT_SECONDARY;
+            JLW_GUI_TEXT_MUTED     = JLW_AURORA_TEXT_MUTED;
+        }
+    }
+    jlw_gui_theme_id = t;
+    return t;
+}
+
+# Advance to the next theme, wrapping COUNT-1 -> 0. Bound to 't' in the running GUI
+# (draw.cyr key_to_action -> control.cyr apply_action). Returns the new active id.
+fn jlw_gui_theme_cycle(): i64 {
+    return jlw_gui_theme_apply((jlw_gui_theme_id + 1) % JLW_GUI_THEME_COUNT);
+}
+
+# Human-readable name for a theme id (for a future on-screen theme label).
+#must_use
+fn jlw_gui_theme_name(id) {
+    if (id == JLW_GUI_THEME_CAUSTIC) { return "Caustic Glass"; }
+    if (id == JLW_GUI_THEME_SACRED)  { return "Sacred Bloom"; }
+    return "Aurora Void";
+}
+
+# Map a $JALWA_THEME value -> theme id (unknown / null -> Aurora). getenv returns 0 when
+# the var is unset, so a null string safely falls through to the default.
+#must_use
+fn jlw_gui_theme_from_name(s): i64 {
+    if (s == 0)                   { return JLW_GUI_THEME_AURORA; }
+    if (streq(s, "caustic") == 1) { return JLW_GUI_THEME_CAUSTIC; }
+    if (streq(s, "sacred") == 1)  { return JLW_GUI_THEME_SACRED; }
+    return JLW_GUI_THEME_AURORA;
+}
+
+# Launch hook: pick the theme from $JALWA_THEME (aurora|caustic|sacred), else keep the
+# Aurora default. jlw_gui_run (present.cyr) calls this once before the first paint.
+fn jlw_gui_theme_init_from_env(): i64 {
+    return jlw_gui_theme_apply(jlw_gui_theme_from_name(getenv("JALWA_THEME")));
+}
