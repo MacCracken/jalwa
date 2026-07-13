@@ -287,6 +287,39 @@ jlw_gui_build_frame(fa, 800, 600, cf2);
 assert_eq(find_text(cf2, "Nothing playing") != 0, 1, "content switches to now-playing");
 assert_eq(find_text(cf2, "FrameTrack"), 0, "old library content gone");
 
+# ---- mini-player (compact window mode) ----
+test_group("build_mini");
+assert_eq(jlw_gui_mini_mode, 0, "starts in full-frame mode");
+var ma = jlw_gui_app_new(fresh_plib(), eng());
+var mpi = mk(ma, "MiniTrk", "MiniArt");
+JlwGuiApp_set_current_playing_id(ma, JlwMediaItem_id(mpi));
+var cm = vec_new();
+jlw_gui_build_mini(ma, 360, 200, cm);
+assert_eq(find_text(cm, "MINI PLAYER") != 0, 1, "mini eyebrow present");
+assert_eq(JlwDrawCmd_color(find_text(cm, "MINI PLAYER")), JLW_GUI_ACCENT, "mini eyebrow accent");
+assert_eq(find_text(cm, "MiniTrk") != 0, 1, "mini shows title");
+assert_eq(find_text(cm, "MiniArt") != 0, 1, "mini shows artist");
+assert_eq(count_kind(cm, JLW_DRAW_IMAGE), 1, "mini shows one album-art box");
+assert_eq(find_text(cm, "|<") != 0, 1, "mini has prev glyph");
+assert_eq(find_text(cm, "|>") != 0, 1, "mini play glyph when stopped");
+# empty state
+var me = jlw_gui_app_new(fresh_plib(), eng());
+var cme = vec_new();
+jlw_gui_build_mini(me, 360, 200, cme);
+assert_eq(find_text(cme, "Nothing playing") != 0, 1, "mini empty state");
+# toggle + build_frame dispatch: mini on renders the compact player (no sidebar)
+assert_eq(jlw_gui_mini_toggle(), 1, "toggle -> mini on");
+var fm = jlw_gui_app_new(fresh_plib(), eng());
+mk(fm, "FullTrk", "FA");
+var cfm = vec_new();
+jlw_gui_build_frame(fm, 800, 600, cfm);
+assert_eq(find_text(cfm, "MINI PLAYER") != 0, 1, "frame renders mini when toggled on");
+assert_eq(find_text(cfm, "Library"), 0, "no sidebar in mini mode");
+assert_eq(jlw_gui_mini_toggle(), 0, "toggle -> back to full");
+var cff = vec_new();
+jlw_gui_build_frame(fm, 800, 600, cff);
+assert_eq(find_text(cff, "Library") != 0, 1, "full frame restored (sidebar back)");
+
 # ---- input mapping ----
 test_group("key_to_action");
 assert_eq(jlw_gui_key_to_action(32), JLW_GUI_ACT_PLAY_PAUSE, "space -> play/pause");
@@ -335,6 +368,7 @@ assert_eq(jlw_gui_key_to_action(97), JLW_GUI_ACT_ENQUEUE, "a -> enqueue");
 assert_eq(jlw_gui_key_to_action(100), JLW_GUI_ACT_REMOVE, "d -> remove");
 assert_eq(jlw_gui_key_to_action(103), JLW_GUI_ACT_TOGGLE_GRID, "g -> toggle grid");
 assert_eq(jlw_gui_key_to_action(116), JLW_GUI_ACT_CYCLE_THEME, "t -> cycle theme");
+assert_eq(jlw_gui_key_to_action(122), JLW_GUI_ACT_TOGGLE_MINI, "z -> toggle mini-player");
 
 # ---- library grid mode (library.rs grid_view) ----
 test_group("build_library_grid");

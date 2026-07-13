@@ -259,6 +259,13 @@ JlwGuiApp_set_selected_index(sc, JLW_GUI_THEME_AURORA);
 jlw_gui_apply_action(sc, JLW_GUI_ACT_ENTER);
 assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_AURORA, "selecting Aurora + Enter restores it");
 
+test_group("toggle_mini action");
+assert_eq(jlw_gui_mini_mode, 0, "mini starts off");
+jlw_gui_apply_action(sc, JLW_GUI_ACT_TOGGLE_MINI);
+assert_eq(jlw_gui_mini_mode, 1, "action toggles mini on");
+jlw_gui_apply_action(sc, JLW_GUI_ACT_TOGGLE_MINI);
+assert_eq(jlw_gui_mini_mode, 0, "action toggles mini off");
+
 rm("/tmp/jalwa_gui_control.db");
 var rc = assert_summary();
 syscall(60, rc);

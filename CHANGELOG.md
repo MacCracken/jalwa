@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.3 — Mini-player (design→code arc complete) (2026-07-12)
+
+Final step of the [design→code arc](docs/development/roadmap.md): the **Mini-player**
+(from `docs/development/design/Jalwa Mini-Player.dc.html`). With this, every non-visualizer
+surface of the "Jalwa Visual Language" is in code.
+
+### Added
+- **Compact mini-player window mode** — press **`z`** to collapse the full
+  sidebar│content│transport frame into a single compact player: album art (framed),
+  title/artist/album, transport glyphs (prev/play/next), and a luminous seek + `M:SS / M:SS`.
+  Press `z` again to return to the full frame. New render-mode flag `jlw_gui_mini_mode`
+  (toggled by `JLW_GUI_ACT_TOGGLE_MINI`); `jlw_gui_build_frame` renders `build_mini`
+  instead of the full split when it's on. Picks up all three themes via the active palette.
+
 ## 1.2.2 — Queue and Search views (2026-07-12)
 
 Third step of the [design→code arc](docs/development/roadmap.md): the **Queue** and

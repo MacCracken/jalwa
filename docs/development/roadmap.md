@@ -4,15 +4,17 @@
 > [`state.md`](state.md); the full plan + module ledger in
 > [`port-audit.md`](port-audit.md). This file is the *order* and the *gates*.
 
-## Status: **v1.2.2 — visual-language arc in progress (themes, settings, chrome, Now-Playing + Library + Queue/Search)** ✅
+## Status: **v1.2.3 — visual-language design→code arc COMPLETE (all non-visualizer surfaces)** ✅
 
 All of jalwa-core, jalwa-playback (real audio), jalwa-ai, jalwa-ui, jalwa-gui, and
 the binary + MCP server are ported to Cyrius and green against `rust-old/`. **v1.1.0**
 shipped jalwa as a **window on the sovereign AGNOS desktop** (aethersafha over setu;
-`aethersafha-jalwa-smoke.sh`). **v1.2.0** opens the **design→code arc** (below): the
-"Jalwa Visual Language" color system, three switchable dark themes, an in-app Settings
-picker, and the first restyled surfaces. The only remaining *parity* gap is **video**,
-hard-blocked on still-Rust dependencies (see P1 below).
+`aethersafha-jalwa-smoke.sh`). The **v1.2.x design→code arc** (below) is now **complete**:
+the "Jalwa Visual Language" color system, three switchable dark themes, an in-app Settings
+picker, and every restyled surface (Now-Playing, Library, Queue, Search, Mini-player) are
+in code. What remains is the **GPU-era visualizer** layer (aurora/caustic/mandala, glass
+blur, 60fps bloom), backlogged with **video** — both hard-blocked on still-Rust
+dependencies (see P1 below).
 
 ## v1.2.x — design → code arc
 
@@ -27,7 +29,12 @@ doesn't have yet and stay backlogged with video (P1).
 | **1.2.0** | Palette + 3 themes, Settings/theme-switcher, Now-Playing hero, sidebar + transport chrome | `Jalwa Visual Language` + `Jalwa Now-Playing` | ✅ shipped ([ADR 0003](../adr/003-visual-language-redesign.md)) |
 | **1.2.1** | Library view (header + eyebrow + count, list/grid selection chrome) | `Jalwa Library.dc.html` | ✅ shipped |
 | **1.2.2** | Queue view + Search screen (eyebrow/count/chrome, focused query field + hints) | `Jalwa Queue & Search.dc.html` | ✅ shipped |
-| **1.2.3** | Mini-player | `Jalwa Mini-Player.dc.html` | ⏳ next |
+| **1.2.3** | Mini-player (compact window mode, `z` toggle) | `Jalwa Mini-Player.dc.html` | ✅ shipped |
+
+**Arc complete.** All five design mockups are ported (color/layout/typography). The only
+un-ported design content is the GPU-era **visualizer** (aurora/caustic/mandala shaders,
+glass blur, 60fps bloom) — it needs a GPU path jalwa doesn't have and is backlogged with
+video (P1).
 
 > The 8-slot active-palette contract (`src/gui/theme.cyr`) means each per-view port is
 > layout/typography work only — colors already resolve through the active theme, so all

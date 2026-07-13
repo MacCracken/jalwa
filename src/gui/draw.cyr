@@ -540,9 +540,66 @@ fn jlw_gui_build_settings(app, x, y, w, h, cmds) {
     return vec_len(cmds);
 }
 
+# ---- mini-player (compact window mode) ----
+# A whole-window compact player: album art, title/artist/album, transport glyphs, and a
+# luminous seek + time -- no sidebar, no view content. Toggled by 'z' (jlw_gui_mini_mode);
+# build_frame renders this instead of the full sidebar|content|transport split.
+var jlw_gui_mini_mode = 0;   # 0 = full frame, 1 = mini-player
+
+# Toggle the compact mini-player mode. Returns the new mode. Bound to 'z' via apply_action.
+fn jlw_gui_mini_toggle(): i64 {
+    if (jlw_gui_mini_mode == 0) { jlw_gui_mini_mode = 1; } else { jlw_gui_mini_mode = 0; }
+    return jlw_gui_mini_mode;
+}
+
+fn jlw_gui_build_mini(app, w, h, cmds) {
+    jlw_gui_draw_rect(cmds, 0, 0, w, h, JLW_GUI_BG_DARK);
+    var engine = JlwGuiApp_engine(app);
+    jlw_gui_draw_text(cmds, JLW_GUI_PAD, JLW_GUI_PAD + 4, JLW_GUI_ACCENT, "MINI PLAYER", 0);
+    var cid = JlwGuiApp_current_playing_id(app);
+    var item = 0;
+    if (cid != 0) { item = jlw_library_find_by_id(jlw_gui_app_lib(app), cid); }
+    var artsz = 96;
+    var ax = JLW_GUI_PAD;
+    var ay = JLW_GUI_ROW_H;
+    jlw_gui_draw_border(cmds, ax - 2, ay - 2, artsz + 4, artsz + 4, JLW_GUI_ACCENT_DIM);   # frosted frame
+    jlw_gui_draw_image(cmds, ax, ay, artsz, artsz, "");
+    var tx = ax + artsz + JLW_GUI_PAD * 2;
+    if (item == 0) {
+        jlw_gui_draw_text(cmds, tx, ay + 20, JLW_GUI_TEXT_MUTED, "Nothing playing", 0);
+    } else {
+        jlw_gui_draw_text(cmds, tx, ay + 16, JLW_GUI_TEXT_PRIMARY,   JlwMediaItem_title(item), 0);
+        jlw_gui_draw_text(cmds, tx, ay + 40, JLW_GUI_TEXT_SECONDARY, jlw_gui_np_artist(JlwMediaItem_artist(item)), 0);
+        jlw_gui_draw_text(cmds, tx, ay + 60, JLW_GUI_TEXT_MUTED,     jlw_gui_np_album(JlwMediaItem_album(item)), 0);
+    }
+    # transport glyphs (prev / play-or-pause / next) under the art
+    var by = ay + artsz + JLW_GUI_PAD * 2;
+    jlw_gui_draw_text(cmds, ax, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_PRIMARY, "|<", 0);
+    var play_glyph = "|>";
+    if (jlw_gui_play_label_code(jlw_engine_state(engine)) == JLW_GUI_ICON_PAUSE) { play_glyph = "||"; }
+    jlw_gui_draw_text(cmds, ax + JLW_GUI_ROW_H, by + JLW_GUI_TEXT_DY, JLW_GUI_ACCENT, play_glyph, 0);
+    jlw_gui_draw_text(cmds, ax + JLW_GUI_ROW_H * 2, by + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_PRIMARY, ">|", 0);
+    # luminous seek + elapsed/total
+    var py = by + JLW_GUI_ROW_H + JLW_GUI_PAD;
+    var bw = w - JLW_GUI_PAD * 2;
+    jlw_gui_draw_rect(cmds, JLW_GUI_PAD, py, bw, 4, JLW_GUI_BG_WIDGET);
+    var ratio = jlw_gui_progress_ratio(jlw_engine_position(engine), JlwPlaybackEngine_duration(engine));
+    var fillw = f64_to(f64_mul(ratio, f64_from(bw)));
+    if (fillw > 0) {
+        jlw_gui_draw_rect(cmds, JLW_GUI_PAD, py, fillw, 4, JLW_GUI_ACCENT);
+        jlw_gui_draw_rect(cmds, JLW_GUI_PAD + fillw - 2, py - 2, 4, 8, JLW_GUI_ACCENT);
+    }
+    jlw_gui_draw_text(cmds, JLW_GUI_PAD, py + 14, JLW_GUI_TEXT_MUTED,
+                      jlw_gui_transport_time(jlw_engine_position(engine),
+                                             JlwPlaybackEngine_duration(engine)), 0);
+    return vec_len(cmds);
+}
+
 # ---- full frame: split the window into sidebar | content | transport, then
 # dispatch the content region to the active view's builder. Pure arithmetic.
+# In mini mode ('z') the whole window is the compact player instead.
 fn jlw_gui_build_frame(app, w, h, cmds) {
+    if (jlw_gui_mini_mode == 1) { jlw_gui_build_mini(app, w, h, cmds); return vec_len(cmds); }
     jlw_gui_draw_rect(cmds, 0, 0, w, h, JLW_GUI_BG_DARK);
     var th = JLW_GUI_TRANSPORT_H;
     var sbw = JLW_GUI_SIDEBAR_W;
@@ -586,6 +643,7 @@ var JLW_GUI_ACT_ENQUEUE    = 17;   # 'a' on selected library row (library.rs:148
 var JLW_GUI_ACT_REMOVE     = 18;   # 'd' on selected queue row (queue.rs:102)
 var JLW_GUI_ACT_TOGGLE_GRID = 19;  # 'g' toggles library list/grid mode (library.rs:43-58)
 var JLW_GUI_ACT_CYCLE_THEME = 20;  # 't' cycles the dark theme (Aurora -> Caustic -> Sacred)
+var JLW_GUI_ACT_TOGGLE_MINI = 21;  # 'z' toggles the compact mini-player window mode
 
 #must_use
 fn jlw_gui_key_to_action(key) {
@@ -610,5 +668,6 @@ fn jlw_gui_key_to_action(key) {
     if (key == 100)             { return JLW_GUI_ACT_REMOVE; }       # 'd' (queue: remove row)
     if (key == 103)             { return JLW_GUI_ACT_TOGGLE_GRID; }  # 'g' (library: list/grid)
     if (key == 116)             { return JLW_GUI_ACT_CYCLE_THEME; }  # 't' (cycle dark theme)
+    if (key == 122)             { return JLW_GUI_ACT_TOGGLE_MINI; }  # 'z' (compact mini-player)
     return JLW_GUI_ACT_NONE;
 }

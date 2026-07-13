@@ -273,6 +273,7 @@ fn jlw_gui_apply_action(app, action) {
     if (action == JLW_GUI_ACT_REMOVE)     { jlw_gui_app_remove_selected_queue(app); return JLW_GUI_RUN_CONTINUE; }
     if (action == JLW_GUI_ACT_TOGGLE_GRID){ jlw_gui_app_toggle_grid(app); return JLW_GUI_RUN_CONTINUE; }
     if (action == JLW_GUI_ACT_CYCLE_THEME){ jlw_gui_theme_cycle(); return JLW_GUI_RUN_CONTINUE; }
+    if (action == JLW_GUI_ACT_TOGGLE_MINI){ jlw_gui_mini_toggle(); return JLW_GUI_RUN_CONTINUE; }
     return JLW_GUI_RUN_CONTINUE;                # NONE / unhandled
 }
 

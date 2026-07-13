@@ -31,10 +31,11 @@ Tracked as the **1.2.x design→code arc** in [`../roadmap.md`](../roadmap.md).
   theme picker, the **Now-Playing** hero, and the shared **sidebar + transport** chrome.
 - **Ported (v1.2.1)**: the **Library** view (header eyebrow + count, list/grid selection chrome).
 - **Ported (v1.2.2)**: the **Queue** view and the **Search** screen (focused query field + hints).
-- **Next (1.2.3)**: Mini-player view.
-- **Aspirational**: the GPU-era visualizers (aurora / caustic / mandala), frosted-glass
-  blur, and 60fps bloom need a GPU path jalwa doesn't have (its GUI is a CPU-framebuffer
-  rasterizer), so they stay backlogged with video.
+- **Ported (v1.2.3)**: the **Mini-player** (compact `z` window mode). **Arc complete** — all
+  five mockups are in code.
+- **Aspirational (only remaining design content)**: the GPU-era visualizers (aurora /
+  caustic / mandala), frosted-glass blur, and 60fps bloom need a GPU path jalwa doesn't
+  have (its GUI is a CPU-framebuffer rasterizer), so they stay backlogged with video.
 
 > When these are folded into first-party design docs, replace this folder with the
 > re-documented versions and drop the raw exports.
