@@ -35,7 +35,9 @@ Tracked as the **1.2.x design→code arc** in [`../roadmap.md`](../roadmap.md).
   five mockups are in code.
 - **Aspirational (only remaining design content)**: the GPU-era visualizers (aurora /
   caustic / mandala), frosted-glass blur, and 60fps bloom need a GPU path jalwa doesn't
-  have (its GUI is a CPU-framebuffer rasterizer), so they stay backlogged with video.
+  have (its GUI is a CPU-framebuffer rasterizer). Tracked as **P7** in
+  [`../roadmap.md`](../roadmap.md) (the adaptive-album-palette piece is CPU-feasible and
+  could land ahead of the GPU work).
 
 > When these are folded into first-party design docs, replace this folder with the
 > re-documented versions and drop the raw exports.

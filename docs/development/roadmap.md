@@ -95,10 +95,20 @@ Wayland shell is currently **keyboard-only** — `gui/wayland.cyr` binds `wl_key
    and scroll-wheel list scroll. The hit-test + action layers are unit-tested; only the `wl_pointer`
    wire handling is smoke-only.
 
-### P4 — GUI real album-art blit — needs an image decoder
-`gui/raster.cyr`'s IMAGE command draws a lettered placeholder box. A real album-art blit needs a
-JPEG/PNG decoder (none wired — tarang is video-only) plus scaled-RGBA alpha blit. Add a Cyrius
-image codec (or a `chitra` path), then blit decoded art into the now-playing + grid art slots.
+### P4 — GUI real album-art blit — decoder available (`chitra`); gap is cover-byte extraction
+The image decoder is **no longer the blocker**: **`chitra`** (sibling Cyrius pkg, v0.3.0,
+`dist/chitra.cyr`) decodes PNG **and** JPEG bytes → canonical RGBA8 on the CPU —
+`chitra_image_decode(src, len, err_out)` (format-agnostic) + `chitra_image_{width,height,pixels,channels}`.
+So a real blit is now three concrete steps, none GPU-bound:
+1. **Extract** the embedded cover bytes from tags — *the actual remaining gap*. Scanner `extract_art`
+   is a STUB (ADR 0002 dropped art: shravan has no picture parser). Add FLAC `PICTURE` + ID3 `APIC`
+   parsing to recover the raw PNG/JPEG bytes into `art_mime` / `art_data`.
+2. **Decode** those bytes → RGBA8 via `chitra_image_decode` (add `[deps.chitra]` → `dist/chitra.cyr`).
+3. **Blit** in `gui/raster.cyr`'s IMAGE command (today a lettered placeholder): nearest/bilinear
+   downscale + alpha composite into the now-playing + grid art slots; cache via `gui/art_cache.cyr`.
+
+Reversing ADR 0002's art drop warrants a follow-up ADR. The decoded RGBA8 also feeds **P7**'s
+adaptive-album-palette (cover → k-means dominant) — the CPU-feasible slice of the visualizer work.
 
 ### P5 — GUI + audio polish
 - Clip-stack → multi-level (scroll viewports currently use one clip level; fine today).
@@ -108,6 +118,24 @@ image codec (or a `chitra` path), then blit decoded art into the now-playing + g
 ### P6 — Later features (carried from the Rust roadmap)
 - Streaming-service adapters (Apple Music, Spotify, Tidal, YouTube Music, SoundCloud, Bandcamp,
   local/NAS, podcasts) — OAuth2/PKCE, unified search, library merge.
-- Subtitle rendering, A/V sync, audio visualizer (all post-video).
+- Subtitle rendering, A/V sync (post-video). *(Audio visualizer → P7.)*
 - Playlist editor, tray/notification, shortcut help dialog.
-- AGNOS integration: zugot marketplace recipe, daimon MCP tools, agnoshi intents, compositor mini-player.
+- AGNOS integration: zugot marketplace recipe, daimon MCP tools, agnoshi intents, compositor-level
+  mini-player window (the in-app compact mode shipped in v1.2.3).
+
+### P7 — GPU visualizer / "theophany mode" — needs a GPU render path
+The philosophical center of the "Jalwa Visual Language" north-star (see
+[`design/`](design/README.md) — `Jalwa Visual Language.dc.html`, section 05) and the **only**
+un-ported design content after the v1.2.x arc. jalwa's GUI is a **CPU-framebuffer rasterizer**
+(`gui/raster.cyr`), so the shader/blur/bloom pieces are blocked on a GPU path that doesn't exist yet
+(mabda or equivalent; dhancha was a design template, not a dep). Deferred:
+- **Full-screen visualizers** mapping the live audio pipeline (PCM · FFT · DSP bands · optional AI mood)
+  to light:
+  - *Manifest* — volumetric aurora: bass → curtain height/bloom, mids → hue rotation, treble → shimmer, beat → global bloom pulse.
+  - *Caustic* — refractive water-light: spectrum → caustic density/warp, loudness → surface brightness, beat → ripple from core, stereo → refraction drift.
+  - *Mandala* — sacred particle bloom: FFT bins → radial petal radius, rms → bloom radius, onset → rotation snap, beat → center supernova.
+- **Frosted-glass depth** (GPU-composited backdrop blur on chrome panels) and a **per-beat 60fps bloom** pulse.
+- **Adaptive album palette** (sample cover → k-means dominant + brightest accent → WCAG-safe glow, eased over a
+  ~600 ms spring on track change). *Pure pixel math, AI-optional* — the extraction/easing is CPU-feasible and
+  could land ahead of the GPU work, feeding the existing 8-slot active palette (`gui/theme.cyr`).
+- **Calm mode** (halve motion, dim bloom ~60%, freeze particles) as an accessibility toggle over the above.
