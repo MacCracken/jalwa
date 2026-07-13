@@ -21,7 +21,8 @@
 var JLW_GUI_THEME_AURORA  = 0;
 var JLW_GUI_THEME_CAUSTIC = 1;
 var JLW_GUI_THEME_SACRED  = 2;
-var JLW_GUI_THEME_COUNT   = 3;
+var JLW_GUI_THEME_SYSTEM  = 3;   # follow the desktop theme (rupa) — the "use system theme" setting
+var JLW_GUI_THEME_COUNT   = 4;
 
 # Exact anchors below are lifted from the designer's per-view mockups
 # (docs/development/design/*.dc.html): the void bg, accent, accent-dim, and the
@@ -85,11 +86,42 @@ fn jlw_gui_color_b(c) { return (c / 256) & 0xFF; }        # >> 8
 #must_use
 fn jlw_gui_color_a(c) { return c & 0xFF; }
 
+# ---- System (desktop) theme: pull the active rupa theme into jalwa's palette ----
+# jalwa keeps its own Aurora/Caustic/Sacred identity; SYSTEM is the opt-in setting that
+# reseats the active palette from the shared desktop theme (rupa), so the player matches
+# the compositor + every other app. rupa tokens are logical 0xRRGGBB; jalwa is packed
+# 0xRRGGBBAA, so pack opaque. (Founder-directed 2026-07-12; jalwa is a parallel-agent
+# repo — this only ADDS the System option + a rupa dep, touching none of the existing
+# themes or the ~50 draw call sites.)
+fn jlw_sys_col(c): i64 { return c * 256 + 255; }   # rupa 0xRRGGBB -> 0xRRGGBBAA (opaque)
+# a dimmed gradient-tail variant of a rupa accent (jalwa's ACCENT_DIM has no rupa peer)
+fn jlw_sys_dim(c): i64 {
+    var r = rupa_color_r(c) * 150 / 256;
+    var g = rupa_color_g(c) * 150 / 256;
+    var b = rupa_color_b(c) * 150 / 256;
+    return r * 16777216 + g * 65536 + b * 256 + 255;
+}
+
 # Reseat the ACTIVE palette to theme `id` (out-of-range -> Aurora). Returns the id set.
 fn jlw_gui_theme_apply(id): i64 {
     var t = id;
     if (t < 0) { t = JLW_GUI_THEME_AURORA; }
     if (t >= JLW_GUI_THEME_COUNT) { t = JLW_GUI_THEME_AURORA; }
+    if (t == JLW_GUI_THEME_SYSTEM) {
+        # Reseat from the active desktop theme (whatever rupa currently holds — MUDRA /
+        # SHANTA, dark or light). Re-apply to re-sync if the desktop theme changes.
+        var rt = rupa_theme_active();
+        JLW_GUI_BG_DARK        = jlw_sys_col(rupa_theme_bg(rt));
+        JLW_GUI_BG_PANEL       = jlw_sys_col(rupa_theme_panel(rt));
+        JLW_GUI_BG_WIDGET      = jlw_sys_col(rupa_theme_widget(rt));
+        JLW_GUI_ACCENT         = jlw_sys_col(rupa_theme_accent(rt));
+        JLW_GUI_ACCENT_DIM     = jlw_sys_dim(rupa_theme_accent(rt));
+        JLW_GUI_TEXT_PRIMARY   = jlw_sys_col(rupa_theme_ink(rt));
+        JLW_GUI_TEXT_SECONDARY = jlw_sys_col(rupa_theme_mute(rt));
+        JLW_GUI_TEXT_MUTED     = jlw_sys_col(rupa_theme_faint(rt));
+        jlw_gui_theme_id = t;
+        return t;
+    }
     if (t == JLW_GUI_THEME_CAUSTIC) {
         JLW_GUI_BG_DARK        = JLW_CAUSTIC_BG_DARK;
         JLW_GUI_BG_PANEL       = JLW_CAUSTIC_BG_PANEL;
@@ -135,6 +167,7 @@ fn jlw_gui_theme_cycle(): i64 {
 fn jlw_gui_theme_name(id) {
     if (id == JLW_GUI_THEME_CAUSTIC) { return "Caustic Glass"; }
     if (id == JLW_GUI_THEME_SACRED)  { return "Sacred Bloom"; }
+    if (id == JLW_GUI_THEME_SYSTEM)  { return "System (Desktop)"; }
     return "Aurora Void";
 }
 
@@ -154,6 +187,7 @@ fn jlw_gui_theme_from_name(s): i64 {
     if (s == 0)                   { return JLW_GUI_THEME_AURORA; }
     if (streq(s, "caustic") == 1) { return JLW_GUI_THEME_CAUSTIC; }
     if (streq(s, "sacred") == 1)  { return JLW_GUI_THEME_SACRED; }
+    if (streq(s, "system") == 1)  { return JLW_GUI_THEME_SYSTEM; }
     return JLW_GUI_THEME_AURORA;
 }
 

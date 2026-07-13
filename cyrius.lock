@@ -1,5 +1,6 @@
 commit	bda4e97b3cde3ee841dfcf530717a856c9d46c13	mishran	https://github.com/MacCracken/mishran.git	0.4.1
 commit	1d9b89ec8d5e49bdddad3514b6f079529fa2be29	setu	https://github.com/MacCracken/setu.git	0.4.0
+commit	841319fa31d6c808e508a0008dfd615cca03cb32	rupa	https://github.com/MacCracken/rupa.git	0.1.0
 commit	d4af3eeb15400bd1e8aa92f4737a727acd84068b	dhvani	https://github.com/MacCracken/dhvani.git	2.2.1
 commit	f229966c601da9528d383d6d2816f386083eabb6	abaco	https://github.com/MacCracken/abaco.git	2.3.2
 commit	6c900238c87c34897aa19fe320553e83c3417df0	darshana	https://github.com/MacCracken/darshana.git	0.9.0
@@ -56,6 +57,7 @@ a1a03ba1182179508dac948e51c3a0cedcb06c2fd38b3b1653262b1b81b2a368  lib/dhvani.cyr
 76396df54a5d38c26fcff8d87d0ea2c1fbd8ea6fc8ced058e903d96cc0b0e592  lib/io.cyr
 e5c01430c59451f1e4e75e371b7c5d25cbf3b4b02f2eb30e680358bbb809ffbb  lib/sync.cyr
 257ab9ff2f0555f015865cadf5fdcb7e56c9a4d57d9153158d86ba8c8509827b  lib/setu.cyr
+4d46d2229be82960cb81afdd27ec378fc315f87b7a13e3a34f3fe4a5465e950c  lib/rupa.cyr
 9fd6444e8cfcf7950837e955473adc5bab6d7bf4fa2c15f8ce2578360c4100eb  lib/hashmap.cyr
 f39294af5dc32bec02ec7d2204ca82033abe4f4bafc78e9be792eb178132e244  lib/fnptr.cyr
 5b5dd5a59b766d642d711e8c884780bfe3ba9efd2dcefb3c76230208556e8d54  lib/kashi_font_data.cyr

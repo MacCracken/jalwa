@@ -32,6 +32,15 @@ git = "https://github.com/MacCracken/setu.git"
 tag = "0.4.0"
 modules = ["dist/setu.cyr"]
 
+# rupa — the shared desktop theme-token core (MUDRA / SHANTA). jalwa keeps its own
+# Aurora/Caustic/Sacred themes; the new "System (Desktop)" theme option reseats the
+# active palette from rupa's active theme so the player can match the compositor +
+# every other app. Only the SYSTEM branch of gui/theme.cyr reads rupa_theme_*.
+[deps.rupa]
+git = "https://github.com/MacCracken/rupa.git"
+tag = "0.1.0"
+modules = ["dist/rupa.cyr"]
+
 [deps.dhvani]
 git = "https://github.com/MacCracken/dhvani.git"
 tag = "2.2.1"

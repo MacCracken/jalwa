@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.4.0 — "System (Desktop)" theme: follow the shared desktop theme (2026-07-12)
+
+jalwa keeps its own Aurora / Caustic / Sacred identity and gains a **fourth theme option,
+"System (Desktop)"**, that pulls in the shared AGNOS desktop theme (**rupa**) so the player can
+match the compositor and every other app. Founder-directed; additive only — the existing themes
+and the ~50 draw call sites are untouched.
+
+### Added
+- **`[deps.rupa]` (0.1.0)** — the shared desktop theme-token core (MUDRA / SHANTA).
+- **`JLW_GUI_THEME_SYSTEM` (id 3)** — a new selectable theme (COUNT 3 → 4). Selecting it (the
+  `t` cycle, `JALWA_THEME=system`, or `jlw_gui_theme_apply`) reseats the active `JLW_GUI_*`
+  palette from rupa's active theme (bg/panel/widget/accent/text ← rupa tokens, packed logical
+  `0xRRGGBB` → jalwa's `0xRRGGBBAA`; `ACCENT_DIM` derived as a dimmed accent). Re-apply to
+  re-sync if the desktop theme changes at runtime. `jlw_gui_theme_from_name("system")` +
+  `jlw_gui_theme_name` → "System (Desktop)".
+- **`tests/gui_theme.tcyr`** — asserts System pulls rupa's MUDRA · Carbon default (and follows a
+  SHANTA switch); suite 50 → **64**. Both targets build (host 2.66 MB / agnos 2.60 MB).
+
+### Note
+jalwa is a parallel-agent repo; this change was founder-directed (2026-07-12) and is deliberately
+additive (only the SYSTEM branch of `gui/theme.cyr` + the rupa dep) to avoid conflicting with
+in-flight work.
+
 ## 1.3.0 — Real album art (2026-07-12)
 
 Embedded cover art now renders in the GUI ([ADR 0004](docs/adr/004-real-album-art-via-chitra.md),

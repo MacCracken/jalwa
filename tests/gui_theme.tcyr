@@ -41,7 +41,8 @@ test_group("theme ids");
 assert_eq(JLW_GUI_THEME_AURORA, 0, "Aurora = 0");
 assert_eq(JLW_GUI_THEME_CAUSTIC, 1, "Caustic = 1");
 assert_eq(JLW_GUI_THEME_SACRED, 2, "Sacred = 2");
-assert_eq(JLW_GUI_THEME_COUNT, 3, "COUNT = 3");
+assert_eq(JLW_GUI_THEME_SYSTEM, 3, "System = 3");
+assert_eq(JLW_GUI_THEME_COUNT, 4, "COUNT = 4 (incl. System)");
 
 test_group("apply: caustic glass");
 assert_eq(jlw_gui_theme_apply(JLW_GUI_THEME_CAUSTIC), JLW_GUI_THEME_CAUSTIC, "apply returns the id");
@@ -63,6 +64,23 @@ assert_eq(jlw_gui_color_b(JLW_GUI_ACCENT), 107, "Sacred ACCENT b=107");
 # warm void base (#0B0906)
 assert_eq(jlw_gui_color_r(JLW_GUI_BG_DARK), 11, "Sacred BG_DARK r=11 (warm void)");
 
+test_group("apply: system (desktop theme = rupa)");
+jlw_gui_theme_apply(JLW_GUI_THEME_SYSTEM);
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_SYSTEM, "active theme is now System");
+# pulls rupa's active theme (default MUDRA · Carbon): bg #0B0C0E, accent cyan #00E5FF
+assert_eq(jlw_gui_color_r(JLW_GUI_BG_DARK), 11, "System BG_DARK r=11 (rupa mudra-dark void)");
+assert_eq(jlw_gui_color_g(JLW_GUI_BG_DARK), 12, "System BG_DARK g=12");
+assert_eq(jlw_gui_color_b(JLW_GUI_BG_DARK), 14, "System BG_DARK b=14");
+assert_eq(jlw_gui_color_r(JLW_GUI_ACCENT), 0, "System ACCENT r=0 (rupa cyan)");
+assert_eq(jlw_gui_color_g(JLW_GUI_ACCENT), 229, "System ACCENT g=229");
+assert_eq(jlw_gui_color_b(JLW_GUI_ACCENT), 255, "System ACCENT b=255");
+assert_eq(jlw_gui_color_a(JLW_GUI_BG_DARK), 255, "System palette is opaque");
+# switching the desktop theme re-colours System on re-apply
+rupa_theme_set_active_name("shanta-light");
+jlw_gui_theme_apply(JLW_GUI_THEME_SYSTEM);
+assert_eq(jlw_gui_color_r(JLW_GUI_BG_DARK), 242, "System follows desktop -> SHANTA rice paper r=242");
+rupa_theme_set_active_name("mudra-dark");
+
 test_group("apply: back to aurora + out-of-range clamps");
 jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);
 assert_eq(jlw_gui_color_r(JLW_GUI_ACCENT), 61, "Aurora restored -> cyan accent");
@@ -70,21 +88,24 @@ assert_eq(jlw_gui_theme_apply(99), JLW_GUI_THEME_AURORA, "id 99 clamps to Aurora
 assert_eq(jlw_gui_theme_apply(0 - 1), JLW_GUI_THEME_AURORA, "id -1 clamps to Aurora");
 assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_AURORA, "clamp leaves Aurora active");
 
-test_group("cycle wraps aurora -> caustic -> sacred -> aurora");
+test_group("cycle wraps aurora -> caustic -> sacred -> system -> aurora");
 jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);
 assert_eq(jlw_gui_theme_cycle(), JLW_GUI_THEME_CAUSTIC, "aurora -> caustic");
 assert_eq(jlw_gui_theme_cycle(), JLW_GUI_THEME_SACRED, "caustic -> sacred");
-assert_eq(jlw_gui_theme_cycle(), JLW_GUI_THEME_AURORA, "sacred -> aurora (wrap)");
+assert_eq(jlw_gui_theme_cycle(), JLW_GUI_THEME_SYSTEM, "sacred -> system");
+assert_eq(jlw_gui_theme_cycle(), JLW_GUI_THEME_AURORA, "system -> aurora (wrap)");
 
 test_group("theme names");
 assert_eq(streq(jlw_gui_theme_name(JLW_GUI_THEME_AURORA), "Aurora Void"), 1, "name aurora");
 assert_eq(streq(jlw_gui_theme_name(JLW_GUI_THEME_CAUSTIC), "Caustic Glass"), 1, "name caustic");
 assert_eq(streq(jlw_gui_theme_name(JLW_GUI_THEME_SACRED), "Sacred Bloom"), 1, "name sacred");
+assert_eq(streq(jlw_gui_theme_name(JLW_GUI_THEME_SYSTEM), "System (Desktop)"), 1, "name system");
 
 test_group("from_name (JALWA_THEME selection)");
 assert_eq(jlw_gui_theme_from_name("aurora"), JLW_GUI_THEME_AURORA, "\"aurora\" -> 0");
 assert_eq(jlw_gui_theme_from_name("caustic"), JLW_GUI_THEME_CAUSTIC, "\"caustic\" -> 1");
 assert_eq(jlw_gui_theme_from_name("sacred"), JLW_GUI_THEME_SACRED, "\"sacred\" -> 2");
+assert_eq(jlw_gui_theme_from_name("system"), JLW_GUI_THEME_SYSTEM, "\"system\" -> 3");
 assert_eq(jlw_gui_theme_from_name("bogus"), JLW_GUI_THEME_AURORA, "unknown -> Aurora");
 assert_eq(jlw_gui_theme_from_name(0), JLW_GUI_THEME_AURORA, "null (unset env) -> Aurora");
 
