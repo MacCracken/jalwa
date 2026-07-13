@@ -59,6 +59,14 @@ git = "https://github.com/MacCracken/shravan.git"
 tag = "2.6.7"
 modules = ["dist/shravan.cyr"]
 
+# chitra — pure-Cyrius CPU image decoder (PNG + baseline JPEG -> RGBA8). Powers real
+# album-art blit (src/gui/raster.cyr). Stdlib-stripped: calls sankoch's crc32/zlib_decompress,
+# so it MUST resolve after [deps.sankoch] (dep order = concat order).
+[deps.chitra]
+git = "https://github.com/MacCracken/chitra.git"
+tag = "0.3.0"
+modules = ["dist/chitra.cyr"]
+
 # vani = ALSA/agnos audio OUTPUT (playback sink). Audio pipeline:
 # shravan decode -> dhvani DSP -> vani out. Not tarang (video-only).
 [deps.vani]

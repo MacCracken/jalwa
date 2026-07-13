@@ -16,9 +16,11 @@ var JLW_GUI_ART_MAX_NO_ART   = 1000;   # const MAX_NO_ART
 # tex_ids: vec of Uuid ptrs (16-byte). tex_access: parallel vec of u64
 # last_access, index-aligned with tex_ids. no_art: vec of Uuid ptrs as a set.
 # access_counter: u64, monotonically increasing.
+# tex_pix/tex_w/tex_h: decoded-RGBA storage, parallel + index-aligned with tex_ids
+# (v1.3.0). tex_pix = chitra RGBA8 buffer ptr, tex_w/tex_h = its pixel dims.
 #derive(accessors)
 struct JlwGuiArtCache {
-    tex_ids; tex_access; no_art; access_counter;
+    tex_ids; tex_access; tex_pix; tex_w; tex_h; no_art; access_counter;
 }
 
 # ArtCache::new()
@@ -27,9 +29,21 @@ fn jlw_gui_art_cache_new() {
     var self = alloc(sizeof(JlwGuiArtCache));
     JlwGuiArtCache_set_tex_ids(self, vec_new());
     JlwGuiArtCache_set_tex_access(self, vec_new());
+    JlwGuiArtCache_set_tex_pix(self, vec_new());
+    JlwGuiArtCache_set_tex_w(self, vec_new());
+    JlwGuiArtCache_set_tex_h(self, vec_new());
     JlwGuiArtCache_set_no_art(self, vec_new());
     JlwGuiArtCache_set_access_counter(self, 0);
     return self;
+}
+
+# Process-global cache (lazily created) -- the raster IMAGE branch resolves art through
+# this, keeping jlw_gui_raster's signature stable (mirrors jlw_gui_theme_id / mini_mode).
+var JLW_GUI_ART_CACHE_G = 0;
+#must_use
+fn jlw_gui_art_cache_global() {
+    if (JLW_GUI_ART_CACHE_G == 0) { JLW_GUI_ART_CACHE_G = jlw_gui_art_cache_new(); }
+    return JLW_GUI_ART_CACHE_G;
 }
 
 # no_art.contains(id) -- linear scan by value.
@@ -73,6 +87,9 @@ fn jlw_gui_art_evict_if_full(self) {
         }
         vec_remove(ids, oldest);
         vec_remove(acc, oldest);
+        vec_remove(JlwGuiArtCache_tex_pix(self), oldest);   # keep the parallel pixel vecs aligned
+        vec_remove(JlwGuiArtCache_tex_w(self), oldest);
+        vec_remove(JlwGuiArtCache_tex_h(self), oldest);
     }
     return 0;
 }
@@ -81,17 +98,29 @@ fn jlw_gui_art_evict_if_full(self) {
 fn jlw_gui_art_invalidate(self, item_id) {
     var ids = JlwGuiArtCache_tex_ids(self);
     var acc = JlwGuiArtCache_tex_access(self);
+    var pix = JlwGuiArtCache_tex_pix(self);
+    var tw = JlwGuiArtCache_tex_w(self);
+    var th = JlwGuiArtCache_tex_h(self);
     var n = vec_len(ids);
     var kids = vec_new();
     var kacc = vec_new();
+    var kpix = vec_new();
+    var kw = vec_new();
+    var kh = vec_new();
     for (var i = 0; i < n; i = i + 1) {
         if (jlw_uuid_eq(vec_get(ids, i), item_id) == 0) {
             vec_push(kids, vec_get(ids, i));
             vec_push(kacc, vec_get(acc, i));
+            vec_push(kpix, vec_get(pix, i));
+            vec_push(kw, vec_get(tw, i));
+            vec_push(kh, vec_get(th, i));
         }
     }
     JlwGuiArtCache_set_tex_ids(self, kids);
     JlwGuiArtCache_set_tex_access(self, kacc);
+    JlwGuiArtCache_set_tex_pix(self, kpix);
+    JlwGuiArtCache_set_tex_w(self, kw);
+    JlwGuiArtCache_set_tex_h(self, kh);
 
     var s = JlwGuiArtCache_no_art(self);
     var m = vec_len(s);
@@ -115,4 +144,57 @@ fn jlw_gui_art_get_miss(self, item_id) {
     vec_push(JlwGuiArtCache_no_art(self), item_id);
     jlw_gui_art_evict_no_art_if_full(self);
     return 0;
+}
+
+# record item_id as no-art (eviction-bounded) and return 0 (miss). Helper for get().
+fn jlw_gui_art__mark_no_art(self, item_id) {
+    vec_push(JlwGuiArtCache_no_art(self), item_id);
+    jlw_gui_art_evict_no_art_if_full(self);
+    return 0;
+}
+
+# get(item_id, path): the REAL v1.3.0 load path (rust-old ArtCache::get, keyed by Uuid,
+# re-extracting from the file since the DB carries no art). On a HIT, writes the cached
+# {pixels, w, h} into out24 (out+0=RGBA ptr, +8=width, +16=height) and returns 1. On a
+# MISS, extracts the embedded cover from `path`, decodes it via chitra (once), caches the
+# RGBA, and returns 1 with out24 filled; if there is no cover / decode fails / it is too
+# large, records no-art and returns 0. Decoding happens ONCE per id (never per frame) --
+# the bump allocator never frees, so a per-frame decode would leak every repaint.
+fn jlw_gui_art_get(self, item_id, path, out24) {
+    JlwGuiArtCache_set_access_counter(self, JlwGuiArtCache_access_counter(self) + 1);
+    var counter = JlwGuiArtCache_access_counter(self);
+    var ids = JlwGuiArtCache_tex_ids(self);
+    var n = vec_len(ids);
+    for (var i = 0; i < n; i = i + 1) {
+        if (jlw_uuid_eq(vec_get(ids, i), item_id) == 1) {         # HIT -> touch LRU + return
+            vec_set(JlwGuiArtCache_tex_access(self), i, counter);
+            store64(out24, vec_get(JlwGuiArtCache_tex_pix(self), i));
+            store64(out24 + 8, vec_get(JlwGuiArtCache_tex_w(self), i));
+            store64(out24 + 16, vec_get(JlwGuiArtCache_tex_h(self), i));
+            return 1;
+        }
+    }
+    if (jlw_gui_art_no_art_contains(self, item_id) == 1) { return 0; }   # known no-art
+    var len = 0;                                                  # MISS -> extract + decode
+    var bytes = jlw_extract_cover_art(path, &len);
+    if (bytes == 0 || len <= 0) { return jlw_gui_art__mark_no_art(self, item_id); }
+    var err = 0;
+    var img = chitra_image_decode(bytes, len, &err);              # PNG / baseline-JPEG only
+    if (img == 0) { return jlw_gui_art__mark_no_art(self, item_id); }
+    var w = chitra_image_width(img);
+    var h = chitra_image_height(img);
+    var px = chitra_image_pixels(img);
+    if (px == 0 || w <= 0 || h <= 0 || w > 2048 || h > 2048) {    # oversize guard (rust-old parity)
+        return jlw_gui_art__mark_no_art(self, item_id);
+    }
+    jlw_gui_art_evict_if_full(self);
+    vec_push(JlwGuiArtCache_tex_ids(self), item_id);
+    vec_push(JlwGuiArtCache_tex_access(self), counter);
+    vec_push(JlwGuiArtCache_tex_pix(self), px);
+    vec_push(JlwGuiArtCache_tex_w(self), w);
+    vec_push(JlwGuiArtCache_tex_h(self), h);
+    store64(out24, px);
+    store64(out24 + 8, w);
+    store64(out24 + 16, h);
+    return 1;
 }

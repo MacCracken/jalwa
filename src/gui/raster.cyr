@@ -104,6 +104,57 @@ fn jlw_gui_fb_fill_rect(buf, fbw, fbh, x, y, w, h, xrgb) {
     return 0;
 }
 
+# blit a source RGBA8 image (src, sw x sh, byte order R,G,B,A) into the dest box
+# (dx,dy,dw,dh), nearest-neighbor scaled + integer alpha-over the existing framebuffer.
+# Clips to fb bounds AND the active JLW_GUI_CLIP_* rect (same idiom as fill_rect); the
+# source index is taken from the UN-clipped dest origin so partial clipping doesn't shift
+# the image. Alloc-free: composites straight into buf. (v1.3.0 album-art blit.)
+fn jlw_gui_fb_blit_rgba(buf, fbw, fbh, dx, dy, dw, dh, src, sw, sh) {
+    if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 || src == 0) { return 0; }
+    var x0 = dx;
+    var y0 = dy;
+    var x1 = dx + dw;
+    var y1 = dy + dh;
+    if (x0 < 0) { x0 = 0; }
+    if (y0 < 0) { y0 = 0; }
+    if (x1 > fbw) { x1 = fbw; }
+    if (y1 > fbh) { y1 = fbh; }
+    if (x0 < JLW_GUI_CLIP_X0) { x0 = JLW_GUI_CLIP_X0; }
+    if (y0 < JLW_GUI_CLIP_Y0) { y0 = JLW_GUI_CLIP_Y0; }
+    if (x1 > JLW_GUI_CLIP_X1) { x1 = JLW_GUI_CLIP_X1; }
+    if (y1 > JLW_GUI_CLIP_Y1) { y1 = JLW_GUI_CLIP_Y1; }
+    var yy = y0;
+    while (yy < y1) {
+        var sy = (yy - dy) * sh / dh;                # nearest row from un-clipped origin
+        if (sy >= sh) { sy = sh - 1; }
+        var xx = x0;
+        while (xx < x1) {
+            var sx = (xx - dx) * sw / dw;            # nearest col
+            if (sx >= sw) { sx = sw - 1; }
+            var sp = src + (sy * sw + sx) * 4;
+            var sa = load8(sp + 3);
+            var fb = buf + (yy * fbw + xx) * 4;
+            if (sa == 255) {
+                store32(fb, load8(sp) * 65536 + load8(sp + 1) * 256 + load8(sp + 2));
+            } else {
+                if (sa != 0) {                       # alpha-over widget-bg; skip fully transparent
+                    var dst = load32(fb);
+                    var dr = (dst / 65536) & 0xFF;
+                    var dg = (dst / 256) & 0xFF;
+                    var db = dst & 0xFF;
+                    var rr = (load8(sp) * sa + dr * (255 - sa)) / 255;
+                    var gg = (load8(sp + 1) * sa + dg * (255 - sa)) / 255;
+                    var bb = (load8(sp + 2) * sa + db * (255 - sa)) / 255;
+                    store32(fb, rr * 65536 + gg * 256 + bb);
+                }
+            }
+            xx = xx + 1;
+        }
+        yy = yy + 1;
+    }
+    return 0;
+}
+
 # 1px rectangle outline (top/bottom/left/right edges).
 fn jlw_gui_fb_border(buf, fbw, fbh, x, y, w, h, xrgb) {
     if (w <= 0 || h <= 0) { return 0; }
@@ -238,21 +289,42 @@ fn jlw_gui_raster(cmds, buf, fbw, fbh) {
                             JlwDrawCmd_text(c), col, JlwDrawCmd_aux(c));
         }
         if (k == JLW_DRAW_IMAGE) {
-            # No decoded-image source yet (real album-art blit needs a JPEG/PNG decoder,
-            # backlogged). Draw a lettered placeholder: widget-bg box + muted outline +
-            # the art id's first glyph centered. `text` carries the id/title.
+            # Real album art (v1.3.0): the command's `aux` carries the media item; resolve
+            # its cover through the global art cache (extract+decode once, cached by Uuid)
+            # and aspect-fit-blit it. No art / decode-fail / no item -> the lettered
+            # placeholder below (widget-bg box + muted outline + first glyph of `text`).
             var ix = JlwDrawCmd_x(c);
             var iy = JlwDrawCmd_y(c);
             var iw = JlwDrawCmd_w(c);
             var ih = JlwDrawCmd_h(c);
-            jlw_gui_fb_fill_rect(buf, fbw, fbh, ix, iy, iw, ih, jlw_gui_color_to_xrgb(JLW_GUI_BG_WIDGET));
-            jlw_gui_fb_border(buf, fbw, fbh, ix, iy, iw, ih, jlw_gui_color_to_xrgb(JLW_GUI_TEXT_MUTED));
-            var art = JlwDrawCmd_text(c);
-            if (art != 0) { if (load8(art) != 0) {
-                var g = jlw_gui__cp_to_glyph(jlw_gui__utf8_at(art, 0) / 8);
-                jlw_gui_fb_glyph(buf, fbw, fbh, ix + iw / 2 - JLW_GLYPH_W / 2, iy + ih / 2 - JLW_GLYPH_H / 2,
-                                 g, jlw_gui_color_to_xrgb(JLW_GUI_TEXT_SECONDARY));
-            } }
+            var item = JlwDrawCmd_aux(c);
+            var tex[24];
+            var have = 0;
+            if (item != 0) {
+                have = jlw_gui_art_get(jlw_gui_art_cache_global(),
+                                       JlwMediaItem_id(item), JlwMediaItem_path(item), &tex);
+            }
+            if (have == 1) {
+                var src = load64(&tex);
+                var sw = load64(&tex + 8);
+                var sh = load64(&tex + 16);
+                var dw = iw;                            # aspect-fit into the box, centered
+                var dh = ih;
+                if (sw * ih > sh * iw) { dh = sh * iw / sw; } else { dw = sw * ih / sh; }
+                if (dw < 1) { dw = 1; }
+                if (dh < 1) { dh = 1; }
+                jlw_gui_fb_fill_rect(buf, fbw, fbh, ix, iy, iw, ih, jlw_gui_color_to_xrgb(JLW_GUI_BG_DARK));   # letterbox
+                jlw_gui_fb_blit_rgba(buf, fbw, fbh, ix + (iw - dw) / 2, iy + (ih - dh) / 2, dw, dh, src, sw, sh);
+            } else {
+                jlw_gui_fb_fill_rect(buf, fbw, fbh, ix, iy, iw, ih, jlw_gui_color_to_xrgb(JLW_GUI_BG_WIDGET));
+                jlw_gui_fb_border(buf, fbw, fbh, ix, iy, iw, ih, jlw_gui_color_to_xrgb(JLW_GUI_TEXT_MUTED));
+                var art = JlwDrawCmd_text(c);
+                if (art != 0) { if (load8(art) != 0) {
+                    var g = jlw_gui__cp_to_glyph(jlw_gui__utf8_at(art, 0) / 8);
+                    jlw_gui_fb_glyph(buf, fbw, fbh, ix + iw / 2 - JLW_GLYPH_W / 2, iy + ih / 2 - JLW_GLYPH_H / 2,
+                                     g, jlw_gui_color_to_xrgb(JLW_GUI_TEXT_SECONDARY));
+                } }
+            }
         }
         if (k == JLW_DRAW_CLIP_PUSH) {
             jlw_gui_clip_set(JlwDrawCmd_x(c), JlwDrawCmd_y(c), JlwDrawCmd_w(c), JlwDrawCmd_h(c));

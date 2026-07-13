@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.0 — Real album art (2026-07-12)
+
+Embedded cover art now renders in the GUI ([ADR 0004](docs/adr/004-real-album-art-via-chitra.md),
+reversing [ADR 0002](docs/adr/002-audio-probe-via-shravan-no-album-art.md)'s art drop) — the
+P4 backlog item.
+
+### Added
+- **`chitra` dependency** (`[deps.chitra]` → `dist/chitra.cyr`, v0.3.0) — a pure-Cyrius CPU
+  image decoder (PNG + baseline JPEG → RGBA8).
+- **Embedded cover extraction** (`src/core/scanner.cyr`) — jalwa-owned FLAC
+  `METADATA_BLOCK_PICTURE` (type 6) and ID3v2 `APIC` parsers (`jlw_extract_cover_art`);
+  shravan has no picture API. FLAC + MP3.
+- **Real album-art blit** — a new alloc-free `jlw_gui_fb_blit_rgba` (nearest-neighbor scale
+  + integer alpha-over, clip-aware) renders decoded covers in Now-Playing, the Library grid,
+  and the Mini-player; the lettered placeholder remains the no-art fallback.
+- **Decoded-art cache** — `gui/art_cache.cyr` now stores decoded RGBA (LRU by Uuid) and
+  `jlw_gui_art_get(id, path)` extracts+decodes **on demand from the file path**, once per
+  cover (never per frame). Art is **not** persisted in the DB (no schema change, no bloat;
+  re-derived from the path across restarts).
+
+### Notes
+- Baseline JPEG + 8-bit PNG covers only; progressive/CMYK JPEG and interlaced PNG fall back
+  to the placeholder. WAV/OGG/MP4 cover extraction is deferred.
+
 ## 1.2.3 — Mini-player (design→code arc complete) (2026-07-12)
 
 Final step of the [design→code arc](docs/development/roadmap.md): the **Mini-player**

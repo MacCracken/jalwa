@@ -6,6 +6,8 @@
 
 include "src/error.cyr"
 include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/core/scanner.cyr"
 include "src/gui/art_cache.cyr"
 
 alloc_init();
@@ -76,6 +78,27 @@ jlw_gui_art_get_miss(c6, jlw_uuid_v4());
 assert_eq(JlwGuiArtCache_access_counter(c6), 1, "counter 1 after first get");
 jlw_gui_art_get_miss(c6, jlw_uuid_v4());
 assert_eq(JlwGuiArtCache_access_counter(c6), 2, "counter 2 after second get");
+
+# ---- get(): the real v1.3.0 load path (extract + chitra decode + cache) ----
+test_group("art_get real cover");
+var cg = jlw_gui_art_cache_new();
+var gid = jlw_uuid_v4();
+var out[24];
+assert_eq(jlw_gui_art_get(cg, gid, "tests/fixtures/probe_art.flac", &out), 1, "FLAC cover found + decoded");
+assert_eq(load64(&out + 8), 2, "cached width 2");
+assert_eq(load64(&out + 16), 2, "cached height 2");
+assert_eq(load64(&out) != 0, 1, "cached pixels non-null");
+assert_eq(jlw_gui_art_texture_count(cg), 1, "one texture cached");
+# same id again -> cache hit, no re-decode, still one texture
+var out2[24];
+assert_eq(jlw_gui_art_get(cg, gid, "tests/fixtures/probe_art.flac", &out2), 1, "cache hit");
+assert_eq(jlw_gui_art_texture_count(cg), 1, "still one texture (hit, no re-decode)");
+assert_eq(load64(&out2 + 8), 2, "hit returns cached width");
+# a file with no embedded cover -> 0 + recorded no_art
+var nid = jlw_uuid_v4();
+assert_eq(jlw_gui_art_get(cg, nid, "tests/fixtures/probe.flac", &out), 0, "no-cover file -> 0");
+assert_eq(jlw_gui_art_no_art_contains(cg, nid), 1, "recorded as no_art");
+assert_eq(jlw_gui_art_texture_count(cg), 1, "no-art did not add a texture");
 
 var rc = assert_summary();
 syscall(60, rc);

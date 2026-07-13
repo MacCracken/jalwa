@@ -22,3 +22,4 @@ Decisions about jalwa — what we chose, the context, and the consequences we ac
 - [0001 — Linear-scan library indexes](001-linear-scan-library-indexes.md)
 - [0002 — Audio probe/tags via shravan (tarang is video-only); album art dropped](002-audio-probe-via-shravan-no-album-art.md)
 - [0003 — Visual-language redesign: deep-void palette + three selectable dark themes](003-visual-language-redesign.md)
+- [0004 — Real album art: extract from tags, decode via chitra, blit (reverses 0002's art drop)](004-real-album-art-via-chitra.md)

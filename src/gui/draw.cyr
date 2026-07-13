@@ -64,8 +64,10 @@ fn jlw_gui_draw_text(cmds, x, y, color, text, max_chars) {
     vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_TEXT, x, y, 0, 0, color, text, max_chars));
     return 0;
 }
-fn jlw_gui_draw_image(cmds, x, y, w, h, art_id) {
-    vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_IMAGE, x, y, w, h, 0, art_id, 0));
+# art_id = a text key for the lettered placeholder fallback; item = the media item ptr
+# (stashed in aux) the raster resolves to real cover art via the art cache. item may be 0.
+fn jlw_gui_draw_image(cmds, x, y, w, h, art_id, item) {
+    vec_push(cmds, jlw_draw_cmd_new(JLW_DRAW_IMAGE, x, y, w, h, 0, art_id, item));
     return 0;
 }
 # clip subsequent draws to (x,y,w,h) until the matching pop (scroll viewports).
@@ -245,7 +247,7 @@ fn jlw_gui_build_library_grid(app, x, y, w, h, cmds) {
                     jlw_gui_draw_border(cmds, cx, cy, JLW_GUI_CELL_W, JLW_GUI_CELL_H, JLW_GUI_ACCENT);   # accent frame
                 }
                 var ax = cx + (JLW_GUI_CELL_W - JLW_GUI_ART_SZ) / 2;
-                jlw_gui_draw_image(cmds, ax, cy + JLW_GUI_PAD, JLW_GUI_ART_SZ, JLW_GUI_ART_SZ, JlwMediaItem_title(item));
+                jlw_gui_draw_image(cmds, ax, cy + JLW_GUI_PAD, JLW_GUI_ART_SZ, JLW_GUI_ART_SZ, JlwMediaItem_title(item), item);
                 var tcy = cy + JLW_GUI_ART_SZ + JLW_GUI_PAD * 2;
                 jlw_gui_draw_text(cmds, cx + JLW_GUI_PAD, tcy + 12, jlw_gui_row_color_code(is_playing, is_selected),
                                   jlw_gui_truncate_str(JlwMediaItem_title(item), 16), 0);
@@ -380,7 +382,7 @@ fn jlw_gui_build_now_playing(app, x, y, w, h, cmds) {
     var ax = x + (w - artsz) / 2;
     var ay = y + JLW_GUI_PAD + JLW_GUI_ROW_H;                      # below the eyebrow
     jlw_gui_draw_border(cmds, ax - 2, ay - 2, artsz + 4, artsz + 4, JLW_GUI_ACCENT_DIM);  # frosted frame
-    jlw_gui_draw_image(cmds, ax, ay, artsz, artsz, "");            # album art (id resolved by raster)
+    jlw_gui_draw_image(cmds, ax, ay, artsz, artsz, "", item);      # album art (real cover via art cache)
     var ty = ay + artsz + JLW_GUI_PAD;
     jlw_gui_draw_text(cmds, ax, ty,       JLW_GUI_TEXT_PRIMARY,   JlwMediaItem_title(item), 0);
     jlw_gui_draw_text(cmds, ax, ty + 24,  JLW_GUI_TEXT_SECONDARY, jlw_gui_np_artist(JlwMediaItem_artist(item)), 0);
@@ -563,7 +565,7 @@ fn jlw_gui_build_mini(app, w, h, cmds) {
     var ax = JLW_GUI_PAD;
     var ay = JLW_GUI_ROW_H;
     jlw_gui_draw_border(cmds, ax - 2, ay - 2, artsz + 4, artsz + 4, JLW_GUI_ACCENT_DIM);   # frosted frame
-    jlw_gui_draw_image(cmds, ax, ay, artsz, artsz, "");
+    jlw_gui_draw_image(cmds, ax, ay, artsz, artsz, "", item);
     var tx = ax + artsz + JLW_GUI_PAD * 2;
     if (item == 0) {
         jlw_gui_draw_text(cmds, tx, ay + 20, JLW_GUI_TEXT_MUTED, "Nothing playing", 0);

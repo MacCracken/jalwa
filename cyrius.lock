@@ -5,6 +5,7 @@ commit	f229966c601da9528d383d6d2816f386083eabb6	abaco	https://github.com/MacCrac
 commit	6c900238c87c34897aa19fe320553e83c3417df0	darshana	https://github.com/MacCracken/darshana.git	0.9.0
 commit	9fa963e6aa885033545cb3338cc9c4017c7b00bf	sankoch	https://github.com/MacCracken/sankoch.git	2.4.9
 commit	961aebb07e61d3dbe664a02a3f3608e37ee2ebfa	shravan	https://github.com/MacCracken/shravan.git	2.6.7
+commit	f8410258046a09015e61e8b2d0fc63c23cd7fde8	chitra	https://github.com/MacCracken/chitra.git	0.3.0
 commit	4af65afcd5cf30783d166010026fcd19a919068d	vani	https://github.com/MacCracken/vani.git	1.1.0
 commit	ccd2b46bad710c38d70c07e420480e5e476a54f5	kashi	https://github.com/MacCracken/kashi.git	1.0.2
 d9f3b17ddbbe1bba48917c3a679807b01c39c4a1ce776efdbdfbb7a1680e86e4  lib/tagged.cyr
@@ -65,4 +66,5 @@ de4598e4862fdc8d02195688b9aacc91e888d5f6b85d9fac08f4b7af9daaca19  lib/random.cyr
 eabdcda355ce4f5d8f2bc634b0681444581a717dc8ca9e3ddb15617c2957c7c1  lib/syscalls_linux_common.cyr
 cbfeb903459ab57393f1772daa5c369f1bf328c9588b7d2fc08116000fd11617  lib/process_win.cyr
 d64b87c0794e921dd8a5c199ff9777b7cccca5c109adcc6556b26487251db8ec  lib/args_macos.cyr
+519e92f8a529cdbdb5e51339b9c26209a1ace3413c3c3633e8650f0c4fb18336  lib/chitra.cyr
 bf99f1f02ef990694c35be2f27fdaf3ec06ee9c3a546f4c8f9e06970f90fb9c1  lib/result.cyr

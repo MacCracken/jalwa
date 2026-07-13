@@ -7,11 +7,13 @@
 include "src/error.cyr"
 include "src/core/types.cyr"
 include "src/core/db.cyr"
+include "src/core/scanner.cyr"
 include "src/playback/dsp.cyr"
 include "src/playback/decode_thread.cyr"
 include "src/playback/engine.cyr"
 include "src/gui/theme.cyr"
 include "src/gui/app.cyr"
+include "src/gui/art_cache.cyr"
 include "src/gui/views.cyr"
 include "src/gui/draw.cyr"
 include "src/gui/raster.cyr"
@@ -196,12 +198,49 @@ assert_eq(px(buf, W, 0, 0), jlw_gui_color_to_xrgb(JLW_GUI_TEXT_PRIMARY), "clip r
 test_group("art_placeholder");
 jlw_gui_fb_clear(buf, W, H, bg);
 var ca = vec_new();
-jlw_gui_draw_image(ca, 4, 4, 40, 40, "Xylophone");       # 'X' centered in the box
+jlw_gui_draw_image(ca, 4, 4, 40, 40, "Xylophone", 0);    # item=0 -> lettered placeholder ('X')
 jlw_gui_raster(ca, buf, W, H);
 assert_eq(px(buf, W, 8, 8), jlw_gui_color_to_xrgb(JLW_GUI_BG_WIDGET), "art box filled with widget bg");
 assert_eq(px(buf, W, 4, 4), jlw_gui_color_to_xrgb(JLW_GUI_TEXT_MUTED), "art box has a muted border");
 var sec = jlw_gui_color_to_xrgb(JLW_GUI_TEXT_SECONDARY);
 assert_eq(count_px(buf, W, 4 + 40 / 2 - 4, 4 + 40 / 2 - 8, 8, 16, sec) > 0, 1, "art first-letter glyph centered");
+
+# ---- fb_blit_rgba: nearest-neighbor scale + alpha-over (v1.3.0) ----
+test_group("fb_blit_rgba");
+jlw_gui_fb_clear(buf, W, H, bg);
+jlw_gui_clip_reset();
+var srcp = alloc(16);                                    # 2x2 RGBA: red, green / blue, white (opaque)
+store8(srcp + 0, 255); store8(srcp + 1, 0);   store8(srcp + 2, 0);   store8(srcp + 3, 255);
+store8(srcp + 4, 0);   store8(srcp + 5, 255); store8(srcp + 6, 0);   store8(srcp + 7, 255);
+store8(srcp + 8, 0);   store8(srcp + 9, 0);   store8(srcp + 10, 255); store8(srcp + 11, 255);
+store8(srcp + 12, 255); store8(srcp + 13, 255); store8(srcp + 14, 255); store8(srcp + 15, 255);
+jlw_gui_fb_blit_rgba(buf, W, H, 0, 0, 2, 2, srcp, 2, 2);   # 1:1
+assert_eq(px(buf, W, 0, 0), 0xFF0000, "blit (0,0) = red (RGBA->XRGB)");
+assert_eq(px(buf, W, 1, 0), 0x00FF00, "blit (1,0) = green");
+assert_eq(px(buf, W, 0, 1), 0x0000FF, "blit (0,1) = blue");
+assert_eq(px(buf, W, 1, 1), 0xFFFFFF, "blit (1,1) = white");
+jlw_gui_fb_blit_rgba(buf, W, H, 10, 10, 4, 4, srcp, 2, 2);   # 2x upscale (nearest)
+assert_eq(px(buf, W, 10, 10), 0xFF0000, "upscaled TL red");
+assert_eq(px(buf, W, 13, 10), 0x00FF00, "upscaled TR green");
+assert_eq(px(buf, W, 10, 13), 0x0000FF, "upscaled BL blue");
+# 50% alpha over a black fb -> half-value channels
+jlw_gui_fb_clear(buf, W, H, 0);
+store8(srcp + 0, 200); store8(srcp + 1, 0); store8(srcp + 2, 0); store8(srcp + 3, 128);   # 50% red
+jlw_gui_fb_blit_rgba(buf, W, H, 20, 20, 1, 1, srcp, 1, 1);
+assert_eq((px(buf, W, 20, 20) / 65536) & 0xFF, 100, "alpha-over: 200*128/255 ~= 100");
+
+# ---- IMAGE cmd resolves a REAL embedded cover through the art cache + blits it ----
+test_group("art_real_cover");
+jlw_gui_fb_clear(buf, W, H, bg);
+jlw_gui_clip_reset();
+var it = alloc(sizeof(JlwMediaItem));                    # minimal item: raster reads only id + path
+JlwMediaItem_set_id(it, jlw_uuid_v4());
+JlwMediaItem_set_path(it, "tests/fixtures/probe_art.flac");
+var cr = vec_new();
+jlw_gui_draw_image(cr, 4, 4, 40, 40, "Z", it);          # item present -> real cover, not the 'Z' placeholder
+jlw_gui_raster(cr, buf, W, H);
+var muted = jlw_gui_color_to_xrgb(JLW_GUI_TEXT_MUTED);
+assert_eq(px(buf, W, 4, 4) != muted, 1, "real art rendered (box corner is cover, not the placeholder border)");
 
 rm("/tmp/jalwa_gui_raster.db");
 var rc = assert_summary();

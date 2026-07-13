@@ -287,6 +287,152 @@ fn jlw_detect_audio_format(buf, n) {
     return (0 - 1);
 }
 
+# ============================================================================
+# Album-art extraction (v1.3.0, ADR 0004 -- reverses ADR 0002's art drop).
+# shravan has NO picture parser, so both the FLAC METADATA_BLOCK_PICTURE (type 6)
+# and the ID3v2 APIC frame are hand-parsed here. Embedded covers live in the file's
+# FRONT metadata, so a fresh bounded read from offset 0 catches them (the shared
+# 1 MiB scan buffer is too small + is mutated per file). ONE reusable 4 MiB buffer
+# holds the encoded bytes just long enough for chitra to decode+copy; the returned
+# ptr points INTO it, so a caller MUST decode before the next extraction reuses it.
+# ============================================================================
+var JLW_ART_CAP = 4194304;    # 4 MiB cover-read window (covers sit in front metadata)
+var JLW_ART_BUF = 0;
+#must_use
+fn jlw_art_buf() {
+    if (JLW_ART_BUF == 0) { JLW_ART_BUF = alloc(JLW_ART_CAP); }
+    return JLW_ART_BUF;
+}
+
+# big-endian u32 / ID3 syncsafe u32 (load16/load32 are LITTLE-endian on x86 -- never
+# use them for these fields).
+#inline
+#must_use
+fn jlw_be32(buf, off) { return (load8(buf + off) << 24) | (load8(buf + off + 1) << 16) | (load8(buf + off + 2) << 8) | load8(buf + off + 3); }
+#inline
+#must_use
+fn jlw_synchsafe32(buf, off) { return (load8(buf + off) << 21) | (load8(buf + off + 1) << 14) | (load8(buf + off + 2) << 7) | load8(buf + off + 3); }
+
+# locate the FLAC PICTURE metadata block (type 6). Returns its payload offset into
+# buf + stores payload length at out_len; 0 if absent/truncated. (jlw_flac_find_vorbis clone.)
+#must_use
+fn jlw_flac_find_picture(buf, n, out_len) {
+    if (n < 4) { return 0; }
+    if (load8(buf) != 0x66 || load8(buf + 1) != 0x4C || load8(buf + 2) != 0x61 || load8(buf + 3) != 0x43) { return 0; }   # "fLaC"
+    var pos = 4;
+    var go = 1;
+    while (go == 1 && pos + 4 <= n) {
+        var hdr = load8(buf + pos);
+        var btype = hdr & 0x7F;
+        var bsize = (load8(buf + pos + 1) << 16) | (load8(buf + pos + 2) << 8) | load8(buf + pos + 3);
+        pos = pos + 4;
+        if (btype == 6) {
+            if (pos + bsize <= n) { store64(out_len, bsize); return pos; }
+            return 0;
+        }
+        if ((hdr & 0x80) != 0) { go = 0; }
+        pos = pos + bsize;
+    }
+    return 0;
+}
+
+# from a FLAC PICTURE payload (offset p, length plen), skip the BE-u32 header fields
+# to the raw image bytes. Layout: [pic_type][mime_len][mime][desc_len][desc][w][h]
+# [depth][ncolors][data_len][data]. Returns image-data offset; stores data_len at
+# out_len; 0 on malformed/overrun.
+#must_use
+fn jlw_flac_picture_data(buf, p, plen, out_len) {
+    var end = p + plen;
+    if (p + 8 > end) { return 0; }
+    var mime_len = jlw_be32(buf, p + 4);
+    var q = p + 8 + mime_len;
+    if (q + 4 > end) { return 0; }
+    var desc_len = jlw_be32(buf, q);
+    q = q + 4 + desc_len + 16;                    # skip desc + w,h,depth,ncolors (4x u32)
+    if (q + 4 > end) { return 0; }
+    var data_len = jlw_be32(buf, q);
+    q = q + 4;
+    if (data_len <= 0 || q + data_len > end) { return 0; }
+    store64(out_len, data_len);
+    return q;
+}
+
+# locate ID3v2 APIC image data in a front-loaded ID3 tag. Returns image-data offset
+# into buf + stores length at out_len; 0 if none. APIC body: [enc:1][mime NUL-term
+# latin1][pic_type:1][desc NUL-term (2 NULs for enc 1/2)][image bytes].
+#must_use
+fn jlw_id3_find_apic(buf, n, out_len) {
+    if (n < 10) { return 0; }
+    if (load8(buf) != 0x49 || load8(buf + 1) != 0x44 || load8(buf + 2) != 0x33) { return 0; }   # "ID3"
+    var ver = load8(buf + 3);                       # major version (3 or 4)
+    var tag_end = 10 + jlw_synchsafe32(buf, 6);     # ID3 header size is always syncsafe
+    if (tag_end > n) { tag_end = n; }
+    var pos = 10;
+    while (pos + 10 <= tag_end) {
+        if (load8(buf + pos) == 0) { return 0; }    # hit padding
+        var fsize = jlw_be32(buf, pos + 4);         # v2.3 size is plain BE
+        if (ver >= 4) { fsize = jlw_synchsafe32(buf, pos + 4); }   # v2.4 size is syncsafe
+        var fbody = pos + 10;
+        if (load8(buf + pos) == 0x41 && load8(buf + pos + 1) == 0x50 && load8(buf + pos + 2) == 0x49 && load8(buf + pos + 3) == 0x43) {   # "APIC"
+            var fend = fbody + fsize;
+            if (fend > n) { return 0; }
+            var q = fbody;
+            var enc = load8(buf + q); q = q + 1;
+            var m = 1;                              # skip MIME (single NUL)
+            while (m == 1) {
+                if (q >= fend) { return 0; }
+                if (load8(buf + q) == 0) { m = 0; }
+                q = q + 1;
+            }
+            q = q + 1;                              # skip picture-type byte
+            if (enc == 1 || enc == 2) {             # UTF-16 desc -> 2-NUL terminator
+                var d = 1;
+                while (d == 1) {
+                    if (q + 1 >= fend) { return 0; }
+                    if (load8(buf + q) == 0 && load8(buf + q + 1) == 0) { d = 0; }
+                    q = q + 2;
+                }
+            } else {                                # latin1/UTF-8 desc -> single NUL
+                var d2 = 1;
+                while (d2 == 1) {
+                    if (q >= fend) { return 0; }
+                    if (load8(buf + q) == 0) { d2 = 0; }
+                    q = q + 1;
+                }
+            }
+            var dlen = fend - q;
+            if (dlen <= 0) { return 0; }
+            store64(out_len, dlen);
+            return q;
+        }
+        pos = fbody + fsize;
+    }
+    return 0;
+}
+
+# Extract an embedded cover from a media file into the reusable art buffer. Returns
+# the encoded-image byte offset (into jlw_art_buf) + stores its length at out_len; 0
+# if the file has no supported embedded cover. FLAC + MP3 only (WAV/OGG/MP4 later).
+#must_use
+fn jlw_extract_cover_art(path, out_len) {
+    store64(out_len, 0);
+    var buf = jlw_art_buf();
+    var n = file_read_all(path, buf, JLW_ART_CAP);
+    if (n <= 0) { return 0; }
+    var fmt = jlw_detect_audio_format(buf, n);
+    var off = 0;                                    # the finders return a byte OFFSET into buf
+    if (fmt == 1) {                                 # FLAC -> type-6 PICTURE block
+        var plen = 0;
+        var p = jlw_flac_find_picture(buf, n, &plen);
+        if (p == 0) { return 0; }
+        off = jlw_flac_picture_data(buf, p, plen, out_len);
+    } else {
+        if (fmt == 5) { off = jlw_id3_find_apic(buf, n, out_len); }   # MP3 -> ID3v2 APIC
+    }
+    if (off == 0) { store64(out_len, 0); return 0; }
+    return buf + off;                               # hand back a real pointer, not an offset
+}
+
 # scan one file into the caller's reusable header buffer (bounded read). Returns
 # a JlwScannedFile with real probe/tags where supported, or an unknown stub on
 # read/format failure.

@@ -1,0 +1,39 @@
+# scanner_art.tcyr -- embedded cover-art extraction (v1.3.0) + chitra decode round-trip.
+# Fixtures probe_art.{flac,mp3} wrap the 77-byte tests/fixtures/cover2x2.png (a 2x2 RGBA
+# PNG) in a FLAC type-6 PICTURE block / an ID3v2 APIC frame.
+include "src/error.cyr"
+include "src/core/types.cyr"
+include "src/core/db.cyr"
+include "src/core/scanner.cyr"
+
+alloc_init();
+
+# decode helper: extract cover from `path`, chitra-decode it, assert 2x2 RGBA.
+fn check_cover(path, label) {
+    var len = 0;
+    var data = jlw_extract_cover_art(path, &len);
+    assert_eq(data != 0, 1, "cover bytes found");
+    assert_eq(len, 77, "cover length = 77 (the embedded PNG)");
+    var err = 0;
+    var img = chitra_image_decode(data, len, &err);
+    assert_eq(img != 0, 1, "chitra decoded the extracted cover");
+    assert_eq(chitra_image_width(img), 2, "cover width 2");
+    assert_eq(chitra_image_height(img), 2, "cover height 2");
+    assert_eq(chitra_image_channels(img), 4, "cover RGBA (4ch)");
+    return 0;
+}
+
+test_group("FLAC PICTURE extraction");
+check_cover("tests/fixtures/probe_art.flac", "flac");
+
+test_group("MP3 APIC extraction");
+check_cover("tests/fixtures/probe_art.mp3", "mp3");
+
+test_group("no-art files return 0");
+var l0 = 0;
+assert_eq(jlw_extract_cover_art("tests/fixtures/probe.flac", &l0), 0, "plain FLAC (no PICTURE) -> 0");
+assert_eq(jlw_extract_cover_art("tests/fixtures/probe.wav", &l0), 0, "WAV (unsupported) -> 0");
+assert_eq(jlw_extract_cover_art("tests/fixtures/does_not_exist.flac", &l0), 0, "missing file -> 0");
+
+var rc = assert_summary();
+syscall(60, rc);

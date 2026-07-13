@@ -4,7 +4,7 @@
 > [`state.md`](state.md); the full plan + module ledger in
 > [`port-audit.md`](port-audit.md). This file is the *order* and the *gates*.
 
-## Status: **v1.2.3 — visual-language design→code arc COMPLETE (all non-visualizer surfaces)** ✅
+## Status: **v1.3.0 — visual-language arc complete + real album art (P4 shipped)** ✅
 
 All of jalwa-core, jalwa-playback (real audio), jalwa-ai, jalwa-ui, jalwa-gui, and
 the binary + MCP server are ported to Cyrius and green against `rust-old/`. **v1.1.0**
@@ -95,7 +95,13 @@ Wayland shell is currently **keyboard-only** — `gui/wayland.cyr` binds `wl_key
    and scroll-wheel list scroll. The hit-test + action layers are unit-tested; only the `wl_pointer`
    wire handling is smoke-only.
 
-### P4 — GUI real album-art blit — decoder available (`chitra`); gap is cover-byte extraction
+### P4 — GUI real album-art blit — ✅ **SHIPPED v1.3.0** ([ADR 0004](../adr/004-real-album-art-via-chitra.md))
+Done: `[deps.chitra]` decodes PNG/baseline-JPEG → RGBA8; jalwa-owned FLAC `PICTURE` + ID3v2
+`APIC` extraction (`scanner.cyr jlw_extract_cover_art`); `jlw_gui_fb_blit_rgba` (nearest scale +
+alpha-over) blits decoded covers, cached load-on-demand by Uuid in `art_cache.cyr` (no DB
+persistence). Placeholder remains the no-art fallback. *Deferred:* WAV/OGG/MP4 covers;
+progressive/CMYK JPEG. Original analysis:
+
 The image decoder is **no longer the blocker**: **`chitra`** (sibling Cyrius pkg, v0.3.0,
 `dist/chitra.cyr`) decodes PNG **and** JPEG bytes → canonical RGBA8 on the CPU —
 `chitra_image_decode(src, len, err_out)` (format-agnostic) + `chitra_image_{width,height,pixels,channels}`.

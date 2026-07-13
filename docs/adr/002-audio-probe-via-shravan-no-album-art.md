@@ -1,7 +1,12 @@
 # 0002 — Audio probe/tags via shravan (tarang is video-only); album art dropped
 
-**Status**: Accepted
+**Status**: Accepted — *album-art drop superseded by [ADR 0004](004-real-album-art-via-chitra.md)*
 **Date**: 2026-07-09
+
+> **Update (2026-07-12):** the "no album art" consequence below is reversed by
+> [ADR 0004](004-real-album-art-via-chitra.md) — jalwa now extracts embedded covers from
+> tags and decodes them via `chitra`. The rest of this ADR (audio probe via shravan,
+> art *not stored in the DB*) still holds.
 
 ## Context
 
