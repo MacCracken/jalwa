@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.1 — Library view (2026-07-12)
+
+Second step of the [design→code arc](docs/development/roadmap.md): the **Library view**
+adopts the visual language (from `docs/development/design/Jalwa Library.dc.html`).
+
+### Added
+- **Library header** — an accent `LIBRARY` eyebrow and a live, search-aware count
+  (`N tracks`, or `N matches` while filtering) above the list/grid.
+- **Consistent selection chrome** — the selected list row gets an accent edge bar
+  (matching the sidebar and Settings), and the selected grid cell gets an accent frame.
+
+### Changed
+- The list/grid now renders in the region **below** the header (virtualization row count
+  adjusts accordingly). All three themes apply automatically via the active palette.
+
 ## 1.2.0 — Visual language: themes, settings, luminous chrome (2026-07-12)
 
 The start of the **design→code arc** (see the 1.2.x plan in
