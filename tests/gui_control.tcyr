@@ -244,9 +244,11 @@ test_group("cycle_theme action");
 jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);
 assert_eq(jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME), JLW_GUI_RUN_CONTINUE, "cycle theme -> CONTINUE");
 assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_CAUSTIC, "action advanced Aurora -> Caustic");
-jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME);
-jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME);
-assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_AURORA, "three cycles wrap back to Aurora");
+jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME);   # Caustic -> Sacred
+jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME);   # Sacred -> System (Desktop)
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_SYSTEM, "third cycle reaches System (Desktop)");
+jlw_gui_apply_action(sc, JLW_GUI_ACT_CYCLE_THEME);   # System -> Aurora (wrap, COUNT=4)
+assert_eq(jlw_gui_theme_id, JLW_GUI_THEME_AURORA, "four cycles wrap back to Aurora");
 jlw_gui_theme_apply(JLW_GUI_THEME_AURORA);
 
 test_group("settings apply theme");

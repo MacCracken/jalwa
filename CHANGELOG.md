@@ -16,7 +16,9 @@ and the ~50 draw call sites are untouched.
   re-sync if the desktop theme changes at runtime. `jlw_gui_theme_from_name("system")` +
   `jlw_gui_theme_name` → "System (Desktop)".
 - **`tests/gui_theme.tcyr`** — asserts System pulls rupa's MUDRA · Carbon default (and follows a
-  SHANTA switch); suite 50 → **64**. Both targets build (host 2.66 MB / agnos 2.60 MB).
+  SHANTA switch); suite 50 → **64**. `tests/gui_control.tcyr`'s theme-cycle test updated for the 4th
+  theme (3 cycles → System, 4 → Aurora). Both targets build (host 2.66 MB / agnos 2.60 MB); full
+  test suite **1364/1364** across 36 files.
 
 ### Note
 jalwa is a parallel-agent repo; this change was founder-directed (2026-07-12) and is deliberately
