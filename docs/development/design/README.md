@@ -30,7 +30,8 @@ Tracked as the **1.2.x design→code arc** in [`../roadmap.md`](../roadmap.md).
   themes ([ADR 0003](../../adr/003-visual-language-redesign.md)) — the **Settings**
   theme picker, the **Now-Playing** hero, and the shared **sidebar + transport** chrome.
 - **Ported (v1.2.1)**: the **Library** view (header eyebrow + count, list/grid selection chrome).
-- **Next (1.2.2–1.2.3)**: Queue + Search, and Mini-player views.
+- **Ported (v1.2.2)**: the **Queue** view and the **Search** screen (focused query field + hints).
+- **Next (1.2.3)**: Mini-player view.
 - **Aspirational**: the GPU-era visualizers (aurora / caustic / mandala), frosted-glass
   blur, and 60fps bloom need a GPU path jalwa doesn't have (its GUI is a CPU-framebuffer
   rasterizer), so they stay backlogged with video.

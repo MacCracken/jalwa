@@ -4,7 +4,7 @@
 > [`state.md`](state.md); the full plan + module ledger in
 > [`port-audit.md`](port-audit.md). This file is the *order* and the *gates*.
 
-## Status: **v1.2.1 — visual-language arc in progress (themes, settings, chrome, Now-Playing + Library)** ✅
+## Status: **v1.2.2 — visual-language arc in progress (themes, settings, chrome, Now-Playing + Library + Queue/Search)** ✅
 
 All of jalwa-core, jalwa-playback (real audio), jalwa-ai, jalwa-ui, jalwa-gui, and
 the binary + MCP server are ported to Cyrius and green against `rust-old/`. **v1.1.0**
@@ -26,8 +26,8 @@ doesn't have yet and stay backlogged with video (P1).
 |---|---|---|---|
 | **1.2.0** | Palette + 3 themes, Settings/theme-switcher, Now-Playing hero, sidebar + transport chrome | `Jalwa Visual Language` + `Jalwa Now-Playing` | ✅ shipped ([ADR 0003](../adr/003-visual-language-redesign.md)) |
 | **1.2.1** | Library view (header + eyebrow + count, list/grid selection chrome) | `Jalwa Library.dc.html` | ✅ shipped |
-| **1.2.2** | Queue + Search views | `Jalwa Queue & Search.dc.html` | ⏳ next |
-| **1.2.3** | Mini-player | `Jalwa Mini-Player.dc.html` | ⏳ |
+| **1.2.2** | Queue view + Search screen (eyebrow/count/chrome, focused query field + hints) | `Jalwa Queue & Search.dc.html` | ✅ shipped |
+| **1.2.3** | Mini-player | `Jalwa Mini-Player.dc.html` | ⏳ next |
 
 > The 8-slot active-palette contract (`src/gui/theme.cyr`) means each per-view port is
 > layout/typography work only — colors already resolve through the active theme, so all

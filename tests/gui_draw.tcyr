@@ -209,6 +209,8 @@ JlwGuiApp_set_view(qa, JLW_GUI_VIEW_QUEUE);
 var cq0 = vec_new();
 jlw_gui_build_queue(qa, JLW_GUI_SIDEBAR_W, 0, 620, 400, cq0);
 assert_eq(find_text(cq0, "Queue is empty") != 0, 1, "empty queue message");
+assert_eq(find_text(cq0, "QUEUE") != 0, 1, "queue eyebrow present (even empty)");
+assert_eq(JlwDrawCmd_color(find_text(cq0, "QUEUE")), JLW_GUI_ACCENT, "queue eyebrow accent");
 # enqueue two tracks
 var qi1 = mk(qa, "First", "AA");
 var qi2 = mk(qa, "Second", "BB");
@@ -221,6 +223,29 @@ assert_eq(find_text(cq1, "Second") != 0, 1, "queue row Second");
 # current position (row 0) is accent
 assert_eq(JlwDrawCmd_color(find_text(cq1, "First")), JLW_GUI_ACCENT, "current queue row accent");
 assert_eq(JlwDrawCmd_color(find_text(cq1, "Second")), JLW_GUI_TEXT_SECONDARY, "non-current row secondary");
+assert_eq(find_text(cq1, "2 tracks") != 0, 1, "queue count header");
+
+# ---- search mode (library view, search_active) -> the design's Search screen ----
+test_group("build_search");
+var sea = jlw_gui_app_new(fresh_plib(), eng());
+mk(sea, "Beacon", "BA"); mk(sea, "Nebula", "NB"); mk(sea, "Berry", "BE");
+JlwGuiApp_set_view(sea, JLW_GUI_VIEW_LIBRARY);
+JlwGuiApp_set_search_active(sea, 1);
+JlwGuiApp_set_search_query(sea, "be");
+jlw_gui_app_update_search(sea);
+var css = vec_new();
+jlw_gui_build_library(sea, JLW_GUI_SIDEBAR_W, 0, 620, 500, css);
+assert_eq(find_text(css, "SEARCH") != 0, 1, "search-mode eyebrow (not LIBRARY)");
+assert_eq(JlwDrawCmd_color(find_text(css, "SEARCH")), JLW_GUI_ACCENT, "search eyebrow accent");
+assert_eq(find_text(css, "> be_") != 0, 1, "focused query field shows query + cursor");
+assert_eq(find_text(css, "esc") != 0, 1, "esc affordance drawn");
+assert_eq(find_text(css, "navigate") != 0, 1, "footer hints drawn");
+# not searching -> eyebrow stays LIBRARY, no query field
+JlwGuiApp_set_search_active(sea, 0);
+var csl = vec_new();
+jlw_gui_build_library(sea, JLW_GUI_SIDEBAR_W, 0, 620, 500, csl);
+assert_eq(find_text(csl, "SEARCH"), 0, "no SEARCH eyebrow when not in search mode");
+assert_eq(find_text(csl, "LIBRARY") != 0, 1, "eyebrow back to LIBRARY");
 
 # ---- equalizer builder ----
 test_group("build_equalizer");

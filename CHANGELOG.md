@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.2 — Queue and Search views (2026-07-12)
+
+Third step of the [design→code arc](docs/development/roadmap.md): the **Queue** and
+**Search** screens adopt the visual language (from
+`docs/development/design/Jalwa Queue & Search.dc.html`).
+
+### Added
+- **Queue header + chrome** — an accent `QUEUE` eyebrow and a `N tracks` count; the
+  current-position row reads in accent and the selected row gets an accent edge bar.
+- **Search screen** — entering search (`/`) now presents the Library as a dedicated
+  Search view: a `SEARCH` eyebrow, a focused query field showing the live query with a
+  cursor (`> vela_`) and an `esc` affordance, a `N matches` count, and footer hints
+  (`Up/Down navigate · Enter play · Esc clear`). Previously the typed query was invisible.
+
+### Changed
+- Queue rows render below the header (virtualization adjusts). Both screens pick up all
+  three themes automatically via the active palette.
+
 ## 1.2.1 — Library view (2026-07-12)
 
 Second step of the [design→code arc](docs/development/roadmap.md): the **Library view**

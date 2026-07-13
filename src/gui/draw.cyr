@@ -270,16 +270,37 @@ fn jlw_gui_lib_header_line(app) {
     else { str_builder_add_cstr(sb, " tracks"); }
     return str_cstr(str_builder_build(sb));
 }
+# generic "N noun" count label (Queue etc.; Library uses the search-aware line above).
+#must_use
+fn jlw_gui_count_line(n, noun) {
+    var sb = str_builder_new();
+    str_builder_add_int(sb, n);
+    str_builder_add_cstr(sb, " ");
+    str_builder_add_cstr(sb, noun);
+    return str_cstr(str_builder_build(sb));
+}
+# the focused search field text: "> {query}_" (trailing cursor block).
+#must_use
+fn jlw_gui_search_input_text(app) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "> ");
+    str_builder_add_cstr(sb, JlwGuiApp_search_query(app));
+    str_builder_add_cstr(sb, "_");
+    return str_cstr(str_builder_build(sb));
+}
 
-# ---- library view (views/library.rs) -- Visual-Language header + selection chrome ----
-# A LIBRARY eyebrow + live count header (search-aware) sits above the list/grid region.
-# List mode: a scrollable/virtualized track list; the selected row gets a widget-bg tint
-# + an accent edge bar, and playing/selected/default text color comes from row_color_code.
-# Grid mode dispatches to jlw_gui_build_library_grid over the same sub-region. Empty/
-# no-match state per library.rs:74-88.
+# ---- library / search view (views/library.rs) -- Visual-Language header + chrome ----
+# A LIBRARY eyebrow + live count sits above the list/grid. In search-input mode the
+# eyebrow becomes SEARCH, a focused query field (with cursor + `esc`) is drawn, and footer
+# hints pin to the bottom -- the design's Search screen, over the same filtered library.
+# List rows: selected -> widget tint + accent edge bar; playing/selected/default text via
+# row_color_code. Grid mode -> jlw_gui_build_library_grid. Empty state per library.rs:74-88.
 fn jlw_gui_build_library(app, x, y, w, h, cmds) {
     jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
-    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_PAD + 4, JLW_GUI_ACCENT, "LIBRARY", 0);
+    var searching = JlwGuiApp_search_active(app);
+    var eyebrow = "LIBRARY";
+    if (searching == 1) { eyebrow = "SEARCH"; }
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_PAD + 4, JLW_GUI_ACCENT, eyebrow, 0);
     var count = jlw_gui_lib_count(app);
     if (count > 0) {
         jlw_gui_draw_text(cmds, x + w - 132, y + JLW_GUI_PAD + 4, JLW_GUI_TEXT_MUTED,
@@ -287,6 +308,17 @@ fn jlw_gui_build_library(app, x, y, w, h, cmds) {
     }
     var hy = y + JLW_GUI_ROW_H + JLW_GUI_PAD;               # list/grid region below the header
     var hh = h - (JLW_GUI_ROW_H + JLW_GUI_PAD);
+    if (searching == 1) {                                  # focused search field + footer hints
+        jlw_gui_draw_rect(cmds, x + JLW_GUI_PAD, hy, w - JLW_GUI_PAD * 2, JLW_GUI_ROW_H, JLW_GUI_BG_WIDGET);
+        jlw_gui_draw_rect(cmds, x + JLW_GUI_PAD, hy + JLW_GUI_ROW_H - 2, w - JLW_GUI_PAD * 2, 2, JLW_GUI_ACCENT);
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD * 2, hy + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_PRIMARY,
+                          jlw_gui_search_input_text(app), 0);
+        jlw_gui_draw_text(cmds, x + w - 40, hy + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_MUTED, "esc", 0);
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + h - JLW_GUI_PAD, JLW_GUI_TEXT_MUTED,
+                          "Up/Down navigate  •  Enter play  •  Esc clear", 0);
+        hy = hy + JLW_GUI_ROW_H + JLW_GUI_PAD;
+        hh = hh - (JLW_GUI_ROW_H + JLW_GUI_PAD) - JLW_GUI_ROW_H;
+    }
     if (count == 0) {                                       # library.rs:74-88 empty state
         var msg = "No matches";                            # search active, filtered to nothing
         if (vec_len(JlwLibrary_items(jlw_gui_app_lib(app))) == 0) {
@@ -375,23 +407,31 @@ fn jlw_gui_build_now_playing(app, x, y, w, h, cmds) {
     return vec_len(cmds);
 }
 
-# ---- queue view (views/queue.rs) ----
-# scrollable queue list: the current-position row is accent, the selected row gets a
-# widget-bg tint; row labels via jlw_gui_queue_row_label (resolving each id's tags).
+# ---- queue view (views/queue.rs) -- Visual-Language header + selection chrome ----
+# A QUEUE eyebrow + track count above the list. The current-position row reads in accent;
+# the selected row gets a widget tint + accent edge bar. Row labels via
+# jlw_gui_queue_row_label (resolving each id's tags).
 fn jlw_gui_build_queue(app, x, y, w, h, cmds) {
     jlw_gui_draw_rect(cmds, x, y, w, h, JLW_GUI_BG_DARK);
+    jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_PAD + 4, JLW_GUI_ACCENT, "QUEUE", 0);
     var q = JlwGuiApp_queue(app);
     var items = JlwPlayQueue_items(q);
     var pos = JlwPlayQueue_position(q);
     var lib = jlw_gui_app_lib(app);
     var count = vec_len(items);
+    if (count > 0) {
+        jlw_gui_draw_text(cmds, x + w - 132, y + JLW_GUI_PAD + 4, JLW_GUI_TEXT_MUTED,
+                          jlw_gui_count_line(count, "tracks"), 0);
+    }
+    var hy = y + JLW_GUI_ROW_H + JLW_GUI_PAD;
+    var hh = h - (JLW_GUI_ROW_H + JLW_GUI_PAD);
     if (count == 0) {                                      # queue.rs:47-51 (two lines)
-        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_MUTED, "Queue is empty", 0);
-        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, y + JLW_GUI_TEXT_DY + 20, JLW_GUI_TEXT_MUTED,
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, hy + JLW_GUI_TEXT_DY, JLW_GUI_TEXT_MUTED, "Queue is empty", 0);
+        jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, hy + JLW_GUI_TEXT_DY + 20, JLW_GUI_TEXT_MUTED,
                           "Press 'a' in Library view to enqueue tracks", 0);
         return vec_len(cmds);
     }
-    var visible = h / JLW_GUI_ROW_H;
+    var visible = hh / JLW_GUI_ROW_H;
     if (visible < 1) { visible = 1; }
     var sel = JlwGuiApp_selected_index(app);
     var start = jlw_gui_scroll_start(sel, visible, count);
@@ -404,8 +444,11 @@ fn jlw_gui_build_queue(app, x, y, w, h, cmds) {
         if (item != 0) { artist = JlwMediaItem_artist(item); title = JlwMediaItem_title(item); }
         var is_current = 0;
         if (i == pos) { is_current = 1; }
-        var ry = y + (i - start) * JLW_GUI_ROW_H;
-        if (i == sel) { jlw_gui_draw_rect(cmds, x, ry, w, JLW_GUI_ROW_H, JLW_GUI_BG_WIDGET); }
+        var ry = hy + (i - start) * JLW_GUI_ROW_H;
+        if (i == sel) {
+            jlw_gui_draw_rect(cmds, x, ry, w, JLW_GUI_ROW_H, JLW_GUI_BG_WIDGET);   # row tint
+            jlw_gui_draw_rect(cmds, x, ry, 3, JLW_GUI_ROW_H, JLW_GUI_ACCENT);      # accent edge bar
+        }
         var color = JLW_GUI_TEXT_SECONDARY;
         if (is_current == 1) { color = JLW_GUI_ACCENT; }
         jlw_gui_draw_text(cmds, x + JLW_GUI_PAD, ry + JLW_GUI_TEXT_DY, color,
