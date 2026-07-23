@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.2] - 2026-07-23
+
+### Changed — setu 0.7.0 (`SETU_SURF_PREMULTIPLIED`) + dep refresh
+
+No behaviour change: the flag is opt-in and this client does not set it.
+
 ## [1.4.1] - 2026-07-23
 
 ### Changed — setu 0.6.0: client buffers are GPU-visible on agnos

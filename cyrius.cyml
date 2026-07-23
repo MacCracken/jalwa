@@ -29,7 +29,7 @@ modules = ["dist/mishran.cyr"]
 # Linux keeps it. Same cross-platform pattern as vani (ALSA/snd). Needs the `net` stdlib.
 [deps.setu]
 git = "https://github.com/MacCracken/setu.git"
-tag = "0.6.0"
+tag = "0.7.0"
 modules = ["dist/setu.cyr"]
 
 # rupa — the shared desktop theme-token core (MUDRA / SHANTA). jalwa keeps its own
