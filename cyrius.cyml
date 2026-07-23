@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "jalwa — AI-native media player for AGNOS. Cyrius port of a 15,355-line Rust workspace (rust-old/)."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.4.43"
+cyrius = "6.4.71"
 
 [build]
 entry = "src/main.cyr"
@@ -29,7 +29,7 @@ modules = ["dist/mishran.cyr"]
 # Linux keeps it. Same cross-platform pattern as vani (ALSA/snd). Needs the `net` stdlib.
 [deps.setu]
 git = "https://github.com/MacCracken/setu.git"
-tag = "0.4.0"
+tag = "0.6.0"
 modules = ["dist/setu.cyr"]
 
 # rupa — the shared desktop theme-token core (MUDRA / SHANTA). jalwa keeps its own

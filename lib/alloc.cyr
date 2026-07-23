@@ -166,7 +166,7 @@ var _LINUX_CHUNK = 0x10000000;
 var _LINUX_MAP_ANON_PRIVATE = 0x22;
 
 # Maximum single allocation size (256MB)
-var ALLOC_MAX = 0x10000000;
+var ALLOC_MAX = 0x80000000;   # 2 GiB (v6.4.51: was 256 MiB; output_buf now allocs 1 GiB off-heap)
 
 # Round `n` up to the next _LINUX_CHUNK multiple.
 fn _linux_round_chunk(n): i64 {

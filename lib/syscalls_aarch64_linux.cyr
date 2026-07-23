@@ -171,6 +171,13 @@ enum SysNr {
     SYS_SETSOCKOPT = 208;
     SYS_BIND = 200;
     SYS_LISTEN = 201;
+    # v6.4.64: NATIVE aarch64 numbers — deliberately NOT the x86 51/52. x86-52 collides
+    # with this peer's own SYS_FCHMOD = 52, and an ESYSXLAT entry for it would remap
+    # fchmod to getpeername (CI caught exactly that: sandbox_syscalls RED on pi). Native
+    # numbers pass through untranslated on aarch64-Linux; the macho backend dual-maps
+    # 204/205 → BSD 32/31 for macOS-arm64, same shape as socket 198→97.
+    SYS_GETSOCKNAME = 204;
+    SYS_GETPEERNAME = 205;
     SYS_CONNECT = 203;
     SYS_RECVFROM = 207;
     SYS_RECVMSG = 212;
