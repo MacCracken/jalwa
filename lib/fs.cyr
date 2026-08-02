@@ -20,7 +20,7 @@ include "lib/fs_win.cyr"
 #endif
 
 # Join two path components with /
-fn path_join(dir, name): i64 {
+fn path_join(dir: Str, name: Str): i64 {
     var sb = str_builder_new();
     str_builder_add(sb, dir);
     if (str_len(dir) > 0) {
@@ -32,7 +32,7 @@ fn path_join(dir, name): i64 {
 }
 
 # Get basename (last component after /)
-fn path_basename(path): i64 {
+fn path_basename(path: Str): i64 {
     var slen = str_len(path);
     var sd = str_data(path);
     var last_slash = 0 - 1;
@@ -46,7 +46,7 @@ fn path_basename(path): i64 {
 }
 
 # Get dirname (everything before last /)
-fn path_dirname(path): i64 {
+fn path_dirname(path: Str): i64 {
     var slen = str_len(path);
     var sd = str_data(path);
     var last_slash = 0 - 1;
@@ -60,10 +60,19 @@ fn path_dirname(path): i64 {
 }
 
 # Check if path has a specific extension. Both args are Str
-# (matches str_ends_with's signature). Callers passing a cstring
-# literal must wrap via str_from(".tcyr"). v5.9.6 added the wrap
-# at programs/checks/selfhost.cyr's _testsuite_gate caller.
-fn path_has_ext(path, ext): i64 {
+# (matches str_ends_with's signature).
+#
+# v6.4.72: params annotated `: Str` so a bare cstring-literal arg
+# (`path_has_ext(name, ".tcyr")`) is auto-coerced to str_from at
+# the call boundary — previously the literal flowed in as a raw
+# cstr pointer and str_ends_with read load64(ptr+8) as the suffix
+# length (garbage), silently failing every check. The literal→Str
+# coercion in PARSE_FNCALL fires ONLY for a param typed `: Str`
+# (smask bit) AND a literal-token arg; an untyped param leaves the
+# pointer un-wrapped. See the find_files note below. Callers may
+# still wrap explicitly (`str_from(".tcyr")`) — an already-Str
+# IDENT arg is passed through unchanged.
+fn path_has_ext(path: Str, ext: Str): i64 {
     return str_ends_with(path, ext);
 }
 
@@ -97,7 +106,7 @@ fn path_has_ext(path, ext): i64 {
 # Inlined (strlen + sys_open) rather than reaching up to io.cyr's file_open so
 # this base lib keeps its existing dependency surface (string.cyr supplies
 # strlen). See 2026-06-18-stdlib-native-agnos-abi-fs.md.
-fn dir_list(path): i64 {
+fn dir_list(path: Str): i64 {
     var entries = vec_new();
     var dp = str_data(path);
     var fd = sys_open(dp, strlen(dp), AO_DIRECTORY);   # agnos: (name, namelen, AO_DIRECTORY)
@@ -137,7 +146,7 @@ fn dir_list(path): i64 {
 }
 #endif
 #ifndef CYRIUS_TARGET_AGNOS
-fn dir_list(path): i64 {
+fn dir_list(path: Str): i64 {
     var entries = vec_new();
     var fd = sys_open(str_data(path), O_RDONLY, 0);
     if (fd < 0) { return entries; }
@@ -187,7 +196,7 @@ fn dir_list(path): i64 {
 #endif
 
 # List directory entries with full paths
-fn dir_list_full(path): i64 {
+fn dir_list_full(path: Str): i64 {
     var names = dir_list(path);
     var full = vec_new();
     var di = 0;
@@ -205,7 +214,7 @@ fn dir_list_full(path): i64 {
 # dir test: the kernel's ext2_open_dir() path only succeeds for a directory
 # inode (a regular file / nonexistent path → fd<0), so a successful open already
 # proves it is a directory. See dir_list above for the AO_DIRECTORY rationale.
-fn is_dir(path): i64 {
+fn is_dir(path: Str): i64 {
     var dp = str_data(path);
     var fd = sys_open(dp, strlen(dp), AO_DIRECTORY);   # agnos: (name, namelen, AO_DIRECTORY)
     if (fd < 0) { return 0; }
@@ -217,7 +226,7 @@ fn is_dir(path): i64 {
 }
 #endif
 #ifndef CYRIUS_TARGET_AGNOS
-fn is_dir(path): i64 {
+fn is_dir(path: Str): i64 {
     var fd = sys_open(str_data(path), O_RDONLY, 0);
     if (fd < 0) { return 0; }
     # v6.0.60: use a full 4096 buffer, not 32. Linux getdents64 returns the
@@ -236,7 +245,7 @@ fn is_dir(path): i64 {
 #endif
 
 # Walk a directory tree, push all file paths to a vec
-fn dir_walk(path, results): i64 {
+fn dir_walk(path: Str, results): i64 {
     var entries = dir_list(path);
     var wi = 0;
     while (wi < vec_len(entries)) {
@@ -251,8 +260,24 @@ fn dir_walk(path, results): i64 {
     return vec_len(results);
 }
 
-# Find files matching an extension in a directory tree
-fn find_files(path, ext): i64 {
+# Find files matching an extension in a directory tree.
+#
+# v6.4.72 — params annotated `: Str`. The pre-fix untyped `ext`
+# param was the root cause of a silent-0-matches bug: a caller
+# passing a bare cstring literal (`find_files(str_from("src"),
+# ".cyr")`) handed `ext` in as a raw cstr pointer rather than a
+# Str, because the compiler's literal→Str auto-coercion only
+# fires for a param typed `: Str`. That raw pointer then reached
+# str_ends_with (via path_has_ext) as the `suffix`, where
+# str_len(suffix)=load64(ptr+8) read garbage and every entry
+# failed the filter — while dir_walk on the same path and a
+# direct str_ends_with(walked, ".cyr") both worked (the direct
+# call coerces the literal because str_ends_with IS typed `: Str`).
+# NOT an allocator/heap-regime issue: find_files(path,
+# str_from(".cyr")) always returned the full set. Typing the
+# params makes the bare-literal form coerce at the boundary;
+# str_from-wrapped callers are unaffected (byte-identical).
+fn find_files(path: Str, ext: Str): i64 {
     var all = vec_new();
     dir_walk(path, all);
     var matched = vec_new();
@@ -279,7 +304,7 @@ fn find_files(path, ext): i64 {
 # node_modules, dist, build, .next, coverage. Signature picked
 # to mirror `dir_walk(path, results)` so callers can use the
 # same shape.
-fn dir_walk_with_prunes(path, results, prunes): i64 {
+fn dir_walk_with_prunes(path: Str, results, prunes): i64 {
     var entries = dir_list(path);
     var wi = 0;
     while (wi < vec_len(entries)) {
@@ -308,7 +333,13 @@ fn dir_walk_with_prunes(path, results, prunes): i64 {
 # Find files matching an extension under `path`, pruning any
 # subtree whose entry name matches a member of `prunes`. Same
 # shape as `find_files(path, ext)`; adds the pruning hook.
-fn find_files_with_prunes(path, ext, prunes): i64 {
+#
+# v6.4.72 — `path`/`ext` annotated `: Str` (same fix as
+# find_files above; `prunes` stays a vec of Str). The TS-corpus
+# release gates that pin this fn already pass str_from(...) for
+# both, so they were never silently vacuous — but the annotation
+# closes the bare-literal footgun for any future caller.
+fn find_files_with_prunes(path: Str, ext: Str, prunes): i64 {
     var all = vec_new();
     dir_walk_with_prunes(path, all, prunes);
     var matched = vec_new();

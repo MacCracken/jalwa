@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "jalwa — AI-native media player for AGNOS. Cyrius port of a 15,355-line Rust workspace (rust-old/)."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.4.71"
+cyrius = "6.5.5"
 
 [build]
 entry = "src/main.cyr"
@@ -20,7 +20,7 @@ stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "ass
 # (msh_router_pump_nb + the transport sched_yield backoffs + the flow-control latch).
 [deps.mishran]
 git = "https://github.com/MacCracken/mishran.git"
-tag = "0.4.1"
+tag = "0.5.2"
 modules = ["dist/mishran.cyr"]
 
 # setu — the AGNOS native display protocol (client transport to the aethersafha
@@ -38,7 +38,7 @@ modules = ["dist/setu.cyr"]
 # every other app. Only the SYSTEM branch of gui/theme.cyr reads rupa_theme_*.
 [deps.rupa]
 git = "https://github.com/MacCracken/rupa.git"
-tag = "0.1.0"
+tag = "0.1.1"
 modules = ["dist/rupa.cyr"]
 
 [deps.dhvani]
@@ -48,7 +48,7 @@ modules = ["dist/dhvani.cyr"]
 
 [deps.abaco]
 git = "https://github.com/MacCracken/abaco.git"
-tag = "2.3.2"
+tag = "2.3.3"
 modules = ["dist/abaco.cyr"]
 
 [deps.darshana]
@@ -80,12 +80,12 @@ modules = ["dist/chitra.cyr"]
 # shravan decode -> dhvani DSP -> vani out. Not tarang (video-only).
 [deps.vani]
 git = "https://github.com/MacCracken/vani.git"
-tag = "1.1.0"
+tag = "1.1.2"
 modules = ["dist/vani.cyr"]
 
 # kashi — freestanding VGA 8x16 font-data core (zero stdlib: load8/store8 + arithmetic).
 # Provides kashi_glyph_row(font_id, ch, row) for the GUI CPU rasterizer (src/gui/raster.cyr).
 [deps.kashi]
 git = "https://github.com/MacCracken/kashi.git"
-tag = "1.0.2"
+tag = "1.0.3"
 modules = ["src/font_data.cyr"]

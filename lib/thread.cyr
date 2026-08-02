@@ -355,6 +355,76 @@ fn chan_send(ch, val): i64 {
     return 0;
 }
 
+# Wake `n` waiters parked on the channel's count word (v6.4.84).
+#
+# On Linux/aarch64 this is FUTEX_WAKE. On **macOS there is no futex**: a raw
+# `syscall(SYS_FUTEX, ...)` raises **SIGSYS (bad system call)** and kills the process
+# outright — exit 140 on Darwin. `lib/sync.cyr` already routes `mutex_*` through a
+# real macOS backend (`lib/sync_macos.cyr`), but these channel fns called SYS_FUTEX
+# DIRECTLY, bypassing that abstraction. Caught by the cross-OS gate on ach, because
+# `vr01_chan_try_send` is the first `vr01_` test ever to exercise channels on macOS.
+#
+# The no-op on macOS is CORRECT, not a stub: the only thing this wake can release is a
+# waiter parked in `chan_send`/`chan_recv`'s FUTEX_WAIT, and those are equally
+# unavailable on macOS — so there can be no waiter to wake. That makes the NON-BLOCKING
+# pair (`chan_try_send` / `chan_try_recv`) fully correct on macOS as plain
+# mutex-protected ring operations, which is exactly what a non-blocking API needs.
+#
+# The BLOCKING paths remain macOS-broken and are NOT fixed here — they need a real
+# condvar backend, which is issue 2026-07-03 (macOS threading), pinned to v6.5.x.
+fn _chan_wake(ch, n): i64 {
+    #ifndef CYRIUS_TARGET_MACOS
+    syscall(SYS_FUTEX, ch + 32, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, n, 0, 0, 0);
+    #endif
+    return 0;
+}
+
+# Non-blocking send — the exact mirror of `chan_try_recv` below, and the answer to
+# the channel API having been non-blocking on the RECEIVE side only (v6.4.84).
+#
+# Returns:
+#    0  → value enqueued
+#   -1  → channel closed, nothing enqueued (same convention as `chan_send`)
+#   -2  → buffer FULL, nothing enqueued; the caller decides to drop, retry, or shed
+#
+# WHY -2 IS DISTINCT FROM -1, and not collapsed the way `chan_try_recv` collapses
+# empty-and-closed into 0: a producer shedding load has to tell "nobody is listening
+# any more, stop producing" from "the consumer is briefly behind, drop this one."
+# Those call for opposite actions. `chan_try_recv`'s own doc comment concedes that its
+# collapse forces callers to peek at `*(ch + 48)`; not repeating that here.
+#
+# WHAT THIS EXISTS FOR: a producer could not express "deliver this if the consumer is
+# keeping up, otherwise drop it and carry on" — the normal contract for telemetry,
+# progress events and pub/sub fan-out, where one slow consumer must never stall a
+# producer. `chan_send` blocks on FUTEX_WAIT until the buffer drains, which turns
+# backpressure into head-of-line blocking across unrelated work. Live instance:
+# `majra/src/pubsub.cyr` holds the hub mutex across its whole fan-out and calls
+# blocking `chan_send` inside it, so ONE full subscriber channel stalls publishes to
+# every other topic — and majra could not fix that from its own side, because there
+# was no non-blocking send to reach for. (Narrowing that lock scope is still majra's
+# to do; this only removes the unbounded stall.)
+#
+# The wake is unconditional-on-success and targets the same word as `chan_send`'s, so
+# a receiver parked in `chan_recv`'s FUTEX_WAIT is released identically.
+fn chan_try_send(ch, val): i64 {
+    var mtx = load64(ch + 40);
+    mutex_lock(mtx);
+    if (load64(ch + 48) != 0) { mutex_unlock(mtx); return 0 - 1; }
+    var count = load64(ch + 32);
+    var cap = load64(ch + 8);
+    if (count >= cap) { mutex_unlock(mtx); return 0 - 2; }
+    var buf = load64(ch);
+    var tail = load64(ch + 24);
+    store64(buf + tail * 8, val);
+    store64(ch + 24, (tail + 1) % cap);
+    store64(ch + 32, count + 1);
+    mutex_unlock(mtx);
+    # Wake one receiver (mirrors chan_send's wake on the same count word).
+    # Routed through _chan_wake: a raw SYS_FUTEX here SIGSYS-es on macOS.
+    _chan_wake(ch, 1);
+    return 0;
+}
+
 # Receive a value from the channel. Blocks if empty. Returns value, or 0 if closed.
 fn chan_recv(ch): i64 {
     var mtx = load64(ch + 40);
@@ -389,8 +459,15 @@ fn chan_close(ch): i64 {
     mutex_lock(mtx);
     store64(ch + 48, 1);
     mutex_unlock(mtx);
-    # Wake all waiters
-    syscall(SYS_FUTEX, ch + 32, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1000, 0, 0, 0);
+    # Wake all waiters. Routed through _chan_wake (v6.4.84): a raw SYS_FUTEX here
+    # SIGSYS-es on macOS. `chan_close` is reachable from the purely NON-BLOCKING
+    # surface — closing is how a producer signals "stop", and `chan_try_send`
+    # returns -1 for it — so it must not kill the process on a platform whose
+    # blocking paths are unavailable. This was the second raw wake on that path;
+    # the first (in chan_try_send) was found by the cross-OS gate on ach, and this
+    # one only surfaced after fixing that, because the SIGSYS discarded the buffered
+    # stdout that would have shown how far the test actually got.
+    _chan_wake(ch, 1000);
     return 0;
 }
 
@@ -422,7 +499,10 @@ fn chan_try_recv(ch): i64 {
     store64(ch + 32, count - 1);
     mutex_unlock(mtx);
     # Wake one sender (if it was waiting on full-buffer condition).
-    syscall(SYS_FUTEX, ch + 32, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, 0, 0, 0);
+    # Routed through _chan_wake: a raw SYS_FUTEX here SIGSYS-es on macOS. This fn is
+    # advertised as non-blocking, so it must not kill the process on a platform whose
+    # blocking paths are unavailable.
+    _chan_wake(ch, 1);
     return result;
 }
 
