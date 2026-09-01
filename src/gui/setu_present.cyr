@@ -6,6 +6,22 @@
 # produce an XRGB8888 buffer (gui/raster.cyr) — exactly what setu ATTACH fmt=1 wants —
 # so the reseat is JUST this present/input shell, no toolkit change. Modeled on the
 # crab setu client. Requires [deps.setu] (+ the `net` stdlib, already pulled in).
+#
+# ⛔ THE TRANSPORT UNDER THIS BACKEND IS RETIRED (2026-08-03). setu spoke TCP on loopback:7700,
+# the WRONG PRIMITIVE for a local display protocol — nothing to route, nothing to checksum, no
+# window to negotiate, no business owning a port. That, not brokenness, is why it is going away.
+# Mechanism, scoped: BEFORE agnos 1.56.34 / `net_src_for` it could not complete a compositor↔client
+# handshake on an ordinary agnos boot (outbound segments claimed `net_ip` as their source, so a
+# loopback SYN was answered on a 4-tuple the client's conn never matched). AFTER `net_src_for` it
+# DID — `agnos/scripts/harness/aethersafha-clients-test.py` reached "connected: 2, presented: 2"
+# un-rigged on 2026-08-02 (`puka` + the dhancha `crab`); ⚠ QEMU at `-smp 1` only, never iron,
+# `-smp 4` fault-kills. jalwa was not one of those clients. The one run that showed jalwa as a
+# window, `aethersafha-jalwa-smoke.sh`, was a FALSE GREEN — its kernel carried the
+# `AETHERSAFHA_SETU_SELFTEST` hook, which assigned `net_ip = 0x7F000001` so a loopback SYN's
+# source and destination agreed by accident. Hook and script are both deleted. The replacement
+# is the agnos socket (`anu`) — agnos `docs/development/planning/ipc.md` §9/§10. The window
+# seam below is fine; what it dials is not, and jalwa's agnos standing must be re-proven there.
+# ⚠ The `net` stdlib dep exists ONLY for that retired TCP path and goes away with it.
 
 enum JlwWinAbi {
     JLW_WIN_EV_NONE   = 0;
@@ -43,11 +59,13 @@ fn jlw_shm_fill(rgb): i64 {
     return 0;
 }
 
-# Connect to the aethersafha compositor over setu (loopback:7700) + allocate the
-# present buffer. Returns 1, or 0 when no compositor is listening (jlw_gui_run then
-# reports cleanly, exactly like the Wayland "no compositor" path).
+# Connect to the aethersafha compositor over setu (⛔ loopback:7700 — RETIRED, see the file
+# header) + allocate the present buffer. Returns 1, or 0 when no compositor is listening
+# (jlw_gui_run then reports cleanly, exactly like the Wayland "no compositor" path).
+# ⚠ On agnos this returned 0 on every ordinary boot and the "no compositor" report was the
+# transport failing, not the compositor being absent.
 fn jlw_win_open(title, init_w, init_h): i64 {
-    var path = "/tmp/aethersafha-setu.sock";     # advisory; the transport is loopback:7700
+    var path = "/tmp/aethersafha-setu.sock";     # advisory (always was); transport ⛔ retired
     var c = setu_client_connect(path);
     if (c == 0) { return 0; }
     jlw_setu_client = c;

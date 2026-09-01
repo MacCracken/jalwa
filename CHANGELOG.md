@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.4.3] - 2026-08-02
+
+### Changed — cyrius pin 6.4.71 -> 6.5.5; mishran 0.5.3, setu 0.7.1, rupa 0.1.2, vani 1.1.3, kashi 1.0.4
+
+Part of the whole-desktop-stack toolchain catch-up cut on this date.
+
+⭐ **This bump clears a real P0 for this repo specifically.** cyrius **6.4.75** fixed *"`fn_table`
+growth past 8192 silently corrupted six fn-indexed side tables"*, and jalwa's compiled unit is the
+largest in the desktop stack. Every build at 6.4.71 was made with those tables corrupted, silently.
+⚠ The exact function count was never established — a `grep`-based estimate is unsound because
+`lib/` carries modules the compiler never prepends, and only `CYRIUS_STATS=1` answers it. The bump
+makes the question moot rather than answering it.
+
+⚠ **`[deps.sankoch]` deliberately held at 2.4.9** while 2.7.6 is on disk — three minors, and this
+repo is not the sweep's to decide. Its own bite.
+
+### Verification
+
+Host build green; **35 suites** pass.
+
 ## [1.4.2] - 2026-07-23
 
 ### Changed — setu 0.7.0 (`SETU_SURF_PREMULTIPLIED`) + dep refresh
@@ -166,14 +186,33 @@ aethersafha compositor over the setu display protocol, alongside crab and cyrius
 All AGNOS changes are `#ifdef CYRIUS_TARGET_AGNOS`-gated; Linux/Wayland behavior is
 byte-unchanged.
 
+> ⛔ **RETRACTED 2026-08-03 — this headline is a FALSE GREEN.** jalwa never ran as a window on an
+> ordinary AGNOS boot. The only run that showed it was `aethersafha-jalwa-smoke.sh`, whose kernel was
+> built with `AETHERSAFHA_SETU_SELFTEST=1` — the hook assigned `net_ip = 0x7F000001`, which on the
+> agnos of that date (**before `net_src_for`, agnos 1.56.34**) was the sole reason a setu-over-TCP
+> connect could match its 4-tuple. Hook and script are deleted. ⚠ Scope note: after `net_src_for`
+> un-rigged setu clients did connect and present (QEMU `-smp 1`, 2026-08-02); jalwa was not one of
+> them, so this headline stays void. TCP-on-loopback is retired as the desktop transport for being
+> the **wrong primitive**, not for being broken (replacement: the agnos socket `anu`, agnos
+> `docs/development/planning/ipc.md` §9/§10). The `#ifdef`-gated backend code stands; the AGNOS
+> desktop claim does not, and must be re-proven on `anu`.
+
 ### Added
 - **AGNOS desktop launch.** Spawned bare on AGNOS (no args — how the compositor launches
   a resident as `/bin/puka`), `main()` defaults to the GUI window instead of printing usage,
   mirroring a desktop app booting its own window. The existing `src/gui/setu_present.cyr`
   backend presents each frame through the `sys_shm` shared-buffer path
   (`setu_buf_create → buf_write → attach_buf fmt=1 → commit`) — the same path cyrius-doom
-  uses. Validated: `agnos scripts/aethersafha-jalwa-smoke.sh` (QEMU; gnoboot+OVMF+NVMe) —
-  jalwa **and** crab both present surfaces in one run (a real multi-window desktop).
+  uses. ~~Validated: `agnos scripts/aethersafha-jalwa-smoke.sh` (QEMU; gnoboot+OVMF+NVMe) —
+  jalwa **and** crab both present surfaces in one run (a real multi-window desktop).~~
+  ⛔ **RETRACTED 2026-08-03 — FALSE GREEN.** `aethersafha-jalwa-smoke.sh` built its kernel with
+  `AETHERSAFHA_SETU_SELFTEST=1`, a hook that assigned `net_ip = 0x7F000001` so a setu client's
+  TCP connect to the compositor could match a 4-tuple that, **before `net_src_for` (agnos
+  1.56.34)**, it otherwise could not. On an ordinary boot of that era jalwa could not have
+  connected at all. (`net_src_for` later fixed that defect and un-rigged clients did connect —
+  QEMU `-smp 1`, 2026-08-02 — but jalwa was not among them.) Hook and script are **deleted**. The
+  `setu_present.cyr` backend code is not withdrawn — only the claim that it was proven on agnos,
+  and the TCP transport under it. See agnos `docs/development/planning/ipc.md` §9-§10.
 - **`jlw_plib_new_empty()`** — an in-memory empty-library fallback (`src/core/db.cyr`). A
   fresh desktop with no on-disk library db (`jlw_open_library()` returns 0) now opens an
   empty library instead of faulting on a null handle at first paint.

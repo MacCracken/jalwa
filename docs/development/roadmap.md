@@ -8,8 +8,16 @@
 
 All of jalwa-core, jalwa-playback (real audio), jalwa-ai, jalwa-ui, jalwa-gui, and
 the binary + MCP server are ported to Cyrius and green against `rust-old/`. **v1.1.0**
-shipped jalwa as a **window on the sovereign AGNOS desktop** (aethersafha over setu;
-`aethersafha-jalwa-smoke.sh`). The **v1.2.x design→code arc** (below) is now **complete**:
+shipped jalwa's **window backend for the sovereign AGNOS desktop** (aethersafha over setu).
+⛔ **The "runs as a window on AGNOS" claim is RETRACTED (2026-08-03)** — its only evidence was
+`aethersafha-jalwa-smoke.sh`, a FALSE GREEN: that smoke built its kernel with the
+`AETHERSAFHA_SETU_SELFTEST` hook, whose `net_ip = 0x7F000001` assignment is the sole reason that
+run's setu-over-TCP connect completed — on the agnos of that date, **before `net_src_for` (agnos
+1.56.34)** fixed the source-address defect. Hook and script are deleted. ⚠ Do not over-read this:
+after `net_src_for`, un-rigged setu clients *did* connect and present (QEMU `-smp 1`, 2026-08-02);
+jalwa simply was not among them. TCP-on-loopback is nonetheless retired as the display transport —
+as the **wrong primitive**, not for being broken — in favour of the agnos socket `anu` (agnos
+`planning/ipc.md` §9-§10). The backend code stands and awaits a valid proof there. The **v1.2.x design→code arc** (below) is now **complete**:
 the "Jalwa Visual Language" color system, three switchable dark themes, an in-app Settings
 picker, and every restyled surface (Now-Playing, Library, Queue, Search, Mini-player) are
 in code. What remains is the **GPU-era visualizer** layer (aurora/caustic/mandala, glass

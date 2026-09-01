@@ -1,14 +1,14 @@
-commit	236da397f1398fd2180038b712f90e778a082dc3	mishran	https://github.com/MacCracken/mishran.git	0.5.2
-commit	8b7e9b4342fe470a25c372b46b61d7b7fc10ec82	setu	https://github.com/MacCracken/setu.git	0.7.0
-commit	bf1187aeb0ef4b37660b2ad0893373a1f06567a3	rupa	https://github.com/MacCracken/rupa.git	0.1.1
+commit	64eb878567f62304f9b8177c00eab4e3268285c9	mishran	https://github.com/MacCracken/mishran.git	0.5.4
+commit	83fddf5427dc960d7654f6602d1ad0b14b1cfea2	setu	https://github.com/MacCracken/setu.git	0.7.4
+commit	16aa349f0f70455096032860337b785bd71f7530	rupa	https://github.com/MacCracken/rupa.git	0.1.2
 commit	d4af3eeb15400bd1e8aa92f4737a727acd84068b	dhvani	https://github.com/MacCracken/dhvani.git	2.2.1
 commit	b08c7945ca15651612d10629c4180e5a131d5f94	abaco	https://github.com/MacCracken/abaco.git	2.3.3
 commit	6c900238c87c34897aa19fe320553e83c3417df0	darshana	https://github.com/MacCracken/darshana.git	0.9.0
 commit	9fa963e6aa885033545cb3338cc9c4017c7b00bf	sankoch	https://github.com/MacCracken/sankoch.git	2.4.9
 commit	961aebb07e61d3dbe664a02a3f3608e37ee2ebfa	shravan	https://github.com/MacCracken/shravan.git	2.6.7
 commit	f8410258046a09015e61e8b2d0fc63c23cd7fde8	chitra	https://github.com/MacCracken/chitra.git	0.3.0
-commit	5a25aa0ebf080130c282a56f11dc2bf87cef9dad	vani	https://github.com/MacCracken/vani.git	1.1.2
-commit	77ad3f2aee7fc6bad0faa6a61528b963920e84af	kashi	https://github.com/MacCracken/kashi.git	1.0.3
+commit	405cc182e8f868834b0c3fbbfe6207fefde9a8db	vani	https://github.com/MacCracken/vani.git	1.1.3
+commit	b81c14da002e601b72c1f8e053a8da1d452ef302	kashi	https://github.com/MacCracken/kashi.git	1.0.4
 d9f3b17ddbbe1bba48917c3a679807b01c39c4a1ce776efdbdfbb7a1680e86e4  lib/tagged.cyr
 b96a50f8df3b533649d09cd239578811a22097434e09d89b113ce8b7f56801db  lib/net.cyr
 e84c090fd0f8532700d967ca3190837780a52a42630f4c6a0a4567ad9a49ab6b  lib/cffi.cyr
@@ -63,7 +63,7 @@ aeddbc2a926ceb30164f6e023b824a605af38db853eb29b4a8d967c2da6e0a53  lib/tls.cyr
 7ca454e7255ee9f5ac655e553550feecf99f6df22e9e774463a8260e032d118a  lib/patra.cyr
 3a46495c11040db6f26872366ff528bfd50f0e8e033e5c0029d0f0684cfcd615  lib/protobuf.cyr
 c4847e348c041f6bb884dfa869a1b4543e2dcc0ae16488c9ae3eb9216cb62eff  lib/shravan.cyr
-ef04b11044d740164f20fa1656c3b9d2153447a785153d2856f3cb00f7f93194  lib/vani.cyr
+cba1010deac9c8bdd87674b8291be02ee5b7daed65cd7d4109a4918f97488b9e  lib/vani.cyr
 af3dc72c3e2d0f94ea4d4a6bdeb60963cd36e7849b7ccf06299bf5c616de7100  lib/sync_windows.cyr
 c183908dd1904c574ac20960428b4c4f63a36fb4d18a76895d5f34ca0cfc99ca  lib/tls_native.cyr
 65c97b05e22533d24bfd844646d530480b79973fa5b0277ad3f759f4398a328c  lib/chrono.cyr
@@ -77,7 +77,7 @@ bd63b07681c88830f82749303a490ed557df70999b60184a8f7b811f15735823  lib/tls_native
 69129bbd84594fedbdc573c5e6ae2d53a4553aec0d86381d73c959ef6f3c1d4c  lib/thread_win.cyr
 87bf220a695d391bbeb622cfcaa2b962e4d31b197750216afef915b533e4903e  lib/thread.cyr
 f7b9d52f29de6d3d633962ccc765a76637091a7256eebc1da5547530eed2c44b  lib/args_win.cyr
-932ff7dbaae6731d62fe5ca769992525e1e98f5926b5a7a72b57adf1b7567759  lib/mishran.cyr
+725d2fee2cef514e80a7867db1d7e0b479aef15d51cf358629672d1cb151ede2  lib/mishran.cyr
 03b00c6f58f54f690505d94bc6d173c0e4ec64e709288f43939fbc7f756847ce  lib/process_agnos.cyr
 6b741e6344246eccd42b940f77d396d0c1a4a24234b51e42a746a3b905ef3f8b  lib/syscalls_aarch64_linux.cyr
 2907e90cae9f66370dce6e9567e24b03dab31221cb4f0e505a5c5745232d5de4  lib/sha1.cyr
@@ -98,8 +98,8 @@ a1a03ba1182179508dac948e51c3a0cedcb06c2fd38b3b1653262b1b81b2a368  lib/dhvani.cyr
 e5c01430c59451f1e4e75e371b7c5d25cbf3b4b02f2eb30e680358bbb809ffbb  lib/sync.cyr
 724cb440922e89ff60c76eba23670eeee53b9d1f3ffdde31ebe2e2f9badda9ed  lib/slice.cyr
 1fe386009b4001573c4111d1852468db6215e8223ef637ecb85881fbe56f1153  lib/tls_native_hs12.cyr
-b1d92ad5fabddaced8626bc9c494cdfed1c323987abf6bef90b92edf798d0f99  lib/setu.cyr
-b1c55950b5c7859cef4c057607fa20b394985e2f7dd4d2a89fd7869674b15e48  lib/rupa.cyr
+8ace143979c9c49b6c4b971315629ab42941cb8d8d5cfbec4cb4cfc0758bd614  lib/setu.cyr
+5c60803482e41924217c1dcd38e86d966f4ee75e9c15cba8bf698a56b8ed794d  lib/rupa.cyr
 9fd6444e8cfcf7950837e955473adc5bab6d7bf4fa2c15f8ce2578360c4100eb  lib/hashmap.cyr
 f39294af5dc32bec02ec7d2204ca82033abe4f4bafc78e9be792eb178132e244  lib/fnptr.cyr
 5b5dd5a59b766d642d711e8c884780bfe3ba9efd2dcefb3c76230208556e8d54  lib/kashi_font_data.cyr

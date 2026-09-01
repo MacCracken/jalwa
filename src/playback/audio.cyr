@@ -73,6 +73,16 @@ fn jlw_audio_f64_to_i16(samples, start, count, volume, out) {
 # vani device when standalone (no mixer). The mishran path streams PCM over
 # loopback:7701; the server paces us via TCP backpressure (its ring-full latch),
 # so the play loop stays real-time without a client-side timer.
+# ⛔ THAT loopback:7701 TRANSPORT IS RETIRED (2026-08-03) — retired because TCP is the wrong
+# primitive for a local wire, and because it was never HONESTLY DEMONSTRATED on agnos: mishran's
+# TCP wire inherited setu's wrong premise, and its agnos greens came from the
+# `MISHRAN_DUPLEX_SELFTEST` kernel hook assigning `net_ip = 0x7F000001` — those stay retracted.
+# ⚠ Do not read that as "it cannot work": the same `net_ip`-as-source defect that blocked it was
+# fixed by `net_src_for` (agnos 1.56.34), after which setu's own loopback wire did connect
+# un-rigged. Nobody ever re-ran the mishran path there, so its agnos standing is simply UNPROVEN
+# in both directions — and it is being replaced regardless. Treat the mixer path as unavailable on
+# agnos; jalwa falls through to the direct vani sink. Replacement is the agnos socket (`anu`) —
+# agnos `docs/development/planning/ipc.md` §9/§10. ⚠ Linux is unaffected.
 enum JlwSinkKind {
     JLW_SINK_MISHRAN = 1;
     JLW_SINK_VANI    = 2;
