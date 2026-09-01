@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "jalwa — AI-native media player for AGNOS. Cyrius port of a 15,355-line Rust workspace (rust-old/)."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.5.5"
+cyrius = "6.5.36"
 
 [build]
 entry = "src/main.cyr"
@@ -16,28 +16,31 @@ stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "ass
 # mishran — the audio MIXER / routing server. jalwa streams its decoded PCM to
 # mishran (msh_client_*) so it shares the one hardware writer with every other
 # app, instead of grabbing vani directly. The client API needs `result` + `net`
-# (above). Pinned to the 0.4.1 release — the two-proc cooperative-yield audio path
+# (above). Pinned to 0.5.6 — PCM over shared memory (0.5.0) plus the app-facing
+# client's hot-path leak fix, on top of the two-proc cooperative-yield audio path
 # (msh_router_pump_nb + the transport sched_yield backoffs + the flow-control latch).
 [deps.mishran]
 git = "https://github.com/MacCracken/mishran.git"
-tag = "0.5.4"
+tag = "0.5.6"
 modules = ["dist/mishran.cyr"]
 
 # setu — the AGNOS native display protocol. jalwa's agnos GUI backend
 # (src/gui/setu_present.cyr) presents its XRGB8888 raster over setu, replacing the Wayland
 # backend on agnos while Linux keeps it. Same cross-platform pattern as vani (ALSA/snd).
-# ⛔ The client transport to the aethersafha compositor "over loopback:7700" is RETIRED
-# (2026-08-03) as the WRONG PRIMITIVE for a local display protocol — not for being broken.
-# Scoped: TCP-on-loopback could not complete a handshake on an ordinary agnos boot BEFORE agnos
-# 1.56.34 / `net_src_for`; afterwards other clients did connect un-rigged (QEMU `-smp 1`,
-# 2026-08-02). jalwa was not one of them — the one run that showed jalwa as a window passed only
-# under the `AETHERSAFHA_SETU_SELFTEST` kernel hook (`net_ip = 0x7F000001`) and stays retracted.
-# Replacement is the agnos socket (`anu`) — agnos
-# `docs/development/planning/ipc.md` §9/§10. The `net` stdlib dep exists only for the retired TCP
-# path and goes away with it.
+# ⭐ 0.7.4 -> 0.8.8 COMPLETES the transport cutover this pin used to describe as pending.
+# TCP-on-loopback is GONE from setu (0.8.4): Linux now speaks AF_UNIX/SOCK_SEQPACKET and the
+# agnos client dials nothing at all — it is handed the `#97` channel band at spawn (0.8.0),
+# which is the `anu` replacement agnos `docs/development/planning/ipc.md` §9/§10 called for.
+# The old "over loopback:7700" claim, and the one jalwa-as-a-window run that passed only under
+# the `AETHERSAFHA_SETU_SELFTEST` kernel hook, stay retracted — they described the retired path.
+# ⚠ 0.8.5 moved the rendezvous into setu: `setu_client_connect(0)` resolves
+# explicit path > `$SETU_SOCKET` > `SETU_UNIX_PATH` (= `/tmp/setu-display.sock`). Consumers MUST
+# pass 0 — a client still dialing its own `/tmp/aethersafha-setu.sock` literal now fails every
+# connect with ENOENT. `src/gui/setu_present.cyr` passes 0 accordingly.
+# ⚠ `net` is still a live stdlib dep: setu's own `dist/setu.deps` declares it.
 [deps.setu]
 git = "https://github.com/MacCracken/setu.git"
-tag = "0.7.4"
+tag = "0.8.8"
 modules = ["dist/setu.cyr"]
 
 # rupa — the shared desktop theme-token core (MUDRA / SHANTA). jalwa keeps its own
@@ -46,7 +49,7 @@ modules = ["dist/setu.cyr"]
 # every other app. Only the SYSTEM branch of gui/theme.cyr reads rupa_theme_*.
 [deps.rupa]
 git = "https://github.com/MacCracken/rupa.git"
-tag = "0.1.2"
+tag = "0.1.6"
 modules = ["dist/rupa.cyr"]
 
 [deps.dhvani]
@@ -56,24 +59,24 @@ modules = ["dist/dhvani.cyr"]
 
 [deps.abaco]
 git = "https://github.com/MacCracken/abaco.git"
-tag = "2.3.3"
+tag = "2.4.5"
 modules = ["dist/abaco.cyr"]
 
 [deps.darshana]
 git = "https://github.com/MacCracken/darshana.git"
-tag = "0.9.0"
+tag = "1.0.0"
 modules = ["dist/darshana.cyr"]
 
 # sankoch before shravan (shravan depends on sankoch). Audio codecs (decode/probe/
 # tags) go through shravan -- tarang is video-only.
 [deps.sankoch]
 git = "https://github.com/MacCracken/sankoch.git"
-tag = "2.4.9"
+tag = "2.7.10"
 modules = ["dist/sankoch.cyr"]
 
 [deps.shravan]
 git = "https://github.com/MacCracken/shravan.git"
-tag = "2.6.7"
+tag = "2.8.0"
 modules = ["dist/shravan.cyr"]
 
 # chitra — pure-Cyrius CPU image decoder (PNG + baseline JPEG -> RGBA8). Powers real
@@ -81,19 +84,19 @@ modules = ["dist/shravan.cyr"]
 # so it MUST resolve after [deps.sankoch] (dep order = concat order).
 [deps.chitra]
 git = "https://github.com/MacCracken/chitra.git"
-tag = "0.3.0"
+tag = "1.0.1"
 modules = ["dist/chitra.cyr"]
 
 # vani = ALSA/agnos audio OUTPUT (playback sink). Audio pipeline:
 # shravan decode -> dhvani DSP -> vani out. Not tarang (video-only).
 [deps.vani]
 git = "https://github.com/MacCracken/vani.git"
-tag = "1.1.3"
+tag = "1.2.2"
 modules = ["dist/vani.cyr"]
 
 # kashi — freestanding VGA 8x16 font-data core (zero stdlib: load8/store8 + arithmetic).
 # Provides kashi_glyph_row(font_id, ch, row) for the GUI CPU rasterizer (src/gui/raster.cyr).
 [deps.kashi]
 git = "https://github.com/MacCracken/kashi.git"
-tag = "1.0.4"
+tag = "1.0.6"
 modules = ["src/font_data.cyr"]

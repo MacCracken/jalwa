@@ -5,11 +5,13 @@
 
 ## Version
 
-**1.0.0** — Rust → Cyrius port complete (2026-07-10). Scaffolded 2026-07-09 via `cyrius port`.
+**1.4.4** (2026-09-01) — toolchain + whole-dep catch-up. Rust → Cyrius port complete at **1.0.0**
+(2026-07-10); scaffolded 2026-07-09 via `cyrius port`.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.4.29` (in `cyrius.cyml [package].cyrius`)
+- **Cyrius pin**: `6.5.36` (in `cyrius.cyml [package].cyrius`) — matches the installed cycc; `lib/`
+  re-vendored at this pin via `cyrius lib sync --full` (108 files).
 
 ## Source / oracle
 
@@ -34,19 +36,42 @@ Backlogged (post-v1, priority order in [`roadmap.md`](roadmap.md)): **P1 video**
 
 ## Tests
 
-- 35 `.tcyr` suites, **1224 assertions, all green**. Includes `scanner_probe` 39 + `audio_decode` 34 (decode → f64→i16 → threaded async-playback → EQ + normalize) + `engine_playback` 27 (threaded play→TrackFinished→Stopped + transport pause/resume/live-volume/seek + open-cancels-playback, over the fnptr seam) + `mcp_serve` 34 + `tui_runloop` 38 + GUI (141 portable logic + `gui_draw` 83, `gui_raster` 51 (fill_rect/border/glyph/UTF-8 text/clip/art + executor + PPM), `gui_input` 39 (evdev→key→action), `gui_control` 55 (apply_action + grid nav + search entry + keystroke path)). Fixtures `tests/fixtures/probe.{wav,flac,mp3}`. Bare `cyrius test` (CI) all green.
+- 35 `.tcyr` suites, **1331 assertions, all green**. Includes `scanner_probe` 39 + `audio_decode` 34 (decode → f64→i16 → threaded async-playback → EQ + normalize) + `engine_playback` 27 (threaded play→TrackFinished→Stopped + transport pause/resume/live-volume/seek + open-cancels-playback, over the fnptr seam) + `mcp_serve` 36 + `tui_runloop` 38 + GUI (141 portable logic + `gui_draw` 83, `gui_raster` 51 (fill_rect/border/glyph/UTF-8 text/clip/art + executor + PPM), `gui_input` 39 (evdev→key→action), `gui_control` 55 (apply_action + grid nav + search entry + keystroke path)). Fixtures `tests/fixtures/probe.{wav,flac,mp3}`. Bare `cyrius test` (CI) all green.
 - **Adversarial correctness review (2026-07-10)** of the audio/threading/parsing code fixed 5 confirmed bugs: (high) `open()` while PLAYING orphaned the decode thread + spawned a second — restored rust-old's `open()→stop()`; (med) MP3 frame-probe `foff<n`→`foff+4<=n` (3-byte over-read); (low) tools/call tool-name now a depth-aware top-level scan (nested `arguments.name` can't shadow it); (low) JSON string scans made escape-aware; (low) `jalwa_recommend` now honors `max`. `main`: assembly builds & runs (2.33MB); `jalwa scan`/`play`/`info`/`mcp` end-to-end smoke-tested (`info` shows real Format/Duration/Codec/tags; `play` decodes real audio, falls back cleanly when no ALSA device); `poll(2)` verified on agnos.
 - **Adversarial GUI review (2026-07-10)** of the new draw+raster layer (5-dimension fan-out, 3-skeptic verify per finding) fixed 5 confirmed / rejected 5 false-positives: (med) `jlw_gui__utf8_at` over-read past NUL on a truncated 3/4-byte lead — now validates each continuation byte before loading the next; (med) library view drew a blank panel when empty — restored rust-old's "Library is empty…" / "No matches"; (low) `now_playing`/`queue` empty states dropped rust-old's 2nd guidance line; (low) `key_to_action` was missing `a`=enqueue / `d`=remove. All 4 have regression tests.
 
-> Toolchain drift: `cyrius.cyml` pins 6.4.29; cycc is now 6.4.42. Builds pass against the 6.4.29-vendored `lib/`; benign pin-drift warning. Bump the pin + `cyrius lib sync` when convenient.
-> Benign build warning: `duplicate fn 'detect_format'` (shravan audio-format vs sankoch compression-format) — jalwa calls neither (uses its own `jlw_detect_audio_format`), so it's inert like the abaco ERR_INVALID noise.
+> ✅ **Toolchain drift is CLOSED at 1.4.4** — pin and cycc both 6.5.36, `lib/` re-vendored. ⛔ The
+> earlier "benign; bump when convenient" reading of this drift was wrong and cost a red tree: cyrius
+> 6.5.x made `f64_round` a **compiler builtin** and vendored abaco 2.3.3 defined `fn f64_round(x)`, so
+> **0 of 35 suites compiled** until abaco 2.4.5 (which renames it `f64_round_half_away`). A pin-drift
+> warning reads identically whether the snapshot is stale or unbuildable — treat drift as unknown-state.
+> ✅ The `duplicate fn 'detect_format'` and abaco `ERR_INVALID`/`MAX_TOKENS` warnings are **gone** at
+> the current dep set. ⚠ One benign pair remains: shravan 2.8.0 ships two definitions each of
+> `silk_bwexpander_32` / `silk_div32_varq` (last wins). Verified semantically equivalent — the winning
+> copy only avoids mutating its `chirp_Q16` parameter — and jalwa reaches neither (its Opus/SILK path
+> is deliberately excluded, `src/playback/audio.cyr:48`).
 - Per-module `.tcyr` suites land with each ported module, cross-checked against `rust-old/` `#[test]` blocks.
 
 ## Dependencies
 
 - **stdlib** (via `cyrius lib sync`): string, fmt, alloc, vec, str, syscalls, io, args, assert, math, random, chrono, patra, fs, yukti, hashmap, tagged, process, **ganita, thread, fnptr, bayan** (last 4 added for shravan)
-- **dist repos** (`[deps.X]` via `cyrius deps`): **dhvani 2.2.1 + abaco 2.3.2 + darshana 0.9.0 + shravan 2.6.7 + sankoch 2.4.9 + vani 1.0.0 wired ✅** (54 deps locked); ai-hwaccel, bote, chitra, dhancha to wire per-wave. vani needs stdlib freelist/sakshi/atomic/sync/thread_local (added).
-  - note: abaco emits benign `duplicate symbol ERR_INVALID / MAX_TOKENS (last wins)` warnings; shravan/sankoch add a benign `duplicate fn detect_format` (jalwa calls neither); darshana pulls transitive vani/acoustic externals (DCE-pruned)
+- **dist repos** (`[deps.X]` via `cyrius deps`) — all 11 at their latest release as of 2026-09-01,
+  **117 deps locked**: **mishran 0.5.6 · setu 0.8.8 · rupa 0.1.6 · dhvani 2.2.1 · abaco 2.4.5 ·
+  darshana 1.0.0 · sankoch 2.7.10 · shravan 2.8.0 · chitra 1.0.1 · vani 1.2.2 · kashi 1.0.6** ✅
+  (dep order matters: sankoch before shravan and chitra, which call into it). ai-hwaccel / bote /
+  dhancha remain unwired. vani needs stdlib freelist/sakshi/atomic/sync/thread_local (declared).
+  - **kashi stays on the freestanding core** (`modules = ["src/font_data.cyr"]`), NOT the `dist/`
+    bundle 1.0.6 added. Upstream measured the full face at **+50% binary** (+183,360 bytes on
+    dhancha) for a font registry no desktop consumer calls, and `CYRIUS_DCE=1` reclaims none of it.
+    jalwa's three calls (`kashi_font_init` / `kashi_font_is_ready` / `kashi_glyph_row`) are all in
+    the core.
+  - **darshana 1.0.0 is an API freeze, not a code change** — byte-identical to 0.9.4. jalwa's 9
+    `tty_*` calls are all inside the frozen surface.
+  - note: darshana pulls transitive vani/acoustic externals (DCE-pruned)
+  - **Upgrade check that cleared the 1.4.4 bump** (repeat it on the next one): diff each dep's
+    exported symbols old-tag vs new-tag, confirm every *removed* symbol is unreferenced by jalwa
+    (setu 1, abaco 3, darshana 5, chitra 7, vani 1 — all unused), and confirm unchanged arity on the
+    71 dep symbols jalwa does call. Then check each `dist/*.deps` against `[deps].stdlib`.
   - note: the MCP server needs NO dep — the JSON-RPC loop is hand-rolled in pure Cyrius (rust-old used bote only for the ToolDef *types*, hand-rolling the loop itself)
 - **Audio stack (unblocked)**: **shravan** (codecs: decode/probe/tags), **dhvani** (DSP), **vani** (output) — audio is NOT tarang-gated.
 - **Blocked (still Rust) — VIDEO ONLY**: **tarang** (video decode/encode), **aethersafta** (video surface). Audio needs neither.

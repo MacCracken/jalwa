@@ -55,6 +55,34 @@ fn thread_join(t): i64 {
     return 0;
 }
 
+# v6.5.8: detached spawn. Windows needs no unmap trampoline — the OS owns the thread
+# stack and reclaims it at thread exit — so detaching is just dropping our reference:
+# CreateThread then CloseHandle immediately. The thread keeps running; only the HANDLE
+# is released, which is what would otherwise leak (a never-closed HANDLE is a kernel
+# object leak, the PE-side analogue of thread.cyr's stranded 2 MiB mapping).
+# Returns 1 on success, 0 on failure — boolean, matching thread.cyr, because there is
+# deliberately nothing left to join.
+fn thread_create_detached(fp, arg): i64 {
+    var h = thread_create(fp, arg);
+    if (h == 0) { return 0; }
+    syscall(3, h);          # CloseHandle — the thread runs on
+    return 1;
+}
+
+# v6.5.8: non-blocking completion test. WaitForSingleObject with a 0 timeout returns
+# WAIT_OBJECT_0 (0) if signalled, WAIT_TIMEOUT (0x102 = 258) if still running.
+# ⛔ VALID ONLY BEFORE `thread_join`. Join CONSUMES the handle — on Windows it
+# CloseHandle()s it, so a post-join query inspects a closed handle and reports "not
+# done" (caught on real cass hardware, by a test that asserted the wrong contract).
+# The intended use is the reaper shape: poll while running, then join once this
+# returns 1. After joining, the thread is done by definition and there is nothing
+# left to ask.
+fn thread_is_done(t): i64 {
+    if (t == 0) { return 0 - 1; }
+    if (syscall(61441, t, 0) == 0) { return 1; }
+    return 0;
+}
+
 # Current thread id — the real Win32 GetCurrentThreadId (0xF00B reroute).
 fn gettid(): i64 { return syscall(61451); }
 

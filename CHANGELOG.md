@@ -1,5 +1,75 @@
 # Changelog
 
+## [1.4.4] - 2026-09-01
+
+### Changed — cyrius pin 6.5.5 -> 6.5.36; every dep to its latest release
+
+Ten of eleven deps move: **mishran 0.5.4 -> 0.5.6**, **setu 0.7.4 -> 0.8.8**, **rupa 0.1.2 -> 0.1.6**,
+**abaco 2.3.3 -> 2.4.5**, **darshana 0.9.0 -> 1.0.0**, **sankoch 2.4.9 -> 2.7.10**,
+**shravan 2.6.7 -> 2.8.0**, **chitra 0.3.0 -> 1.0.1**, **vani 1.1.3 -> 1.2.2**,
+**kashi 1.0.4 -> 1.0.6**. dhvani stays at **2.2.1** — already latest. 117 deps locked (was 108).
+
+⛔ **The tree did not build before this cut — 0 of 35 suites compiled.** The 1.4.3 pin-drift note
+("benign; bump when convenient") had stopped being benign: cyrius 6.5.x made **`f64_round` a
+compiler builtin**, and vendored **abaco 2.3.3** defines `fn f64_round(x)`, so every compile died at
+`lib/abaco.cyr:578: expected identifier, got reserved keyword 'f64_round'`. abaco **2.4.5** renames
+it `f64_round_half_away`. ⚠ The drift was invisible in the ledger because the pin-drift warning it
+emitted looks identical whether the snapshot is merely stale or actually unbuildable.
+
+⚠ **`[deps.sankoch]`'s deliberate 2.4.9 hold from 1.4.3 is released** — three minors then, six now,
+and this is the bite that was deferred to.
+
+### Fixed — `jalwa mcp` advertised a version five releases stale
+
+`serverInfo.version` was a frozen `"2026.3.22"` literal — the last **Rust** calendar version, from
+before the port's own versioning scheme existed. Every MCP client that asked jalwa to identify itself
+got that answer, while `VERSION` said 1.4.3.
+
+The oracle uses `env!("CARGO_PKG_VERSION")` (`rust-old/src/mcp.rs:75`), and the port now has the same
+facility: `CYRIUS_PKG_VERSION`, injected from `[package].version` (which resolves `${file:VERSION}`).
+⭐ **This bump is what makes it usable.** The constant landed at 6.5.21 but did **not** resolve from
+an *included* file until **6.5.34** — and `src/mcp_serve.cyr` is included by `src/main.cyr`, which is
+exactly the case that was silently omitted. A `VERSION` bump now reaches the wire with no second edit.
+The regression test asserts against the injected constant, not a literal, so it cannot rot the way
+the value it replaces did.
+
+### Fixed — the agnos setu backend dialed a name nothing binds any more
+
+⛔ **`src/gui/setu_present.cyr` passed its own `/tmp/aethersafha-setu.sock` literal.** setu **0.8.5**
+moved the rendezvous into setu itself and renamed the default to `/tmp/setu-display.sock`, so that
+literal is now a *different name from the one the compositor binds* — it would have failed every
+connect with ENOENT, and `$SETU_SOCKET` would not have been honoured either. `setu_client_connect(0)`
+means "ask setu": explicit path > `$SETU_SOCKET` > `SETU_UNIX_PATH`.
+
+⭐ **The transport this backend was waiting on has landed.** The retired TCP-on-loopback path is gone
+from setu entirely (**0.8.4**: Linux speaks AF_UNIX/SOCK_SEQPACKET; **0.8.0**: the agnos client dials
+nothing at all, using the `#97` channel band it is endowed at spawn — the `anu` shape agnos
+`docs/development/planning/ipc.md` §9/§10 called for). The stale "RETIRED / what it dials is not
+[fine]" headers in `cyrius.cyml` and `setu_present.cyr` are rewritten to match.
+⛔ **jalwa's agnos standing is still UNPROVEN and stays retracted** — the transport landing does not
+re-prove it. The only run that ever showed jalwa as a window was a false green under the deleted
+`AETHERSAFHA_SETU_SELFTEST` kernel hook. This backend needs a live aethersafha on real AGNOS.
+⚠ `net` is **not** vestigial after the TCP retirement, contrary to what both headers claimed: setu's
+own `dist/setu.deps` still declares it, as does mishran's.
+
+### Verification
+
+Build green (3.3 MB). **35 suites, 1331 assertions, 0 failed** (was 1329 — the 2 new version
+assertions). Upgrade cleared for breakage the way it should be, not by hoping: the exported symbol
+surface of each dep was diffed old-tag vs new-tag, and every symbol removed across the ten bumps
+(setu 1, abaco 3, darshana 5, chitra 7, vani 1) was confirmed **unreferenced by jalwa**, with the
+arity of all 71 dep symbols jalwa *does* call unchanged. Every dep's `dist/*.deps` stdlib
+requirement is already covered by the declared `[deps].stdlib` — no additions needed.
+Smoke: `stats`, `library`, `search`, `info` (FLAC + MP3 probe/tags via shravan 2.8.0), `play`
+(clean no-device degrade), `gui` (clean no-compositor degrade), `mcp` (`initialize` + `tools/list`).
+
+⚠ **Warning surface is much cleaner** — abaco's `MAX_TOKENS`/`ERR_INVALID` duplicates, the
+shravan/sankoch `detect_format` duplicate, bayan's typed-pointer warnings, and the lib-shadow and
+pin-drift warnings are all gone. ⚠ **One new benign pair:** shravan 2.8.0 ships two definitions each
+of `silk_bwexpander_32` and `silk_div32_varq` (2.6.7 had one each). Verified semantically equivalent
+— the winning second copy only avoids mutating its `chirp_Q16` parameter — and jalwa reaches neither:
+its Opus/SILK path is deliberately excluded (`src/playback/audio.cyr:48`).
+
 ## [1.4.3] - 2026-08-02
 
 ### Changed — cyrius pin 6.4.71 -> 6.5.5; mishran 0.5.3, setu 0.7.1, rupa 0.1.2, vani 1.1.3, kashi 1.0.4

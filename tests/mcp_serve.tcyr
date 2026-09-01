@@ -32,6 +32,16 @@ assert_eq(contains(ri, "\"jsonrpc\":\"2.0\""), 1, "has jsonrpc 2.0");
 assert_eq(contains(ri, "\"id\":1"), 1, "echoes id 1");
 assert_eq(contains(ri, "\"protocolVersion\":\"2024-11-05\""), 1, "protocolVersion present");
 assert_eq(contains(ri, "\"serverInfo\":{\"name\":\"jalwa\""), 1, "serverInfo name jalwa");
+# The advertised version tracks [package].version (= the VERSION file) via CYRIUS_PKG_VERSION,
+# mirroring rust-old's env!("CARGO_PKG_VERSION"). Asserting against the injected constant rather
+# than a literal is the point: a hardcoded expectation would rot in lockstep with the bug it
+# replaces (the frozen "2026.3.22" it caught nothing of for five releases).
+var vsb = str_builder_new();
+str_builder_add_cstr(vsb, "\"version\":\"");
+str_builder_add_cstr(vsb, CYRIUS_PKG_VERSION);
+str_builder_add_cstr(vsb, "\"}}");
+assert_eq(contains(ri, str_cstr(str_builder_build(vsb))), 1, "serverInfo version tracks the package version");
+assert_eq(contains(ri, "2026.3.22"), 0, "no frozen calendar-version literal");
 assert_eq(contains(ri, "\"error\""), 0, "no error key");
 
 # ---- run_tools_list (8 tools present) ----

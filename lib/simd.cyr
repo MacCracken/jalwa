@@ -146,31 +146,47 @@ fn f64v4_lane2_ptr(p): i64 { return load64(p + 16); }
 # Lane 3 extractor (pointer form).
 fn f64v4_lane3_ptr(p): i64 { return load64(p + 24); }
 
+# --- f64v4 arithmetic: 256-bit ymm when the CPU has AVX2, else 2×SSE (v6.5.24) ---
+# All four ops (add/sub/mul/div), in BOTH the pointer and value forms below, pick the
+# 256-bit packed-double kernel `f64v256_*` (vaddpd/vsubpd/vmulpd/vdivpd ymm — ONE
+# iteration for all four lanes) when the host advertises AVX2, and otherwise keep the
+# 128-bit `f64v_*` path (two iterations). Measured 15.9 -> ~7.9 ns.
+#
+# ⚠ THE GATE IS NOT OPTIONAL. `f64v256_*` emits unconditional VEX, which #UDs (SIGILL) on
+# any pre-AVX2 x86. `simd_has_avx2()` also returns 0 on every non-x86 target — its CPUID
+# probe is `#ifdef CYRIUS_ARCH_X86` and no-ops elsewhere — so aarch64 / Mach-O-arm64 / cx
+# take the `f64v_*` NEON-or-portable path for free, exactly as the f32v8 wrappers do.
+# ⚠ n is 4 here and MUST stay a multiple of 4: the ymm emitter strides its index by 4.
+# The f64v2 wrappers above pass n=2 and MUST keep calling `f64v_*` — never widen them.
 # Pointer form of f64v4_add.
 fn f64v4_add_ptr(a_ptr, b_ptr): f64v4 {
     var r: f64v4;
-    f64v_add(&r, a_ptr, b_ptr, 4);
+    if (simd_has_avx2() == 1) { f64v256_add(&r, a_ptr, b_ptr, 4); }
+    else { f64v_add(&r, a_ptr, b_ptr, 4); }
     return r;
 }
 
 # Pointer form of f64v4_sub.
 fn f64v4_sub_ptr(a_ptr, b_ptr): f64v4 {
     var r: f64v4;
-    f64v_sub(&r, a_ptr, b_ptr, 4);
+    if (simd_has_avx2() == 1) { f64v256_sub(&r, a_ptr, b_ptr, 4); }
+    else { f64v_sub(&r, a_ptr, b_ptr, 4); }
     return r;
 }
 
 # Pointer form of f64v4_mul.
 fn f64v4_mul_ptr(a_ptr, b_ptr): f64v4 {
     var r: f64v4;
-    f64v_mul(&r, a_ptr, b_ptr, 4);
+    if (simd_has_avx2() == 1) { f64v256_mul(&r, a_ptr, b_ptr, 4); }
+    else { f64v_mul(&r, a_ptr, b_ptr, 4); }
     return r;
 }
 
 # Pointer form of f64v4_div.
 fn f64v4_div_ptr(a_ptr, b_ptr): f64v4 {
     var r: f64v4;
-    f64v_div(&r, a_ptr, b_ptr, 4);
+    if (simd_has_avx2() == 1) { f64v256_div(&r, a_ptr, b_ptr, 4); }
+    else { f64v_div(&r, a_ptr, b_ptr, 4); }
     return r;
 }
 
@@ -587,30 +603,38 @@ fn f64v4_lane2(v: f64v4): i64 { return load64(&v + 16); }
 fn f64v4_lane3(v: f64v4): i64 { return load64(&v + 24); }
 
 # 4-lane packed-double add (value form): r[i] = a[i] + b[i].
+# ⚠ These four value forms carry the SAME AVX2 gate as their `_ptr` siblings — see the
+# comment block above `f64v4_add_ptr`. This fn's NAME is also why the builtin is spelled
+# `f64v256_add` rather than `f64v4_add`: the lane-count name was already taken here, and
+# reserving it as a keyword would make this very definition a parse error.
 fn f64v4_add(a: f64v4, b: f64v4): f64v4 {
     var r: f64v4;
-    f64v_add(&r, &a, &b, 4);
+    if (simd_has_avx2() == 1) { f64v256_add(&r, &a, &b, 4); }
+    else { f64v_add(&r, &a, &b, 4); }
     return r;
 }
 
 # 4-lane packed-double subtract (value form).
 fn f64v4_sub(a: f64v4, b: f64v4): f64v4 {
     var r: f64v4;
-    f64v_sub(&r, &a, &b, 4);
+    if (simd_has_avx2() == 1) { f64v256_sub(&r, &a, &b, 4); }
+    else { f64v_sub(&r, &a, &b, 4); }
     return r;
 }
 
 # 4-lane packed-double multiply (value form).
 fn f64v4_mul(a: f64v4, b: f64v4): f64v4 {
     var r: f64v4;
-    f64v_mul(&r, &a, &b, 4);
+    if (simd_has_avx2() == 1) { f64v256_mul(&r, &a, &b, 4); }
+    else { f64v_mul(&r, &a, &b, 4); }
     return r;
 }
 
 # 4-lane packed-double divide (value form).
 fn f64v4_div(a: f64v4, b: f64v4): f64v4 {
     var r: f64v4;
-    f64v_div(&r, &a, &b, 4);
+    if (simd_has_avx2() == 1) { f64v256_div(&r, &a, &b, 4); }
+    else { f64v_div(&r, &a, &b, 4); }
     return r;
 }
 

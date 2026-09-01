@@ -152,9 +152,21 @@ fn jlw_mcp_get_str_top(obj, key) {
 
 # ---- result builders ----
 # initialize result -- byte-faithful to rust-old mcp.rs:72-76.
+# ⭐ The advertised version is the PACKAGE version, matching the oracle's
+# `env!("CARGO_PKG_VERSION")`. `CYRIUS_PKG_VERSION` is injected by cbt/cycc from
+# `[package].version` (which resolves `${file:VERSION}`), so a `VERSION` bump reaches the
+# wire without a second edit here. Requires the 6.5.36 pin: the constant landed at 6.5.21
+# but did NOT resolve from an *included* file until 6.5.34 — and mcp_serve.cyr is included
+# by src/main.cyr, which is precisely the case that was silently omitted.
+# ⛔ It was a frozen `"2026.3.22"` literal before: the last Rust calendar version, five
+# jalwa releases stale, so `jalwa mcp` mis-identified itself to every MCP client.
 #must_use
 fn jlw_mcp_initialize_result() {
-    return "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{\"listChanged\":false}},\"serverInfo\":{\"name\":\"jalwa\",\"version\":\"2026.3.22\"}}";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{\"listChanged\":false}},\"serverInfo\":{\"name\":\"jalwa\",\"version\":\"");
+    str_builder_add_cstr(sb, CYRIUS_PKG_VERSION);
+    str_builder_add_cstr(sb, "\"}}");
+    return str_cstr(str_builder_build(sb));
 }
 
 # emit one tool def in the MCP {"name","description","inputSchema"} shape.

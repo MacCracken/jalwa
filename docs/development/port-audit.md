@@ -211,5 +211,9 @@ Waves C and D are parallelizable after A. Each module is verified against `rust-
   (bote already POSTs JSON-RPC) or keep a jalwa-local helper?
 - **MPRIS:** required on AGNOS, or use an AGNOS-native media-control convention
   (`majra` pub/sub, `bote`/`setu` endpoint) instead — determines if the samvada extension is in scope.
-- **Versioning:** the Cyrius port starts at `0.1.0`; the Rust line was calendar-versioned
-  (`2026.3.22`). Confirm the new version scheme.
+- ~~**Versioning:**~~ **RESOLVED (1.4.4, 2026-09-01).** The port is **semver**, `VERSION` at the
+  root is the source of truth, and `cyrius.cyml` derives it via `version = "${file:VERSION}"`. The
+  Rust line's calendar version (`2026.3.22`) is history. ⛔ It survived in code until 1.4.4 as a
+  hardcoded `serverInfo.version` literal in `src/mcp_serve.cyr`, so `jalwa mcp` identified itself
+  with the old scheme for five releases; it now reads `CYRIUS_PKG_VERSION` (needs the ≥6.5.34 pin to
+  resolve from an included file), matching the oracle's `env!("CARGO_PKG_VERSION")`.
